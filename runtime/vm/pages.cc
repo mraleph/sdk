@@ -145,6 +145,11 @@ RawObject* HeapPage::FindObject(FindObjectVisitor* visitor) const {
 
 void HeapPage::WriteProtect(bool read_only) {
   ASSERT(!is_image_page());
+  if (type_ == kExecutable) {
+    if (!FLAG_write_protect_code) {
+      return;
+    }
+  }
 
   VirtualMemory::Protection prot;
   if (read_only) {

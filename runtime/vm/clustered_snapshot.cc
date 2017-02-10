@@ -6,6 +6,8 @@
 
 #include "platform/assert.h"
 #include "vm/bootstrap.h"
+#include "vm/class_finalizer.h"
+#include "vm/code_observers.h"
 #include "vm/dart.h"
 #include "vm/heap.h"
 #include "vm/image_snapshot.h"
@@ -1856,6 +1858,17 @@ class CodeDeserializationCluster : public DeserializationCluster {
 #endif  // !DART_PRECOMPILED_RUNTIME
 
       code->ptr()->state_bits_ = d->Read<int32_t>();
+
+      const Object& owner = Object::Handle(code->ptr()->owner_);
+      const char* name = "???";
+      if (owner.IsFunction()) {
+        name = Function::Cast(owner).ToLibNamePrefixedQualifiedCString();
+      } else {
+        name = owner.ToCString();
+      }
+      CodeObservers::NotifyAll(name, Instructions::PayloadStart(instr), 0,
+                               Instructions::Size(instr),
+                               Code::Handle(code).is_optimized());
     }
   }
 };

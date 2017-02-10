@@ -221,6 +221,7 @@ void Disassembler::DisassembleCodeHelper(const char* function_fullname,
   if (FLAG_print_variable_descriptors) {
     var_descriptors = code.GetLocalVarDescriptors();
   }
+  THR_Print("*** BEGIN CODE\n");
   THR_Print("Code for %sfunction '%s' {\n", optimized ? "optimized " : "",
             function_fullname);
   code.Disassemble();
@@ -356,6 +357,7 @@ void Disassembler::DisassembleCodeHelper(const char* function_fullname,
   if (FLAG_trace_source_positions) {
     code.DumpSourcePositions();
   }
+  THR_Print("*** END CODE\n");
 }
 
 void Disassembler::DisassembleCode(const Function& function,
