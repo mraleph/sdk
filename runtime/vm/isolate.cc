@@ -49,6 +49,7 @@
 #include "vm/verifier.h"
 #include "vm/visitor.h"
 
+#include "vm/intermediate_language.h"
 
 namespace dart {
 
@@ -770,6 +771,62 @@ void BaseIsolate::AssertCurrentThreadIsMutator() const {
 
 #define REUSABLE_HANDLE_INITIALIZERS(object) object##_handle_(NULL),
 
+class InstructionOpcodes {
+ public:
+#define PLUS_ONE(ignored) +1
+  static const intptr_t kCount = 0 FOR_EACH_INSTRUCTION(PLUS_ONE)
+                                   FOR_EACH_INSTRUCTION(PLUS_ONE);
+#undef PLUS_ONE
+
+  static const char* names[];
+
+  static uint64_t* Create() {
+    uint64_t* counters = new uint64_t[kCount];
+    memset(counters, 0, sizeof(uint64_t) * kCount);
+    return counters;
+  }
+
+  static int CmpCounts(const void* a, const void* b, void* arg) {
+    uint64_t* counts = static_cast<uint64_t*>(arg);
+    intptr_t index_a = *static_cast<const intptr_t*>(a);
+    intptr_t index_b = *static_cast<const intptr_t*>(b);
+
+    if (counts[index_a] < counts[index_b]) {
+      return -1;
+    } else if (counts[index_a] > counts[index_b]) {
+      return 1;
+    } else {
+      return 0;
+    }
+  }
+
+  static void Dump(const char* name, uint64_t* count) {
+    intptr_t o[kCount];
+
+    for (intptr_t i = 0; i < kCount; i++) o[i] = i;
+    qsort_r(o, kCount, sizeof(intptr_t), &CmpCounts, count);
+
+    OS::Print("dumping tag counters for %s:\n", name);
+    for (intptr_t j = 0; j < kCount; j++) {
+      intptr_t i = o[j];
+      if (count[i] != 0) {
+        OS::Print("%s: %" Pu "\n", names[i], count[i]);
+      }
+    }
+    OS::Print("--------------------------\n\n");
+  }
+};
+
+const char* InstructionOpcodes::names[kCount] = {
+#define DECLARE(name) #name,
+  FOR_EACH_INSTRUCTION(DECLARE)
+#undef DECLARE
+#define DECLARE(name) "Branch on " #name,
+  FOR_EACH_INSTRUCTION(DECLARE)
+#undef DECLARE
+};
+
+
 // TODO(srdjan): Some Isolate monitors can be shared. Replace their usage with
 // that shared monitor.
 Isolate::Isolate(const Dart_IsolateFlags& api_flags)
@@ -779,6 +836,7 @@ Isolate::Isolate(const Dart_IsolateFlags& api_flags)
       current_tag_(UserTag::null()),
       default_tag_(UserTag::null()),
       object_store_(NULL),
+      opcode_counters_(InstructionOpcodes::Create()),
       class_table_(),
       single_step_(false),
       thread_registry_(new ThreadRegistry()),
@@ -852,17 +910,22 @@ Isolate::Isolate(const Dart_IsolateFlags& api_flags)
   // how the vm_tag (kEmbedderTagId) can be set, these tags need to
   // move to the OSThread structure.
   set_user_tag(UserTags::kDefaultUserTag);
+
+
+
 }
 
 #undef REUSABLE_HANDLE_SCOPE_INIT
 #undef REUSABLE_HANDLE_INITIALIZERS
 
 Isolate::~Isolate() {
+  InstructionOpcodes::Dump(name_, opcode_counters_);
   free(name_);
   free(debugger_name_);
   delete store_buffer_;
   delete heap_;
   delete object_store_;
+  delete[] opcode_counters_;
   delete api_state_;
 #ifndef PRODUCT
   if (FLAG_support_debugger) {

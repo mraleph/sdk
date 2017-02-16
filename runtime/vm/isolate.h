@@ -190,6 +190,13 @@ class Isolate : public BaseIsolate {
     return OFFSET_OF(Isolate, class_table_);
   }
 
+
+  uint64_t* opcode_counters() const { return opcode_counters_; }
+  void set_opcode_counters(uint64_t* counters) { opcode_counters_ = counters; }
+  static intptr_t opcode_counters_offset() {
+    return OFFSET_OF(Isolate, opcode_counters_);
+  }
+
   // Prefers old classes when we are in the middle of a reload.
   RawClass* GetClassForHeapWalkAt(intptr_t cid);
 
@@ -717,6 +724,7 @@ class Isolate : public BaseIsolate {
   RawUserTag* default_tag_;
   RawCode* ic_miss_code_;
   ObjectStore* object_store_;
+  uint64_t* opcode_counters_;
   ClassTable class_table_;
   bool single_step_;
 

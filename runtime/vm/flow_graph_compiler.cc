@@ -413,6 +413,10 @@ void FlowGraphCompiler::CompactBlocks() {
 
 
 void FlowGraphCompiler::EmitInstructionPrologue(Instruction* instr) {
+  if (is_optimizing()) {
+    EmitOpcodeCounter(instr);
+  }
+
   if (!is_optimizing()) {
     if (instr->CanBecomeDeoptimizationTarget() && !instr->IsGoto()) {
       // Instructions that can be deoptimization targets need to record kDeopt

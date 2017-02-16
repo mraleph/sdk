@@ -1383,6 +1383,22 @@ Condition FlowGraphCompiler::EmitEqualityRegConstCompare(
   return EQUAL;
 }
 
+#define PLUS_ONE(ignored) +1
+static const intptr_t kBranchOn = 0 FOR_EACH_INSTRUCTION(PLUS_ONE);
+#undef PLUS_ONE
+
+
+void FlowGraphCompiler::EmitOpcodeCounter(Instruction* instr) {
+  int tag = instr->tag();
+  if (BranchInstr* branch = instr->AsBranch()) {
+    tag = kBranchOn + branch->comparison()->tag();
+  }
+
+  __ LoadIsolate(TMP);
+  __ movq(TMP, Address(TMP, Isolate::opcode_counters_offset()));
+  __ addq(Address(TMP, tag * sizeof(uint64_t)), Immediate(1));
+}
+
 
 Condition FlowGraphCompiler::EmitEqualityRegRegCompare(
     Register left,

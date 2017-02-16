@@ -615,6 +615,7 @@ class FlowGraphCompiler : public ValueObject {
 
   void EmitInstructionPrologue(Instruction* instr);
   void EmitInstructionEpilogue(Instruction* instr);
+  void EmitOpcodeCounter(Instruction* instr);
 
   // Emit code to load a Value into register 'dst'.
   void LoadValue(Register dst, Value* value);
