@@ -354,7 +354,12 @@ class RawObject {
   }
 
   // Support for GC marking bit.
-  bool IsMarked() const { return MarkBit::decode(ptr()->tags_); }
+  bool IsMarked() const {
+    if (((uword) this) < 0x10) {
+      return true;
+    }
+    return MarkBit::decode(ptr()->tags_);
+  }
   void SetMarkBit() {
     ASSERT(!IsMarked());
     UpdateTagBit<MarkBit>(true);
@@ -376,7 +381,9 @@ class RawObject {
   bool IsCanonical() const { return CanonicalObjectTag::decode(ptr()->tags_); }
   void SetCanonical() { UpdateTagBit<CanonicalObjectTag>(true); }
   void ClearCanonical() { UpdateTagBit<CanonicalObjectTag>(false); }
-  bool IsVMHeapObject() const { return VMHeapObjectTag::decode(ptr()->tags_); }
+  bool IsVMHeapObject() const {
+    return reinterpret_cast<uword>(this) < 0x10 || VMHeapObjectTag::decode(ptr()->tags_);
+  }
   void SetVMHeapObject() { UpdateTagBit<VMHeapObjectTag>(true); }
 
   // Support for GC remembered bit.
@@ -525,6 +532,10 @@ class RawObject {
   intptr_t SizeFromClass() const;
 
   intptr_t GetClassId() const {
+    uword p = (uword) ptr();
+    if (p == 0) {
+      return kNullCid;
+    }
     uword tags = ptr()->tags_;
     return ClassIdTag::decode(tags);
   }

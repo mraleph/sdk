@@ -50,7 +50,9 @@ void VerifyPointersVisitor::VisitPointers(RawObject** first, RawObject** last) {
   for (RawObject** current = first; current <= last; current++) {
     RawObject* raw_obj = *current;
     if (raw_obj->IsHeapObject()) {
-      if (!allocated_set_->Contains(raw_obj)) {
+      const uword ptr = (uword) raw_obj;
+
+      if (ptr > 0x10 && !allocated_set_->Contains(raw_obj)) {
         uword raw_addr = RawObject::ToAddr(raw_obj);
         FATAL1("Invalid object pointer encountered %#" Px "\n", raw_addr);
       }

@@ -2788,7 +2788,9 @@ void Assembler::LoadObjectHelper(Register dst,
                                  bool is_unique) {
   ASSERT(!object.IsICData() || ICData::Cast(object).IsOriginal());
   ASSERT(!object.IsField() || Field::Cast(object).IsOriginal());
-  if (Thread::CanLoadFromThread(object)) {
+  if (object.raw() == Object::null()) {
+    movq(dst, Immediate(0x1));
+  } else if (Thread::CanLoadFromThread(object)) {
     movq(dst, Address(THR, Thread::OffsetFromThread(object)));
   } else if (CanLoadFromObjectPool(object)) {
     const intptr_t idx = is_unique ? object_pool_wrapper_.AddObject(object)
@@ -2857,7 +2859,9 @@ void Assembler::PushObject(const Object& object) {
 void Assembler::CompareObject(Register reg, const Object& object) {
   ASSERT(!object.IsICData() || ICData::Cast(object).IsOriginal());
   ASSERT(!object.IsField() || Field::Cast(object).IsOriginal());
-  if (Thread::CanLoadFromThread(object)) {
+  if (object.raw() == Object::null()) {
+    cmpq(reg, Immediate(0x1));
+  } else if (Thread::CanLoadFromThread(object)) {
     cmpq(reg, Address(THR, Thread::OffsetFromThread(object)));
   } else if (CanLoadFromObjectPool(object)) {
     const intptr_t idx = object_pool_wrapper_.FindObject(object, kNotPatchable);
@@ -3627,9 +3631,25 @@ void Assembler::LoadClassId(Register result, Register object) {
   ASSERT(RawObject::kClassIdTagPos == kBitsPerInt32);
   ASSERT(RawObject::kClassIdTagSize == kBitsPerInt32);
   ASSERT(sizeof(classid_t) == sizeof(uint32_t));
+  Label done;
   const intptr_t class_id_offset =
       Object::tags_offset() + RawObject::kClassIdTagPos / kBitsPerByte;
-  movl(result, FieldAddress(object, class_id_offset));
+  if (result != object) {
+    movl(result, Immediate(kNullCid));
+    cmpl(object, Immediate(0x1));
+    j(EQUAL, &done, kNearJump);
+    movl(result, FieldAddress(object, class_id_offset));
+    Bind(&done);
+  } else if (result != TMP) {
+    movq(TMP, object);
+    movl(result, Immediate(kNullCid));
+    cmpl(TMP, Immediate(0x1));
+    j(EQUAL, &done, kNearJump);
+    movl(result, FieldAddress(TMP, class_id_offset));
+    Bind(&done);
+  } else {
+    UNREACHABLE();
+  }
 }
 
 

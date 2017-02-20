@@ -97,7 +97,7 @@ class WeakTable {
     kEntrySize,
   };
 
-  static const intptr_t kDeletedEntry = 1;  // Equivalent to a tagged NULL.
+  static const intptr_t kDeletedEntry = 0x11;  // Equivalent to a tagged NULL.
   static const intptr_t kMinSize = 8;
 
   static intptr_t SizeFor(intptr_t count, intptr_t size);

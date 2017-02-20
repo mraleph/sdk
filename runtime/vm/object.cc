@@ -479,6 +479,7 @@ void Object::InitNull(Isolate* isolate) {
   // TODO(iposva): NoSafepointScope needs to be added here.
   ASSERT(class_class() == null_);
 
+  /*
   Heap* heap = isolate->heap();
 
   // Allocate and initialize the null instance.
@@ -490,6 +491,7 @@ void Object::InitNull(Isolate* isolate) {
     // The call below is using 'null_' to initialize itself.
     InitializeObject(address, kNullCid, Instance::InstanceSize(), true);
   }
+  */
 }
 
 
