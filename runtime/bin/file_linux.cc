@@ -89,10 +89,35 @@ MappedMemory* File::Map(MapType type, int64_t position, int64_t length) {
     default:
       return NULL;
   }
-  void* addr = mmap(NULL, length, prot, MAP_PRIVATE, handle_->fd(), position);
+
+  void* addr = MAP_FAILED;
+  if (type == kReadExecute) {
+    addr = mmap(NULL, length, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+  } else {
+    addr = mmap(NULL, length, prot, MAP_PRIVATE, handle_->fd(), position);
+  }
+
   if (addr == MAP_FAILED) {
     return NULL;
   }
+
+  if (type == kReadExecute) {
+    lseek(handle_->fd(), position, SEEK_SET);
+
+    int64_t left = length;
+    uint8_t* p = reinterpret_cast<uint8_t*>(addr);
+    while (left > 0) {
+      int64_t n = read(handle_->fd(), p, left);
+      if (n <= 0) {
+        UNREACHABLE();
+      }
+      if (n > left) { UNREACHABLE(); }
+      left -= n;
+      p += n;
+    }
+    mprotect(addr, length, PROT_READ | PROT_EXEC);
+  }
+
   return new MappedMemory(addr, length);
 }
 
