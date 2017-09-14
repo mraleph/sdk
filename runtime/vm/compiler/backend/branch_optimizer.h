@@ -9,12 +9,12 @@
 
 namespace dart {
 
+class BranchInstr;
+class Definition;
 class FlowGraph;
 class JoinEntryInstr;
-class Zone;
 class TargetEntryInstr;
-class Value;
-class BranchInstr;
+class Zone;
 
 // Rewrite branches to eliminate materialization of boolean values after
 // inlining, and to expose other optimizations (e.g., constant folding of
@@ -37,8 +37,8 @@ class BranchSimplifier : public AllStatic {
   // inputs.
   static BranchInstr* CloneBranch(Zone* zone,
                                   BranchInstr* branch,
-                                  Value* new_left,
-                                  Value* new_right);
+                                  Definition* new_left,
+                                  Definition* new_right);
 };
 
 // Rewrite diamond control flow patterns that materialize values to use more

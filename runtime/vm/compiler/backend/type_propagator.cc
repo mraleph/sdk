@@ -146,7 +146,7 @@ void FlowGraphTypePropagator::PropagateRecursive(BlockEntryInstr* block) {
     Instruction* instr = it.Current();
 
     for (intptr_t i = 0; i < instr->InputCount(); i++) {
-      VisitValue(instr->InputAt(i));
+      VisitValue(instr->InputUseAt(i));
     }
     if (instr->IsDefinition()) {
       instr->AsDefinition()->RecomputeType();
@@ -160,7 +160,7 @@ void FlowGraphTypePropagator::PropagateRecursive(BlockEntryInstr* block) {
     intptr_t pred_index = join->IndexOfPredecessor(block);
     ASSERT(pred_index >= 0);
     for (PhiIterator it(join); !it.Done(); it.Advance()) {
-      VisitValue(it.Current()->InputAt(pred_index));
+      VisitValue(it.Current()->InputUseAt(pred_index));
     }
   }
 
@@ -763,7 +763,7 @@ bool CompileType::IsMoreSpecificThan(const AbstractType& other) {
   return ToAbstractType()->IsMoreSpecificThan(other, NULL, NULL, Heap::kOld);
 }
 
-CompileType* Value::Type() {
+CompileType* Value::Type() const {
   if (reaching_type_ == NULL) {
     reaching_type_ = definition()->Type();
   }

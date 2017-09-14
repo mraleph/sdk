@@ -44,7 +44,7 @@ void RangeAnalysis::Analyze() {
 
 static Definition* UnwrapConstraint(Definition* defn) {
   while (defn->IsConstraint()) {
-    defn = defn->AsConstraint()->value()->definition();
+    defn = defn->AsConstraint()->value();
   }
   return defn;
 }
@@ -112,7 +112,7 @@ static ConstraintInstr* FindBoundingConstraint(PhiInstr* phi,
                                                Definition* defn) {
   ConstraintInstr* limit = NULL;
   for (ConstraintInstr* constraint = defn->AsConstraint(); constraint != NULL;
-       constraint = constraint->value()->definition()->AsConstraint()) {
+       constraint = constraint->value()->AsConstraint()) {
     if (constraint->target() == NULL) {
       continue;  // Only interested in non-artifical constraints.
     }
@@ -144,20 +144,20 @@ static InductionVariableInfo* DetectSimpleInductionVariable(PhiInstr* phi) {
           ? 0
           : 1;
 
-  Definition* initial_value = phi->InputAt(1 - backedge_idx)->definition();
+  Definition* initial_value = phi->InputAt(1 - backedge_idx);
 
   BinarySmiOpInstr* increment =
-      UnwrapConstraint(phi->InputAt(backedge_idx)->definition())
+      UnwrapConstraint(phi->InputAt(backedge_idx))
           ->AsBinarySmiOp();
 
   if ((increment != NULL) && (increment->op_kind() == Token::kADD) &&
-      (UnwrapConstraint(increment->left()->definition()) == phi) &&
-      increment->right()->BindsToConstant() &&
+      (UnwrapConstraint(increment->left()) == phi) &&
+      increment->right()->IsConstant() &&
       increment->right()->BoundConstant().IsSmi() &&
       (Smi::Cast(increment->right()->BoundConstant()).Value() == 1)) {
     return new InductionVariableInfo(
         phi, initial_value, increment,
-        FindBoundingConstraint(phi, increment->left()->definition()));
+        FindBoundingConstraint(phi, increment->left()));
   }
 
   return NULL;
@@ -803,24 +803,25 @@ class Scheduler {
   Instruction* EmitRecursively(Instruction* instruction, Instruction* sink) {
     // Schedule all unscheduled inputs and unwrap all constrained inputs.
     for (intptr_t i = 0; i < instruction->InputCount(); i++) {
-      Definition* defn = instruction->InputAt(i)->definition();
+      Definition* defn = instruction->InputAt(i);
 
       // Instruction is not in the graph yet which means that none of
       // its input uses should be recorded at defn's use chains.
       // Verify this assumption to ensure that we are not going to
       // leave use-lists in an inconsistent state when we start
       // rewriting inputs via set_definition.
-      ASSERT(instruction->InputAt(i)->IsSingleUse() &&
-             !defn->HasOnlyInputUse(instruction->InputAt(i)));
+      // FIXME
+      // ASSERT(instruction->InputAt(i)->IsSingleUse() &&
+      //       !defn->HasSingleInputUse(instruction->InputAt(i)));
 
       if (!defn->HasSSATemp()) {
         Definition* scheduled = Emit(defn, sink);
         if (scheduled == NULL) {
           return NULL;
         }
-        instruction->InputAt(i)->set_definition(scheduled);
+        instruction->InputUseAt(i)->set_definition(scheduled);
       } else if (defn->IsConstraint()) {
-        instruction->InputAt(i)->set_definition(UnwrapConstraint(defn));
+        instruction->InputUseAt(i)->set_definition(UnwrapConstraint(defn));
       }
     }
 

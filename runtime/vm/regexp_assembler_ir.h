@@ -262,13 +262,13 @@ class IRRegExpMacroAssembler : public RegExpMacroAssembler {
   Definition* Sub(PushArgumentInstr* lhs, PushArgumentInstr* rhs);
 
   LoadLocalInstr* LoadLocal(LocalVariable* local) const;
-  void StoreLocal(LocalVariable* local, Value* value);
+  void StoreLocal(LocalVariable* local, Definition* value);
 
-  PushArgumentInstr* PushArgument(Value* value);
+  PushArgumentInstr* PushArgument(Definition* value);
   PushArgumentInstr* PushLocal(LocalVariable* local);
 
   PushArgumentInstr* PushRegisterIndex(intptr_t reg);
-  Value* LoadRegister(intptr_t reg);
+  Definition* LoadRegister(intptr_t reg);
   void StoreRegister(intptr_t reg, intptr_t value);
   void StoreRegister(PushArgumentInstr* registers,
                      PushArgumentInstr* index,
@@ -280,10 +280,10 @@ class IRRegExpMacroAssembler : public RegExpMacroAssembler {
                                      intptr_t character_count);
 
   // Returns the character within the passed string at the specified index.
-  Value* CharacterAt(LocalVariable* index);
+  Definition* CharacterAt(LocalVariable* index);
 
   // Load a number of characters starting from index in the pattern string.
-  Value* LoadCodeUnitsAt(LocalVariable* index, intptr_t character_count);
+  Definition* LoadCodeUnitsAt(LocalVariable* index, intptr_t character_count);
 
   // Check whether preemption has been requested. Also serves as an OSR entry.
   void CheckPreemption(bool is_backtrack);
@@ -322,9 +322,9 @@ class IRRegExpMacroAssembler : public RegExpMacroAssembler {
   // setting current_instruction_ to NULL.
   void CloseBlockWith(Instruction* instruction);
   // Appends definition and allocates a temp index for the result.
-  Value* Bind(Definition* definition);
+  Definition* Bind(Definition* definition);
   // Loads and binds a local variable.
-  Value* BindLoadLocal(const LocalVariable& local);
+  Definition* BindLoadLocal(const LocalVariable& local);
 
   // Appends the definition.
   void Do(Definition* definition);

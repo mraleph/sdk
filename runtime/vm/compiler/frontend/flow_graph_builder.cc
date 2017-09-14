@@ -502,6 +502,7 @@ Definition* InlineExitCollector::JoinReturns(BlockEntryInstr** exit_block,
       phi->mark_alive();
       for (intptr_t i = 0; i < num_exits; ++i) {
         ReturnAt(i)->RemoveEnvironment();
+        // FIXME: Type information is lost here.
         phi->SetInputAt(i, ValueAt(i));
       }
       join->InsertPhi(phi);
@@ -645,7 +646,7 @@ void EffectGraphVisitor::Append(const EffectGraphVisitor& other_fragment) {
   exit_ = other_fragment.exit();
 }
 
-Value* EffectGraphVisitor::Bind(Definition* definition) {
+Definition* EffectGraphVisitor::Bind(Definition* definition) {
   ASSERT(is_open());
   owner()->DeallocateTemps(definition->InputCount());
   owner()->add_args_pushed(-definition->ArgumentCount());
@@ -656,7 +657,7 @@ Value* EffectGraphVisitor::Bind(Definition* definition) {
     exit()->LinkTo(definition);
   }
   exit_ = definition;
-  return new (Z) Value(definition);
+  return definition;
 }
 
 void EffectGraphVisitor::Do(Definition* definition) {

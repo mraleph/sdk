@@ -88,7 +88,7 @@ void FlowGraph::ReplaceCurrentInstruction(ForwardInstructionIterator* iterator,
       PushArgumentInstr* push = current->PushArgumentAt(i);
       if (replacement == NULL || i >= replacement->ArgumentCount() ||
           replacement->PushArgumentAt(i) != push) {
-        push->ReplaceUsesWith(push->value()->definition());
+        push->ReplaceUsesWith(push->value());
         push->RemoveFromGraph();
       }
     }
@@ -299,7 +299,7 @@ static void VerifyUseListsInInstruction(Instruction* instr) {
   ASSERT(instr != NULL);
   ASSERT(!instr->IsJoinEntry());
   for (intptr_t i = 0; i < instr->InputCount(); ++i) {
-    Value* use = instr->InputAt(i);
+    Value* use = instr->InputUseAt(i);
     ASSERT(use->definition() != NULL);
     ASSERT((use->definition() != instr) || use->definition()->IsPhi() ||
            use->definition()->IsMaterializeObject());
@@ -335,7 +335,7 @@ static void VerifyUseListsInInstruction(Instruction* instr) {
       // The instruction should not be removed from the graph.
       ASSERT((instr->IsPhi() && instr->AsPhi()->is_alive()) ||
              (instr->previous() != NULL));
-      ASSERT(curr == instr->InputAt(curr->use_index()));
+      ASSERT(curr == instr->InputUseAt(curr->use_index()));
       prev = curr;
       curr = curr->next_use();
     }
@@ -365,7 +365,7 @@ void FlowGraph::ComputeIsReceiverRecursive(
   if (phi->is_receiver() != PhiInstr::kUnknownReceiver) return;
   phi->set_is_receiver(PhiInstr::kReceiver);
   for (intptr_t i = 0; i < phi->InputCount(); ++i) {
-    Definition* def = phi->InputAt(i)->definition();
+    Definition* def = phi->InputAt(i);
     if (def->IsParameter() && (def->AsParameter()->index() == 0)) continue;
     if (!def->IsPhi()) {
       phi->set_is_receiver(PhiInstr::kNotReceiver);
@@ -453,10 +453,10 @@ Instruction* FlowGraph::CreateCheckClass(Definition* to_check,
                                          TokenPosition token_pos) {
   if (cids.IsMonomorphic() && cids.MonomorphicReceiverCid() == kSmiCid) {
     return new (zone())
-        CheckSmiInstr(new (zone()) Value(to_check), deopt_id, token_pos);
+        CheckSmiInstr(to_check, deopt_id, token_pos);
   }
   return new (zone())
-      CheckClassInstr(new (zone()) Value(to_check), deopt_id, cids, token_pos);
+      CheckClassInstr(to_check, deopt_id, cids, token_pos);
 }
 
 bool FlowGraph::VerifyUseLists() {
@@ -492,7 +492,7 @@ bool FlowGraph::VerifyRedefinitions() {
          !instr_it.Done(); instr_it.Advance()) {
       RedefinitionInstr* redefinition = instr_it.Current()->AsRedefinition();
       if (redefinition != NULL) {
-        Definition* original = redefinition->value()->definition();
+        Definition* original = redefinition->value();
         for (Value::Iterator it(original->input_use_list()); !it.Done();
              it.Advance()) {
           Value* original_use = it.Current();
@@ -1115,7 +1115,7 @@ void FlowGraph::RenameRecursive(BlockEntryInstr* block_entry,
     // For each use of a LoadLocal, StoreLocal, DropTemps or Constant: Replace
     // it with the renamed value.
     for (intptr_t i = current->InputCount() - 1; i >= 0; --i) {
-      Value* v = current->InputAt(i);
+      Value* v = current->InputUseAt(i);
       // Update expression stack.
       ASSERT(env->length() > variable_count());
 
@@ -1150,7 +1150,7 @@ void FlowGraph::RenameRecursive(BlockEntryInstr* block_entry,
         if (store != NULL) {
           // Update renaming environment.
           intptr_t index = store->local().BitIndexIn(num_non_copied_params_);
-          result = store->value()->definition();
+          result = store->value();
 
           if (!FLAG_prune_dead_locals ||
               variable_liveness->IsStoreAlive(block_entry, store)) {
@@ -1188,7 +1188,7 @@ void FlowGraph::RenameRecursive(BlockEntryInstr* block_entry,
             env->RemoveLast();
           }
           if (drop->value() != NULL) {
-            result = drop->value()->definition();
+            result = drop->value();
           }
           ASSERT((drop->value() != NULL) || !drop->HasTemp());
         } else {
@@ -1240,8 +1240,7 @@ void FlowGraph::RenameRecursive(BlockEntryInstr* block_entry,
         PhiInstr* phi = (*successor->phis())[i];
         if (phi != NULL) {
           // Rename input operand.
-          Value* use = new (zone()) Value((*env)[i]);
-          phi->SetInputAt(pred_index, use);
+          phi->SetInputAt(pred_index, (*env)[i]);
         }
       }
     }
@@ -1278,8 +1277,7 @@ void FlowGraph::RemoveDeadPhis(GrowableArray<PhiInstr*>* live_phis) {
   while (!live_phis->is_empty()) {
     PhiInstr* phi = live_phis->RemoveLast();
     for (intptr_t i = 0; i < phi->InputCount(); i++) {
-      Value* val = phi->InputAt(i);
-      PhiInstr* used_phi = val->definition()->AsPhi();
+      PhiInstr* used_phi = phi->InputAt(i)->AsPhi();
       if ((used_phi != NULL) && !used_phi->is_alive()) {
         used_phi->mark_alive();
         live_phis->Add(used_phi);
@@ -1298,13 +1296,13 @@ RedefinitionInstr* FlowGraph::EnsureRedefinition(Instruction* prev,
                                                  CompileType compile_type) {
   RedefinitionInstr* first = prev->next()->AsRedefinition();
   if (first != NULL && (first->constrained_type() != NULL)) {
-    if ((first->value()->definition() == original) &&
+    if ((first->value() == original) &&
         first->constrained_type()->IsEqualTo(&compile_type)) {
       // Already redefined. Do nothing.
       return NULL;
     }
   }
-  RedefinitionInstr* redef = new RedefinitionInstr(new Value(original));
+  RedefinitionInstr* redef = new RedefinitionInstr(original);
   redef->set_constrained_type(new CompileType(compile_type));
   InsertAfter(prev, redef, NULL, FlowGraph::kValue);
   RenameDominatedUses(original, redef, redef);
@@ -1322,7 +1320,7 @@ void FlowGraph::RemoveRedefinitions() {
       if (redefinition != NULL) {
         Definition* original;
         do {
-          original = redefinition->value()->definition();
+          original = redefinition->value();
         } while (original->IsRedefinition());
         redefinition->ReplaceUsesWith(original);
         instr_it.RemoveCurrentFromGraph();
@@ -1464,24 +1462,29 @@ void FlowGraph::InsertConversion(Representation from,
     const intptr_t deopt_id = (to == kUnboxedInt32) && (deopt_target != NULL)
                                   ? deopt_target->DeoptimizationTarget()
                                   : Thread::kNoDeoptId;
+    // FIXME CopyWithType
     converted = new (Z)
-        UnboxedIntConverterInstr(from, to, use->CopyWithType(), deopt_id);
+        UnboxedIntConverterInstr(from, to, use->definition(), deopt_id);
   } else if ((from == kUnboxedInt32) && (to == kUnboxedDouble)) {
-    converted = new Int32ToDoubleInstr(use->CopyWithType());
+    // FIXME CopyWithType
+    converted = new Int32ToDoubleInstr(use->definition());
   } else if ((from == kUnboxedInt64) && (to == kUnboxedDouble) &&
              CanConvertUnboxedMintToDouble()) {
     const intptr_t deopt_id = (deopt_target != NULL)
                                   ? deopt_target->DeoptimizationTarget()
                                   : Thread::kNoDeoptId;
     ASSERT(CanUnboxDouble());
-    converted = new MintToDoubleInstr(use->CopyWithType(), deopt_id);
+    // FIXME CopyWithType
+    converted = new MintToDoubleInstr(use->definition(), deopt_id);
   } else if ((from == kTagged) && Boxing::Supports(to)) {
     const intptr_t deopt_id = (deopt_target != NULL)
                                   ? deopt_target->DeoptimizationTarget()
                                   : Thread::kNoDeoptId;
-    converted = UnboxInstr::Create(to, use->CopyWithType(), deopt_id);
+    // FIXME CopyWithType
+    converted = UnboxInstr::Create(to, use->definition(), deopt_id);
   } else if ((to == kTagged) && Boxing::Supports(from)) {
-    converted = BoxInstr::Create(from, use->CopyWithType());
+    // FIXME CopyWithType
+    converted = BoxInstr::Create(from, use->definition());
   } else {
     // We have failed to find a suitable conversion instruction.
     // Insert two "dummy" conversion instructions with the correct
@@ -1492,10 +1495,11 @@ void FlowGraph::InsertConversion(Representation from,
                                   : Thread::kNoDeoptId;
     ASSERT(Boxing::Supports(from));
     ASSERT(Boxing::Supports(to));
-    Definition* boxed = BoxInstr::Create(from, use->CopyWithType());
+    // FIXME CopyWithType
+    Definition* boxed = BoxInstr::Create(from, use->definition());
     use->BindTo(boxed);
     InsertBefore(insert_before, boxed, NULL, FlowGraph::kValue);
-    converted = UnboxInstr::Create(to, new (Z) Value(boxed), deopt_id);
+    converted = UnboxInstr::Create(to, boxed, deopt_id);
   }
   ASSERT(converted != NULL);
   InsertBefore(insert_before, converted, use->instruction()->env(),
@@ -1577,7 +1581,7 @@ static void UnboxPhi(PhiInstr* phi) {
     //   - are used in at least 1 Unbox() operation.
     bool should_unbox = false;
     for (intptr_t i = 0; i < phi->InputCount(); i++) {
-      Definition* input = phi->InputAt(i)->definition();
+      Definition* input = phi->InputAt(i);
       if (input->IsBox() &&
           RangeUtils::Fits(input->range(),
                            RangeBoundary::kRangeBoundaryInt64)) {
@@ -1779,7 +1783,7 @@ void FlowGraph::WidenSmiToInt32() {
 
       // Process all inputs.
       for (intptr_t k = 0; k < defn->InputCount(); k++) {
-        Definition* input = defn->InputAt(k)->definition();
+        Definition* input = defn->InputAt(k);
         if (input->IsBinarySmiOp() && CanBeWidened(input->AsBinarySmiOp())) {
           worklist.Add(input);
         } else if (input->IsPhi() && (input->Type()->ToCid() == kSmiCid)) {
@@ -1953,8 +1957,8 @@ void FlowGraph::TryOptimizePatterns() {
       if (it.Current()->IsBinarySmiOp()) {
         BinarySmiOpInstr* binop = it.Current()->AsBinarySmiOp();
         if (binop->op_kind() == Token::kBIT_AND) {
-          OptimizeLeftShiftBitAndSmiOp(&it, binop, binop->left()->definition(),
-                                       binop->right()->definition());
+          OptimizeLeftShiftBitAndSmiOp(&it, binop, binop->left(),
+                                       binop->right());
         } else if ((binop->op_kind() == Token::kTRUNCDIV) ||
                    (binop->op_kind() == Token::kMOD)) {
           if (binop->HasUses()) {
@@ -1965,8 +1969,8 @@ void FlowGraph::TryOptimizePatterns() {
         BinaryInt64OpInstr* mintop = it.Current()->AsBinaryInt64Op();
         if (mintop->op_kind() == Token::kBIT_AND) {
           OptimizeLeftShiftBitAndSmiOp(&it, mintop,
-                                       mintop->left()->definition(),
-                                       mintop->right()->definition());
+                                       mintop->left(),
+                                       mintop->right());
         }
       } else if (it.Current()->IsInvokeMathCFunction()) {
         InvokeMathCFunctionInstr* math_unary =
@@ -2028,7 +2032,7 @@ void FlowGraph::RenameUsesDominatedByRedefinitions() {
          !instr_it.Done(); instr_it.Advance()) {
       RedefinitionInstr* redefinition = instr_it.Current()->AsRedefinition();
       if (redefinition != NULL) {
-        Definition* original = redefinition->value()->definition();
+        Definition* original = redefinition->value();
         RenameDominatedUses(original, redefinition, redefinition);
       }
     }
@@ -2067,10 +2071,10 @@ void FlowGraph::OptimizeLeftShiftBitAndSmiOp(
   if (!is_positive_or_zero) return;
 
   BinarySmiOpInstr* smi_shift_left = NULL;
-  if (bit_and_instr->InputAt(0)->IsSingleUse()) {
+  if (bit_and_instr->InputUseAt(0)->IsSingleUse()) {
     smi_shift_left = AsSmiShiftLeftInstruction(left_instr);
   }
-  if ((smi_shift_left == NULL) && (bit_and_instr->InputAt(1)->IsSingleUse())) {
+  if ((smi_shift_left == NULL) && (bit_and_instr->InputUseAt(1)->IsSingleUse())) {
     smi_shift_left = AsSmiShiftLeftInstruction(right_instr);
   }
   if (smi_shift_left == NULL) return;
@@ -2081,7 +2085,7 @@ void FlowGraph::OptimizeLeftShiftBitAndSmiOp(
   if (bit_and_instr->IsBinaryInt64Op()) {
     // Replace Mint op with Smi op.
     BinarySmiOpInstr* smi_op = new (Z) BinarySmiOpInstr(
-        Token::kBIT_AND, new (Z) Value(left_instr), new (Z) Value(right_instr),
+        Token::kBIT_AND, left_instr, right_instr,
         Thread::kNoDeoptId);  // BIT_AND cannot deoptimize.
     bit_and_instr->ReplaceWith(smi_op, current_iterator);
   }
@@ -2122,14 +2126,14 @@ void FlowGraph::TryMergeTruncDivMod(
     const Token::Kind other_kind = (curr_instr->op_kind() == Token::kTRUNCDIV)
                                        ? Token::kMOD
                                        : Token::kTRUNCDIV;
-    Definition* left_def = curr_instr->left()->definition();
-    Definition* right_def = curr_instr->right()->definition();
+    Definition* left_def = curr_instr->left();
+    Definition* right_def = curr_instr->right();
     for (intptr_t k = i + 1; k < merge_candidates->length(); k++) {
       BinarySmiOpInstr* other_binop = (*merge_candidates)[k];
       // 'other_binop' can be NULL if it was already merged.
       if ((other_binop != NULL) && (other_binop->op_kind() == other_kind) &&
-          (other_binop->left()->definition() == left_def) &&
-          (other_binop->right()->definition() == right_def)) {
+          (other_binop->left() == left_def) &&
+          (other_binop->right() == right_def)) {
         (*merge_candidates)[k] = NULL;  // Clear it.
         ASSERT(curr_instr->HasUses());
         AppendExtractNthOutputForMerged(
@@ -2142,9 +2146,10 @@ void FlowGraph::TryMergeTruncDivMod(
             kSmiCid);
 
         // Replace with TruncDivMod.
+        // FIXME CopyWithType
         TruncDivModInstr* div_mod = new (Z) TruncDivModInstr(
-            curr_instr->left()->CopyWithType(),
-            curr_instr->right()->CopyWithType(), curr_instr->deopt_id());
+            curr_instr->left(),
+            curr_instr->right(), curr_instr->deopt_id());
         curr_instr->ReplaceWith(div_mod, NULL);
         other_binop->ReplaceUsesWith(div_mod);
         other_binop->RemoveFromGraph();
@@ -2157,14 +2162,14 @@ void FlowGraph::TryMergeTruncDivMod(
   }
 }
 
-void FlowGraph::AppendExtractNthOutputForMerged(Definition* instr,
+void FlowGraph::AppendExtractNthOutputForMerged(Definition* defn,
                                                 intptr_t index,
                                                 Representation rep,
                                                 intptr_t cid) {
   ExtractNthOutputInstr* extract =
-      new (Z) ExtractNthOutputInstr(new (Z) Value(instr), index, rep, cid);
-  instr->ReplaceUsesWith(extract);
-  InsertAfter(instr, extract, NULL, FlowGraph::kValue);
+      new (Z) ExtractNthOutputInstr(defn, index, rep, cid);
+  defn->ReplaceUsesWith(extract);
+  InsertAfter(defn, extract, NULL, FlowGraph::kValue);
 }
 
 }  // namespace dart

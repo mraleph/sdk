@@ -1107,7 +1107,7 @@ void PhiInstr::PrintTo(BufferFormatter* f) const {
     f->Print("v%" Pd " <- phi(", ssa_temp_index());
   }
   for (intptr_t i = 0; i < inputs_.length(); ++i) {
-    if (inputs_[i] != NULL) inputs_[i]->PrintTo(f);
+    if (inputs_[i].definition() != NULL) inputs_[i].PrintTo(f);
     if (i < inputs_.length() - 1) f->Print(", ");
   }
   f->Print(")");

@@ -162,7 +162,7 @@ class Place : public ValueObject {
       case Instruction::kLoadField: {
         LoadFieldInstr* load_field = instr->AsLoadField();
         set_representation(load_field->representation());
-        instance_ = load_field->instance()->definition()->OriginalDefinition();
+        instance_ = load_field->instance()->OriginalDefinition();
         if (load_field->field() != NULL) {
           set_kind(kField);
           field_ = load_field->field();
@@ -178,7 +178,7 @@ class Place : public ValueObject {
         StoreInstanceFieldInstr* store = instr->AsStoreInstanceField();
         set_representation(store->RequiredInputRepresentation(
             StoreInstanceFieldInstr::kValuePos));
-        instance_ = store->instance()->definition()->OriginalDefinition();
+        instance_ = store->instance()->OriginalDefinition();
         if (!store->field().IsNull()) {
           set_kind(kField);
           field_ = &store->field();
@@ -209,8 +209,8 @@ class Place : public ValueObject {
       case Instruction::kLoadIndexed: {
         LoadIndexedInstr* load_indexed = instr->AsLoadIndexed();
         set_representation(load_indexed->representation());
-        instance_ = load_indexed->array()->definition()->OriginalDefinition();
-        SetIndex(load_indexed->index()->definition(),
+        instance_ = load_indexed->array()->OriginalDefinition();
+        SetIndex(load_indexed->index(),
                  load_indexed->index_scale(), load_indexed->class_id());
         *is_load = true;
         break;
@@ -220,8 +220,8 @@ class Place : public ValueObject {
         StoreIndexedInstr* store_indexed = instr->AsStoreIndexed();
         set_representation(store_indexed->RequiredInputRepresentation(
             StoreIndexedInstr::kValuePos));
-        instance_ = store_indexed->array()->definition()->OriginalDefinition();
-        SetIndex(store_indexed->index()->definition(),
+        instance_ = store_indexed->array()->OriginalDefinition();
+        SetIndex(store_indexed->index(),
                  store_indexed->index_scale(), store_indexed->class_id());
         *is_store = true;
         break;
@@ -990,7 +990,7 @@ class AliasedSet : public ZoneAllocated {
         // and we never load again then the store does not create an alias.
         StoreInstanceFieldInstr* store = instr->AsStoreInstanceField();
         Definition* instance =
-            store->instance()->definition()->OriginalDefinition();
+            store->instance()->OriginalDefinition();
         if (Place::IsAllocation(instance) &&
             !instance->Identity().IsAliased()) {
           bool is_load, is_store;
@@ -1027,7 +1027,7 @@ class AliasedSet : public ZoneAllocated {
           use->instruction()->IsStoreInstanceField()) {
         StoreInstanceFieldInstr* store =
             use->instruction()->AsStoreInstanceField();
-        Definition* value = store->value()->definition()->OriginalDefinition();
+        Definition* value = store->value()->OriginalDefinition();
         if (value->Identity().IsNotAliased()) {
           value->SetIdentity(AliasIdentity::Aliased());
           identity_rollback_.Add(value);
@@ -1108,17 +1108,17 @@ class AliasedSet : public ZoneAllocated {
 
 static Definition* GetStoredValue(Instruction* instr) {
   if (instr->IsStoreIndexed()) {
-    return instr->AsStoreIndexed()->value()->definition();
+    return instr->AsStoreIndexed()->value();
   }
 
   StoreInstanceFieldInstr* store_instance_field = instr->AsStoreInstanceField();
   if (store_instance_field != NULL) {
-    return store_instance_field->value()->definition();
+    return store_instance_field->value();
   }
 
   StoreStaticFieldInstr* store_static_field = instr->AsStoreStaticField();
   if (store_static_field != NULL) {
-    return store_static_field->value()->definition();
+    return store_static_field->value();
   }
 
   UNREACHABLE();  // Should only be called for supported store instructions.
@@ -1155,7 +1155,7 @@ static PhiPlaceMoves* ComputePhiMoves(
 
       Place input_place(*place);
       for (intptr_t j = 0; j < phi->InputCount(); j++) {
-        input_place.set_instance(phi->InputAt(j)->definition());
+        input_place.set_instance(phi->InputAt(j));
 
         Place* result = map->LookupValue(&input_place);
         if (result == NULL) {
@@ -1292,7 +1292,7 @@ void LICM::TrySpecializeSmiPhi(PhiInstr* phi,
   const intptr_t kNotFound = -1;
   intptr_t non_smi_input = kNotFound;
   for (intptr_t i = 0; i < phi->InputCount(); ++i) {
-    Value* input = phi->InputAt(i);
+    Value* input = phi->InputUseAt(i);
     if (input->Type()->ToCid() != kSmiCid) {
       if ((non_smi_input != kNotFound) ||
           (input->Type()->ToCid() != kDynamicCid)) {
@@ -1324,8 +1324,9 @@ void LICM::TrySpecializeSmiPhi(PhiInstr* phi,
   Hoist(NULL, pre_header, check);
 
   // Replace value we are checking with phi's input.
-  check->value()->BindTo(phi->InputAt(non_smi_input)->definition());
-  check->value()->SetReachingType(phi->InputAt(non_smi_input)->Type());
+  // FIXME
+  check->InputUseAt(0)->BindTo(phi->InputAt(non_smi_input));
+  check->InputUseAt(0)->SetReachingType(phi->InputUseAt(non_smi_input)->Type());
 
   phi->UpdateType(CompileType::FromCid(kSmiCid));
 }
@@ -1381,7 +1382,7 @@ void LICM::Optimize() {
             IsLoopInvariantLoad(loop_invariant_loads, i, current)) {
           bool inputs_loop_invariant = true;
           for (int i = 0; i < current->InputCount(); ++i) {
-            Definition* input_def = current->InputAt(i)->definition();
+            Definition* input_def = current->InputAt(i);
             if (!input_def->GetBlock()->Dominates(pre_header)) {
               inputs_loop_invariant = false;
               break;
@@ -1622,7 +1623,7 @@ class LoadOptimizer : public ValueObject {
                 intptr_t type_args_offset =
                     alloc->cls().type_arguments_field_offset();
                 if (load->offset_in_bytes() == type_args_offset) {
-                  forward_def = alloc->PushArgumentAt(0)->value()->definition();
+                  forward_def = alloc->PushArgumentAt(0)->value();
                 }
               }
               gen->Add(load->place_id());
@@ -1972,8 +1973,7 @@ class LoadOptimizer : public ValueObject {
       // To prevent using them we additionally mark definitions themselves
       // as replaced and store a pointer to the replacement.
       Definition* replacement = (*pred_out_values)[place_id]->Replacement();
-      Value* input = new (Z) Value(replacement);
-      phi->SetInputAt(i, input);
+      phi->SetInputAt(i, replacement);
       replacement->AddInputUse(input);
     }
 
@@ -2054,7 +2054,7 @@ class LoadOptimizer : public ValueObject {
       PhiInstr* phi = worklist_[i];
 
       for (intptr_t i = 0; i < phi->InputCount(); i++) {
-        Definition* input = phi->InputAt(i)->definition();
+        Definition* input = phi->InputAt(i);
         if (input == phi) continue;
 
         PhiInstr* phi_input = input->AsPhi();
@@ -2125,8 +2125,8 @@ class LoadOptimizer : public ValueObject {
     ASSERT(a->tag() == b->tag());
     ASSERT(a->InputCount() == b->InputCount());
     for (intptr_t j = 0; j < a->InputCount(); j++) {
-      Definition* inputA = a->InputAt(j)->definition();
-      Definition* inputB = b->InputAt(j)->definition();
+      Definition* inputA = a->InputAt(j);
+      Definition* inputB = b->InputAt(j);
 
       if (inputA != inputB) {
         if (!AddPairToCongruencyWorklist(inputA, inputB)) {
@@ -2604,8 +2604,8 @@ static bool IsSafeUse(Value* use, SafeUseCheck check_type) {
 
   StoreInstanceFieldInstr* store = use->instruction()->AsStoreInstanceField();
   if (store != NULL) {
-    if (use == store->value()) {
-      Definition* instance = store->instance()->definition();
+    if (use == store->InputUseAt(StoreInstanceFieldInstr::kValuePos)) {
+      Definition* instance = store->instance();
       return instance->IsAllocateObject() &&
              ((check_type == kOptimisticCheck) ||
               instance->Identity().IsAllocationSinkingCandidate());
@@ -2641,7 +2641,7 @@ static bool IsAllocationSinkingCandidate(Definition* alloc,
 static Definition* StoreInto(Value* use) {
   StoreInstanceFieldInstr* store = use->instruction()->AsStoreInstanceField();
   if (store != NULL) {
-    return store->instance()->definition();
+    return store->instance();
   }
 
   return NULL;

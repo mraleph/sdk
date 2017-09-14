@@ -77,9 +77,9 @@ Definition* Definition::OriginalDefinition() {
   Definition* defn = this;
   while (defn->IsRedefinition() || defn->IsAssertAssignable()) {
     if (defn->IsRedefinition()) {
-      defn = defn->AsRedefinition()->value()->definition();
+      defn = defn->AsRedefinition()->value();
     } else {
-      defn = defn->AsAssertAssignable()->value()->definition();
+      defn = defn->AsAssertAssignable()->value();
     }
   }
   return defn;
@@ -109,8 +109,7 @@ const ICData* Instruction::GetICData(
 intptr_t Instruction::Hashcode() const {
   intptr_t result = tag();
   for (intptr_t i = 0; i < InputCount(); ++i) {
-    Value* value = InputAt(i);
-    intptr_t j = value->definition()->ssa_temp_index();
+    intptr_t j = InputAt(i)->ssa_temp_index();
     result = result * 31 + j;
   }
   return result;
@@ -254,7 +253,7 @@ intptr_t Cids::MonomorphicReceiverCid() const {
   return cid_ranges_[0]->cid_start;
 }
 
-CheckClassInstr::CheckClassInstr(Value* value,
+CheckClassInstr::CheckClassInstr(Definition* value,
                                  intptr_t deopt_id,
                                  const Cids& cids,
                                  TokenPosition token_pos)
@@ -613,7 +612,7 @@ void Instruction::InsertAfter(Instruction* prev) {
   // Update def-use chains whenever instructions are added to the graph
   // after initial graph construction.
   for (intptr_t i = InputCount() - 1; i >= 0; --i) {
-    Value* input = InputAt(i);
+    Value* input = InputUseAt(i);
     input->definition()->AddInputUse(input);
   }
 }
@@ -623,7 +622,7 @@ Instruction* Instruction::AppendInstruction(Instruction* tail) {
   // Update def-use chains whenever instructions are added to the graph
   // after initial graph construction.
   for (intptr_t i = tail->InputCount() - 1; i >= 0; --i) {
-    Value* input = tail->InputAt(i);
+    Value* input = tail->InputUseAt(i);
     input->definition()->AddInputUse(input);
   }
   return tail;
@@ -662,7 +661,7 @@ void FlowGraphVisitor::VisitBlocks() {
   }
 }
 
-bool Value::NeedsStoreBuffer() {
+bool Value::NeedsStoreBuffer() const {
   if (Type()->IsNull() || (Type()->ToNullableCid() == kSmiCid) ||
       (Type()->ToNullableCid() == kBoolCid)) {
     return false;
@@ -724,8 +723,8 @@ void Value::RemoveFromUseList() {
 
 // True if the definition has a single input use and is used only in
 // environments at the same instruction as that input use.
-bool Definition::HasOnlyUse(Value* use) const {
-  if (!HasOnlyInputUse(use)) {
+bool Definition::HasOnlyUse(Instruction* at) const {
+  if (HasSingleInputUse()) {
     return false;
   }
 
@@ -736,8 +735,9 @@ bool Definition::HasOnlyUse(Value* use) const {
   return true;
 }
 
-bool Definition::HasOnlyInputUse(Value* use) const {
-  return (input_use_list() == use) && (use->next_use() == NULL);
+bool Definition::HasSingleInputUse() const {
+  // FIXME sometimes it's called when there are no uses at all.
+  return (input_use_list() != NULL) && (input_use_list()->next_use() == NULL);
 }
 
 void Definition::ReplaceUsesWith(Definition* other) {
@@ -781,7 +781,7 @@ void Definition::ReplaceUsesWith(Definition* other) {
 
 void Instruction::UnuseAllInputs() {
   for (intptr_t i = InputCount() - 1; i >= 0; --i) {
-    InputAt(i)->RemoveFromUseList();
+    InputUseAt(i)->RemoveFromUseList();
   }
   for (Environment::DeepIterator it(env()); !it.Done(); it.Advance()) {
     it.CurrentValue()->RemoveFromUseList();
@@ -842,8 +842,7 @@ bool Instruction::IsDominatedBy(Instruction* dom) {
 
 bool Instruction::HasUnmatchedInputRepresentations() const {
   for (intptr_t i = 0; i < InputCount(); i++) {
-    Definition* input = InputAt(i)->definition();
-    if (RequiredInputRepresentation(i) != input->representation()) {
+    if (RequiredInputRepresentation(i) != InputAt(i)->representation()) {
       return true;
     }
   }
@@ -855,7 +854,7 @@ void Definition::ReplaceWith(Definition* other,
                              ForwardInstructionIterator* iterator) {
   // Record other's input uses.
   for (intptr_t i = other->InputCount() - 1; i >= 0; --i) {
-    Value* input = other->InputAt(i);
+    Value* input = other->InputUseAt(i);
     input->definition()->AddInputUse(input);
   }
   // Take other's environment from this definition.
@@ -886,8 +885,9 @@ void Definition::ReplaceWith(Definition* other,
 }
 
 void BranchInstr::SetComparison(ComparisonInstr* new_comparison) {
+  // FIXME
   for (intptr_t i = new_comparison->InputCount() - 1; i >= 0; --i) {
-    Value* input = new_comparison->InputAt(i);
+    Value* input = new_comparison->InputUseAt(i);
     input->definition()->AddInputUse(input);
     input->set_instruction(this);
   }
@@ -1084,7 +1084,8 @@ void BlockEntryInstr::ReplaceAsPredecessorWith(BlockEntryInstr* new_block) {
       ASSERT(phi != NULL);
       ASSERT(pred_count == phi->InputCount());
       // Save the predecessor use.
-      Value* pred_use = phi->InputAt(old_index);
+      // FIXME - type information is lost.
+      Definition* pred_use = phi->InputAt(old_index);
       // Move uses between old and new.
       intptr_t step = (old_index < new_index) ? 1 : -1;
       for (intptr_t use_idx = old_index; use_idx != new_index;
@@ -1154,7 +1155,7 @@ void JoinEntryInstr::RemoveDeadPhis(Definition* replacement) {
       if (phi->is_alive()) {
         (*phis_)[to_index++] = phi;
         for (intptr_t i = phi->InputCount() - 1; i >= 0; --i) {
-          Value* input = phi->InputAt(i);
+          Value* input = phi->InputUseAt(i);
           input->definition()->AddInputUse(input);
         }
       } else {
@@ -1215,7 +1216,7 @@ void Instruction::Goto(JoinEntryInstr* entry) {
 
 bool UnboxedIntConverterInstr::ComputeCanDeoptimize() const {
   return (to() == kUnboxedInt32) && !is_truncating() &&
-         !RangeUtils::Fits(value()->definition()->range(),
+         !RangeUtils::Fits(value()->range(),
                            RangeBoundary::kRangeBoundaryInt32);
 }
 
@@ -1223,17 +1224,17 @@ bool UnboxInt32Instr::ComputeCanDeoptimize() const {
   const intptr_t value_cid = value()->Type()->ToCid();
   if (value_cid == kSmiCid) {
     return (kSmiBits > 32) && !is_truncating() &&
-           !RangeUtils::Fits(value()->definition()->range(),
+           !RangeUtils::Fits(value()->range(),
                              RangeBoundary::kRangeBoundaryInt32);
   } else if (value_cid == kMintCid) {
     return !is_truncating() &&
-           !RangeUtils::Fits(value()->definition()->range(),
+           !RangeUtils::Fits(value()->range(),
                              RangeBoundary::kRangeBoundaryInt32);
-  } else if (is_truncating() && value()->definition()->IsBoxInteger()) {
+  } else if (is_truncating() && value()->IsBoxInteger()) {
     return false;
   } else if ((kSmiBits < 32) && value()->Type()->IsInt()) {
     // Note: we don't support truncation of Bigint values.
-    return !RangeUtils::Fits(value()->definition()->range(),
+    return !RangeUtils::Fits(value()->range(),
                              RangeBoundary::kRangeBoundaryInt32);
   } else if (FLAG_experimental_strong_mode && FLAG_limit_ints_to_64_bits &&
              value()->Type()->IsNullableInt()) {
@@ -1252,7 +1253,7 @@ bool UnboxUint32Instr::ComputeCanDeoptimize() const {
     return false;
   }
   // Check input value's range.
-  Range* value_range = value()->definition()->range();
+  Range* value_range = value()->range();
   return !RangeUtils::Fits(value_range, RangeBoundary::kRangeBoundaryInt64);
 }
 
@@ -1306,8 +1307,8 @@ bool ShiftInt64OpInstr::IsShiftCountInRange() const {
 }
 
 bool BinaryIntegerOpInstr::RightIsPowerOfTwoConstant() const {
-  if (!right()->definition()->IsConstant()) return false;
-  const Object& constant = right()->definition()->AsConstant()->value();
+  if (!right()->IsConstant()) return false;
+  const Object& constant = right()->AsConstant()->value();
   if (!constant.IsSmi()) return false;
   const intptr_t int_value = Smi::Cast(constant).Value();
   return Utils::IsPowerOfTwo(Utils::Abs(int_value));
@@ -1333,9 +1334,9 @@ static int64_t RepresentationMask(Representation r) {
                               (64 - RepresentationBits(r)));
 }
 
-static bool ToIntegerConstant(Value* value, int64_t* result) {
-  if (!value->BindsToConstant()) {
-    UnboxInstr* unbox = value->definition()->AsUnbox();
+static bool ToIntegerConstant(Definition* value, int64_t* result) {
+  if (!value->IsConstant()) {
+    UnboxInstr* unbox = value->AsUnbox();
     if (unbox != NULL) {
       switch (unbox->representation()) {
         case kUnboxedDouble:
@@ -1376,8 +1377,8 @@ static bool ToIntegerConstant(Value* value, int64_t* result) {
 }
 
 static Definition* CanonicalizeCommutativeDoubleArithmetic(Token::Kind op,
-                                                           Value* left,
-                                                           Value* right) {
+                                                           Definition* left,
+                                                           Definition* right) {
   int64_t left_value;
   if (!ToIntegerConstant(left, &left_value)) {
     return NULL;
@@ -1389,14 +1390,14 @@ static Definition* CanonicalizeCommutativeDoubleArithmetic(Token::Kind op,
   switch (op) {
     case Token::kMUL:
       if (left_value == 1) {
-        if (right->definition()->representation() != kUnboxedDouble) {
+        if (right->representation() != kUnboxedDouble) {
           // Can't yet apply the equivalence because representation selection
           // did not run yet. We need it to guarantee that right value is
           // correctly coerced to double. The second canonicalization pass
           // will apply this equivalence.
           return NULL;
         } else {
-          return right->definition();
+          return right;
         }
       }
       break;
@@ -1421,9 +1422,9 @@ Definition* DoubleToFloatInstr::Canonicalize(FlowGraph* flow_graph) {
   }
 #endif
   if (!HasUses()) return NULL;
-  if (value()->definition()->IsFloatToDouble()) {
+  if (value()->IsFloatToDouble()) {
     // F2D(D2F(v)) == v.
-    return value()->definition()->AsFloatToDouble()->value()->definition();
+    return value()->AsFloatToDouble()->value();
   }
   return this;
 }
@@ -1447,10 +1448,9 @@ Definition* BinaryDoubleOpInstr::Canonicalize(FlowGraph* flow_graph) {
     return result;
   }
 
-  if ((op_kind() == Token::kMUL) &&
-      (left()->definition() == right()->definition())) {
+  if ((op_kind() == Token::kMUL) && (left() == right())) {
     MathUnaryInstr* math_unary = new MathUnaryInstr(
-        MathUnaryInstr::kDoubleSquare, new Value(left()->definition()),
+        MathUnaryInstr::kDoubleSquare, left(),
         DeoptimizationTarget());
     flow_graph->InsertBefore(this, math_unary, env(), FlowGraph::kValue);
     return math_unary;
@@ -1478,7 +1478,7 @@ static bool IsCommutative(Token::Kind op) {
 
 UnaryIntegerOpInstr* UnaryIntegerOpInstr::Make(Representation representation,
                                                Token::Kind op_kind,
-                                               Value* value,
+                                               Definition* value,
                                                intptr_t deopt_id,
                                                Range* range) {
   UnaryIntegerOpInstr* op = NULL;
@@ -1513,8 +1513,8 @@ UnaryIntegerOpInstr* UnaryIntegerOpInstr::Make(Representation representation,
 
 BinaryIntegerOpInstr* BinaryIntegerOpInstr::Make(Representation representation,
                                                  Token::Kind op_kind,
-                                                 Value* left,
-                                                 Value* right,
+                                                 Definition* left,
+                                                 Definition* right,
                                                  intptr_t deopt_id,
                                                  bool can_overflow,
                                                  bool is_truncating,
@@ -1683,8 +1683,7 @@ Definition* BinaryIntegerOpInstr::CreateConstantResult(FlowGraph* flow_graph,
                                                        const Integer& result) {
   Definition* result_defn = flow_graph->GetConstant(result);
   if (representation() != kTagged) {
-    result_defn = UnboxInstr::Create(representation(), new Value(result_defn),
-                                     GetDeoptId());
+    result_defn = UnboxInstr::Create(representation(), result_defn, GetDeoptId());
     flow_graph->InsertBefore(this, result_defn, env(), FlowGraph::kValue);
   }
   return result_defn;
@@ -1703,8 +1702,8 @@ Definition* CheckedSmiOpInstr::Canonicalize(FlowGraph* flow_graph) {
       case Token::kBIT_OR:
       case Token::kBIT_XOR:
         replacement = new BinarySmiOpInstr(
-            op_kind(), new Value(left()->definition()),
-            new Value(right()->definition()), Thread::kNoDeoptId);
+            op_kind(), left(),
+            right(), Thread::kNoDeoptId);
       default:
         break;
     }
@@ -1716,24 +1715,23 @@ Definition* CheckedSmiOpInstr::Canonicalize(FlowGraph* flow_graph) {
   return this;
 }
 
-ComparisonInstr* CheckedSmiComparisonInstr::CopyWithNewOperands(Value* left,
-                                                                Value* right) {
+ComparisonInstr* CheckedSmiComparisonInstr::CopyWithNewOperands(Definition* left,
+                                                                Definition* right) {
   UNREACHABLE();
   return NULL;
 }
 
 Definition* CheckedSmiComparisonInstr::Canonicalize(FlowGraph* flow_graph) {
-  if ((left()->Type()->ToCid() == kSmiCid) &&
-      (right()->Type()->ToCid() == kSmiCid)) {
+  // FIXME Type() should be reaching type here and everywhere!
+  if ((InputUseAt(0)->Type()->ToCid() == kSmiCid) &&
+      (InputUseAt(1)->Type()->ToCid() == kSmiCid)) {
     Definition* replacement = NULL;
     if (Token::IsRelationalOperator(kind())) {
       replacement = new RelationalOpInstr(
-          token_pos(), kind(), new Value(left()->definition()),
-          new Value(right()->definition()), kSmiCid, Thread::kNoDeoptId);
+          token_pos(), kind(), left(), right(), kSmiCid, Thread::kNoDeoptId);
     } else if (Token::IsEqualityOperator(kind())) {
       replacement = new EqualityCompareInstr(
-          token_pos(), kind(), new Value(left()->definition()),
-          new Value(right()->definition()), kSmiCid, Thread::kNoDeoptId);
+          token_pos(), kind(), left(), right(), kSmiCid, Thread::kNoDeoptId);
     }
     if (replacement != NULL) {
       flow_graph->InsertBefore(this, replacement, env(), FlowGraph::kValue);
@@ -1747,20 +1745,20 @@ Definition* BinaryIntegerOpInstr::Canonicalize(FlowGraph* flow_graph) {
   // If both operands are constants evaluate this expression. Might
   // occur due to load forwarding after constant propagation pass
   // have already been run.
-  if (left()->BindsToConstant() && left()->BoundConstant().IsInteger() &&
-      right()->BindsToConstant() && right()->BoundConstant().IsInteger()) {
+  if (left()->IsConstant() && left()->AsConstant()->value().IsInteger() &&
+      right()->IsConstant() && right()->AsConstant()->value().IsInteger()) {
     const Integer& result =
-        Integer::Handle(Evaluate(Integer::Cast(left()->BoundConstant()),
-                                 Integer::Cast(right()->BoundConstant())));
+        Integer::Handle(Evaluate(Integer::Cast(left()->AsConstant()->value()),
+                                 Integer::Cast(right()->AsConstant()->value())));
     if (!result.IsNull()) {
       return CreateConstantResult(flow_graph, result);
     }
   }
 
-  if (left()->BindsToConstant() && !right()->BindsToConstant() &&
+  if (left()->IsConstant() && !right()->IsConstant() &&
       IsCommutative(op_kind())) {
-    Value* l = left();
-    Value* r = right();
+    Definition* l = left();
+    Definition* r = right();
     SetInputAt(0, r);
     SetInputAt(1, l);
   }
@@ -1789,15 +1787,16 @@ Definition* BinaryIntegerOpInstr::Canonicalize(FlowGraph* flow_graph) {
   switch (op_kind()) {
     case Token::kMUL:
       if (rhs == 1) {
-        return left()->definition();
+        return left();
       } else if (rhs == 0) {
-        return right()->definition();
+        return right();
       } else if (rhs == 2) {
         ConstantInstr* constant_1 =
             flow_graph->GetConstant(Smi::Handle(Smi::New(1)));
+        // FIXME CopyWithType left
         BinaryIntegerOpInstr* shift = BinaryIntegerOpInstr::Make(
-            representation(), Token::kSHL, left()->CopyWithType(),
-            new Value(constant_1), GetDeoptId(), can_overflow(),
+            representation(), Token::kSHL, left(),
+            constant_1, GetDeoptId(), can_overflow(),
             is_truncating(), range());
         if (shift != NULL) {
           flow_graph->InsertBefore(this, shift, env(), FlowGraph::kValue);
@@ -1808,29 +1807,30 @@ Definition* BinaryIntegerOpInstr::Canonicalize(FlowGraph* flow_graph) {
       break;
     case Token::kADD:
       if (rhs == 0) {
-        return left()->definition();
+        return left();
       }
       break;
     case Token::kBIT_AND:
       if (rhs == 0) {
-        return right()->definition();
+        return right();
       } else if (rhs == range_mask) {
-        return left()->definition();
+        return left();
       }
       break;
     case Token::kBIT_OR:
       if (rhs == 0) {
-        return left()->definition();
+        return left();
       } else if (rhs == range_mask) {
-        return right()->definition();
+        return right();
       }
       break;
     case Token::kBIT_XOR:
       if (rhs == 0) {
-        return left()->definition();
+        return left();
       } else if (rhs == range_mask) {
+        // FIXME CopyWithType left()
         UnaryIntegerOpInstr* bit_not = UnaryIntegerOpInstr::Make(
-            representation(), Token::kBIT_NOT, left()->CopyWithType(),
+            representation(), Token::kBIT_NOT, left(),
             GetDeoptId(), range());
         if (bit_not != NULL) {
           flow_graph->InsertBefore(this, bit_not, env(), FlowGraph::kValue);
@@ -1841,16 +1841,17 @@ Definition* BinaryIntegerOpInstr::Canonicalize(FlowGraph* flow_graph) {
 
     case Token::kSUB:
       if (rhs == 0) {
-        return left()->definition();
+        return left();
       }
       break;
 
     case Token::kTRUNCDIV:
       if (rhs == 1) {
-        return left()->definition();
+        return left();
       } else if (rhs == -1) {
+        // FIXME copy with type
         UnaryIntegerOpInstr* negation = UnaryIntegerOpInstr::Make(
-            representation(), Token::kNEGATE, left()->CopyWithType(),
+            representation(), Token::kNEGATE, left(),
             GetDeoptId(), range());
         if (negation != NULL) {
           flow_graph->InsertBefore(this, negation, env(), FlowGraph::kValue);
@@ -1861,7 +1862,7 @@ Definition* BinaryIntegerOpInstr::Canonicalize(FlowGraph* flow_graph) {
 
     case Token::kSHR:
       if (rhs == 0) {
-        return left()->definition();
+        return left();
       } else if (rhs < 0) {
         DeoptimizeInstr* deopt =
             new DeoptimizeInstr(ICData::kDeoptBinarySmiOp, GetDeoptId());
@@ -1873,7 +1874,7 @@ Definition* BinaryIntegerOpInstr::Canonicalize(FlowGraph* flow_graph) {
     case Token::kSHL: {
       const intptr_t kMaxShift = RepresentationBits(representation()) - 1;
       if (rhs == 0) {
-        return left()->definition();
+        return left();
       } else if ((rhs < 0) || (rhs >= kMaxShift)) {
         if ((rhs < 0) || !is_truncating()) {
           DeoptimizeInstr* deopt =
@@ -1906,8 +1907,8 @@ Definition* RedefinitionInstr::Canonicalize(FlowGraph* flow_graph) {
     return NULL;
   }
   if ((constrained_type() != NULL) &&
-      Type()->IsEqualTo(value()->definition()->Type())) {
-    return value()->definition();
+      Type()->IsEqualTo(value()->Type())) {
+    return value();
   }
   return this;
 }
@@ -2013,7 +2014,7 @@ Definition* LoadFieldInstr::Canonicalize(FlowGraph* flow_graph) {
     // call we can replace the length load with the length argument passed to
     // the constructor.
     StaticCallInstr* call =
-        instance()->definition()->OriginalDefinition()->AsStaticCall();
+        instance()->OriginalDefinition()->AsStaticCall();
     if (call != NULL) {
       if (call->is_known_list_constructor() &&
           IsFixedLengthArrayCid(call->Type()->ToCid())) {
@@ -2022,16 +2023,16 @@ Definition* LoadFieldInstr::Canonicalize(FlowGraph* flow_graph) {
     }
 
     CreateArrayInstr* create_array =
-        instance()->definition()->OriginalDefinition()->AsCreateArray();
+        instance()->OriginalDefinition()->AsCreateArray();
     if ((create_array != NULL) &&
         (recognized_kind() == MethodRecognizer::kObjectArrayLength)) {
-      return create_array->num_elements()->definition();
+      return create_array->num_elements();
     }
 
     // For arrays with guarded lengths, replace the length load
     // with a constant.
     LoadFieldInstr* load_array =
-        instance()->definition()->OriginalDefinition()->AsLoadField();
+        instance()->OriginalDefinition()->AsLoadField();
     if (load_array != NULL) {
       const Field* field = load_array->field();
       if ((field != NULL) && (field->guarded_list_length() >= 0)) {
@@ -2042,9 +2043,9 @@ Definition* LoadFieldInstr::Canonicalize(FlowGraph* flow_graph) {
   }
 
   // Try folding away loads from constant objects.
-  if (instance()->BindsToConstant()) {
+  if (instance()->IsConstant()) {
     Object& result = Object::Handle();
-    if (Evaluate(instance()->BoundConstant(), &result)) {
+    if (Evaluate(instance()->AsConstant()->value(), &result)) {
       return flow_graph->GetConstant(result);
     }
   }
@@ -2053,8 +2054,9 @@ Definition* LoadFieldInstr::Canonicalize(FlowGraph* flow_graph) {
 }
 
 Definition* AssertBooleanInstr::Canonicalize(FlowGraph* flow_graph) {
+  // FIXME Type() !!!
   if (FLAG_eliminate_type_checks && (value()->Type()->ToCid() == kBoolCid)) {
-    return value()->definition();
+    return value();
   }
 
   return this;
@@ -2063,7 +2065,7 @@ Definition* AssertBooleanInstr::Canonicalize(FlowGraph* flow_graph) {
 Definition* AssertAssignableInstr::Canonicalize(FlowGraph* flow_graph) {
   if (FLAG_eliminate_type_checks &&
       value()->Type()->IsAssignableTo(dst_type())) {
-    return value()->definition();
+    return value();
   }
   if (dst_type().IsInstantiated()) {
     return this;
@@ -2071,9 +2073,9 @@ Definition* AssertAssignableInstr::Canonicalize(FlowGraph* flow_graph) {
   // For uninstantiated target types: If the instantiator and function
   // type arguments are constant, instantiate the target type here.
   ConstantInstr* constant_instantiator_type_args =
-      instantiator_type_arguments()->definition()->AsConstant();
+      instantiator_type_arguments()->AsConstant();
   ConstantInstr* constant_function_type_args =
-      function_type_arguments()->definition()->AsConstant();
+      function_type_arguments()->AsConstant();
   if ((constant_instantiator_type_args != NULL) &&
       (constant_function_type_args != NULL)) {
     ASSERT(constant_instantiator_type_args->value().IsNull() ||
@@ -2100,12 +2102,14 @@ Definition* AssertAssignableInstr::Canonicalize(FlowGraph* flow_graph) {
     if (new_dst_type.IsDynamicType() || new_dst_type.IsObjectType() ||
         (FLAG_eliminate_type_checks &&
          value()->Type()->IsAssignableTo(new_dst_type))) {
-      return value()->definition();
+      return value();
     }
 
     ConstantInstr* null_constant = flow_graph->constant_null();
-    instantiator_type_arguments()->BindTo(null_constant);
-    function_type_arguments()->BindTo(null_constant);
+    // instantiator_type_arguments()->BindTo(null_constant);
+    SetInputAt(1, null_constant);
+    // function_type_arguments()->BindTo(null_constant);
+    SetInputAt(2, null_constant);
   }
   return this;
 }
@@ -2141,30 +2145,30 @@ static bool HasTryBlockUse(Value* use_list) {
 Definition* BoxInstr::Canonicalize(FlowGraph* flow_graph) {
   if ((input_use_list() == NULL) && !HasTryBlockUse(env_use_list())) {
     // Environments can accommodate any representation. No need to box.
-    return value()->definition();
+    return value();
   }
 
   // Fold away Box<rep>(Unbox<rep>(v)) if value is known to be of the
   // right class.
-  UnboxInstr* unbox_defn = value()->definition()->AsUnbox();
+  UnboxInstr* unbox_defn = value()->AsUnbox();
   if ((unbox_defn != NULL) &&
       (unbox_defn->representation() == from_representation()) &&
       (unbox_defn->value()->Type()->ToCid() == Type()->ToCid())) {
-    return unbox_defn->value()->definition();
+    return unbox_defn->value();
   }
 
   return this;
 }
 
 bool BoxIntegerInstr::ValueFitsSmi() const {
-  Range* range = value()->definition()->range();
+  Range* range = value()->range();
   return RangeUtils::Fits(range, RangeBoundary::kRangeBoundarySmi);
 }
 
 Definition* BoxIntegerInstr::Canonicalize(FlowGraph* flow_graph) {
   if ((input_use_list() == NULL) && !HasTryBlockUse(env_use_list())) {
     // Environments can accommodate any representation. No need to box.
-    return value()->definition();
+    return value();
   }
 
   return this;
@@ -2177,16 +2181,18 @@ Definition* BoxInt64Instr::Canonicalize(FlowGraph* flow_graph) {
   }
 
   UnboxedIntConverterInstr* conv =
-      value()->definition()->AsUnboxedIntConverter();
+      value()->AsUnboxedIntConverter();
   if (conv != NULL) {
     Definition* replacement = this;
 
     switch (conv->from()) {
       case kUnboxedInt32:
-        replacement = new BoxInt32Instr(conv->value()->CopyWithType());
+        // FIXME CopyWithType
+        replacement = new BoxInt32Instr(conv->value());
         break;
       case kUnboxedUint32:
-        replacement = new BoxUint32Instr(conv->value()->CopyWithType());
+        // FIXME CopyWithType
+        replacement = new BoxUint32Instr(conv->value());
         break;
       default:
         UNREACHABLE();
@@ -2207,13 +2213,13 @@ Definition* UnboxInstr::Canonicalize(FlowGraph* flow_graph) {
   if (!HasUses() && !CanDeoptimize()) return NULL;
 
   // Fold away Unbox<rep>(Box<rep>(v)).
-  BoxInstr* box_defn = value()->definition()->AsBox();
+  BoxInstr* box_defn = value()->AsBox();
   if ((box_defn != NULL) &&
       (box_defn->from_representation() == representation())) {
-    return box_defn->value()->definition();
+    return box_defn->value();
   }
 
-  if ((representation() == kUnboxedDouble) && value()->BindsToConstant()) {
+  if ((representation() == kUnboxedDouble) && value()->IsConstant()) {
     UnboxedConstantInstr* uc = NULL;
 
     const Object& val = value()->BoundConstant();
@@ -2239,16 +2245,17 @@ Definition* UnboxIntegerInstr::Canonicalize(FlowGraph* flow_graph) {
   if (!HasUses() && !CanDeoptimize()) return NULL;
 
   // Fold away UnboxInteger<rep_to>(BoxInteger<rep_from>(v)).
-  BoxIntegerInstr* box_defn = value()->definition()->AsBoxInteger();
+  BoxIntegerInstr* box_defn = value()->AsBoxInteger();
   if (box_defn != NULL) {
     Representation from_representation =
-        box_defn->value()->definition()->representation();
+        box_defn->value()->representation();
     if (from_representation == representation()) {
-      return box_defn->value()->definition();
+      return box_defn->value();
     } else {
+      // FIXME CopyWithType
       UnboxedIntConverterInstr* converter = new UnboxedIntConverterInstr(
           from_representation, representation(),
-          box_defn->value()->CopyWithType(),
+          box_defn->value(),
           (representation() == kUnboxedInt32) ? GetDeoptId()
                                               : Thread::kNoDeoptId);
       // TODO(vegorov): marking resulting converter as truncating when
@@ -2274,7 +2281,7 @@ Definition* UnboxInt32Instr::Canonicalize(FlowGraph* flow_graph) {
     return replacement;
   }
 
-  ConstantInstr* c = value()->definition()->AsConstant();
+  ConstantInstr* c = value()->AsConstant();
   if ((c != NULL) && c->value().IsSmi()) {
     if (!is_truncating() && (kSmiBits > 32)) {
       // Check that constant fits into 32-bit integer.
@@ -2300,7 +2307,7 @@ Definition* UnboxedIntConverterInstr::Canonicalize(FlowGraph* flow_graph) {
   if (!HasUses()) return NULL;
 
   UnboxedIntConverterInstr* box_defn =
-      value()->definition()->AsUnboxedIntConverter();
+      value()->AsUnboxedIntConverter();
   if ((box_defn != NULL) && (box_defn->representation() == from())) {
     if (box_defn->from() == to()) {
       // Do not erase truncating conversions from 64-bit value to 32-bit values
@@ -2308,11 +2315,12 @@ Definition* UnboxedIntConverterInstr::Canonicalize(FlowGraph* flow_graph) {
       if ((box_defn->from() == kUnboxedInt64) && box_defn->is_truncating()) {
         return this;
       }
-      return box_defn->value()->definition();
+      return box_defn->value();
     }
 
+    // FIXME CopyWithType
     UnboxedIntConverterInstr* converter = new UnboxedIntConverterInstr(
-        box_defn->from(), representation(), box_defn->value()->CopyWithType(),
+        box_defn->from(), representation(), box_defn->value(),
         (to() == kUnboxedInt32) ? GetDeoptId() : Thread::kNoDeoptId);
     if ((representation() == kUnboxedInt32) && is_truncating()) {
       converter->mark_truncating();
@@ -2321,16 +2329,16 @@ Definition* UnboxedIntConverterInstr::Canonicalize(FlowGraph* flow_graph) {
     return converter;
   }
 
-  UnboxInt64Instr* unbox_defn = value()->definition()->AsUnboxInt64();
+  UnboxInt64Instr* unbox_defn = value()->AsUnboxInt64();
   if (unbox_defn != NULL && (from() == kUnboxedInt64) &&
-      (to() == kUnboxedInt32) && unbox_defn->HasOnlyInputUse(value())) {
+      (to() == kUnboxedInt32) && unbox_defn->HasSingleInputUse()) {
     // TODO(vegorov): there is a duplication of code between UnboxedIntCoverter
     // and code path that unboxes Mint into Int32. We should just schedule
     // these instructions close to each other instead of fusing them.
     Definition* replacement =
         new UnboxInt32Instr(is_truncating() ? UnboxInt32Instr::kTruncate
                                             : UnboxInt32Instr::kNoTruncation,
-                            unbox_defn->value()->CopyWithType(), GetDeoptId());
+                            unbox_defn->value()/* ->CopyWithType() */, GetDeoptId());
     flow_graph->InsertBefore(this, replacement, env(), FlowGraph::kValue);
     return replacement;
   }
@@ -2339,8 +2347,8 @@ Definition* UnboxedIntConverterInstr::Canonicalize(FlowGraph* flow_graph) {
 }
 
 Definition* BooleanNegateInstr::Canonicalize(FlowGraph* flow_graph) {
-  Definition* defn = value()->definition();
-  if (defn->IsComparison() && defn->HasOnlyUse(value()) &&
+  Definition* defn = value();
+  if (defn->IsComparison() && defn->HasOnlyUse(this) &&
       defn->Type()->ToCid() == kBoolCid) {
     defn->AsComparison()->NegateComparison();
     return defn;
@@ -2383,12 +2391,12 @@ static Definition* CanonicalizeStrictCompare(StrictCompareInstr* compare,
   *negated = false;
   PassiveObject& constant = PassiveObject::Handle();
   Value* other = NULL;
-  if (compare->right()->BindsToConstant()) {
-    constant = compare->right()->BoundConstant().raw();
-    other = compare->left();
-  } else if (compare->left()->BindsToConstant()) {
-    constant = compare->left()->BoundConstant().raw();
-    other = compare->right();
+  if (compare->right()->IsConstant()) {
+    constant = compare->right()->AsConstant()->value().raw();
+    other = compare->left_use();
+  } else if (compare->left()->IsConstant()) {
+    constant = compare->left()->AsConstant()->value().raw();
+    other = compare->right_use();
   } else {
     return compare;
   }
@@ -2409,14 +2417,14 @@ static Definition* CanonicalizeStrictCompare(StrictCompareInstr* compare,
   // Handle e !== true.
   if ((kind == Token::kNE_STRICT) && (constant.raw() == Bool::True().raw()) &&
       other_defn->IsComparison() && can_merge &&
-      other_defn->HasOnlyUse(other)) {
+      other_defn->HasOnlyUse(other->instruction())) {
     *negated = true;
     return other_defn;
   }
   // Handle e === false.
   if ((kind == Token::kEQ_STRICT) && (constant.raw() == Bool::False().raw()) &&
       other_defn->IsComparison() && can_merge &&
-      other_defn->HasOnlyUse(other)) {
+      other_defn->HasOnlyUse(other->instruction())) {
     *negated = true;
     return other_defn;
   }
@@ -2439,7 +2447,7 @@ static bool RecognizeTestPattern(Value* left, Value* right, bool* negate) {
     return false;
   }
 
-  BinarySmiOpInstr* mask_op = left->definition()->AsBinarySmiOp();
+  BinarySmiOpInstr* mask_op = left->AsBinarySmiOp();
   if ((mask_op == NULL) || (mask_op->op_kind() != Token::kBIT_AND) ||
       !mask_op->HasOnlyUse(left)) {
     return false;
@@ -2509,10 +2517,10 @@ Instruction* BranchInstr::Canonicalize(FlowGraph* flow_graph) {
     bool negate = false;
     if (RecognizeTestPattern(comparison()->left(), comparison()->right(),
                              &negate)) {
-      bit_and = comparison()->left()->definition()->AsBinarySmiOp();
+      bit_and = comparison()->left()->AsBinarySmiOp();
     } else if (RecognizeTestPattern(comparison()->right(), comparison()->left(),
                                     &negate)) {
-      bit_and = comparison()->right()->definition()->AsBinarySmiOp();
+      bit_and = comparison()->right()->AsBinarySmiOp();
     }
     if (bit_and != NULL) {
       if (FLAG_trace_optimization) {
@@ -2644,7 +2652,7 @@ Instruction* GuardFieldLengthInstr::Canonicalize(FlowGraph* flow_graph) {
   }
 
   // Check if length is statically known.
-  StaticCallInstr* call = value()->definition()->AsStaticCall();
+  StaticCallInstr* call = value()->AsStaticCall();
   if (call == NULL) {
     return this;
   }
@@ -3590,7 +3598,7 @@ void Environment::DeepCopyTo(Zone* zone, Instruction* instr) const {
   instr->SetEnvironment(copy);
   for (Environment::DeepIterator it(copy); !it.Done(); it.Advance()) {
     Value* value = it.CurrentValue();
-    value->definition()->AddEnvUse(value);
+    value->AddEnvUse(value);
   }
 }
 

@@ -38,6 +38,90 @@ class RangeAnalysis;
 class RangeBoundary;
 class UnboxIntegerInstr;
 
+////////////////////////////////////////////////////////////////////////////////
+
+/*
+
+#define APPLY0(...) __VA_ARGS__
+#define APPLY1(...) APPLY0(APPLY0(APPLY0(APPLY0(__VA_ARGS__))))
+#define APPLY(...) APPLY1(APPLY1(APPLY1(APPLY1(__VA_ARGS__))))
+//#define APPLY3(...) APPLY2(APPLY2(APPLY2(__VA_ARGS__)))
+//#define APPLY4(...) APPLY3(APPLY3(APPLY3(__VA_ARGS__)))
+//#define APPLY(...)  APPLY4(APPLY4(APPLY4(__VA_ARGS__)))
+
+#define MAP_END(...)
+#define MAP_NOTHING
+#define MAP__COMMA ,
+
+#define MAP_IS_END_2() 0, MAP_END
+#define MAP_IS_END_1(...) MAP_IS_END_2
+#define MAP_IS_END(...) MAP_IS_END_1
+#define MAP_COMPUTE_NEXT_STEP_0(item, cont, ...) cont MAP_NOTHING
+#define MAP_COMPUTE_NEXT_STEP_1(item, cont) MAP_COMPUTE_NEXT_STEP_0(item, cont, 0)
+#define MAP_COMPUTE_NEXT_STEP(item, cont)  MAP_COMPUTE_NEXT_STEP_1(MAP_IS_END item, cont)
+
+#define MAP0(f, item0, item1, ...) f(item0) MAP_COMPUTE_NEXT_STEP(item1, MAP1) (f, item1, __VA_ARGS__)
+#define MAP1(f, item0, item1, ...) f(item0) MAP_COMPUTE_NEXT_STEP(item1, MAP0) (f, item1, __VA_ARGS__)
+#define MAP(f, ...) APPLY(MAP1(f, __VA_ARGS__, ()()(), ()()(), ()()(), 0))
+
+#define MAP_COMMA_STEP_1(item, cont) MAP_COMPUTE_NEXT_STEP_0(item, MAP__COMMA cont, 0)
+#define MAP_COMMA_STEP(item, cont)  MAP_COMMA_STEP_1(MAP_IS_END item, cont)
+#define MAP_COMMA0(f, item0, item1, ...) f(item0) MAP_COMMA_STEP(item1, MAP_COMMA1)(f, item1, __VA_ARGS__)
+#define MAP_COMMA1(f, item0, item1, ...) f(item0) MAP_COMMA_STEP(item1, MAP_COMMA0)(f, item1, __VA_ARGS__)
+
+#define MAP_COMMA(f, ...) APPLY(MAP_COMMA1(f, __VA_ARGS__, ()()(), ()()(), ()()(), 0))
+
+#define CONCAT1(a, b) a##b
+#define CONCAT(a, b) CONCAT1(a, b)
+
+#define LOWER_CASE_NAME(a, ...) a
+#define CAPITALIZED_NAME(a, ...) __VA_ARGS__
+
+#define DEFINE_INPUT(names) Definition* LOWER_CASE_NAME names () const { return InputAt(CONCAT(k, CAPITALIZED_NAME names)); }
+#define DEFINE_INPUT_USE(names) Value* CONCAT(LOWER_CASE_NAME names, _use) () const { return InputUseAt(CONCAT(k, CAPITALIZED_NAME names)); }
+#define DEFINE_INPUT_SET(names) void CONCAT(set_, LOWER_CASE_NAME names) (Definition* defn) { SetInputAt(CONCAT(k, CAPITALIZED_NAME names), value); }
+#define DEFINE_ENUM(names) CONCAT(k, CAPITALIZED_NAME names)
+
+#define DEFINE_INPUTS(...)           \
+  enum { MAP_COMMA(DEFINE_ENUM, __VA_ARGS__) }; \
+  MAP(DEFINE_INPUT, __VA_ARGS__)     \
+  MAP(DEFINE_INPUT_USE, __VA_ARGS__) \
+  MAP(DEFINE_INPUT_SET, __VA_ARGS__) \
+
+DEFINE_INPUTS((input0, Input0), (input1, Input1))
+
+DEFINE_INPUTS((input0, Input0), (input1, Input1), (input2, Input2), (input3, Input3), (input4, Input4), (input5, Input5), (input6, Input6), (input7, Input7))
+
+*/
+
+#define EVAL0(...) __VA_ARGS__
+#define EVAL1(...) EVAL0(EVAL0(EVAL0(__VA_ARGS__)))
+#define EVAL2(...) EVAL1(EVAL1(EVAL1(__VA_ARGS__)))
+#define EVAL3(...) EVAL2(EVAL2(EVAL2(__VA_ARGS__)))
+#define EVAL4(...) EVAL3(EVAL3(EVAL3(__VA_ARGS__)))
+#define EVAL(...)  EVAL4(EVAL4(EVAL4(__VA_ARGS__)))
+
+#define MAP_END(...)
+#define MAP_OUT
+#define MAP_COMMA ,
+
+#define MAP_GET_END2() 0, MAP_END
+#define MAP_GET_END1(...) MAP_GET_END2
+#define MAP_GET_END(...) MAP_GET_END1
+#define MAP_NEXT0(item, m, ...) m MAP_OUT
+#define MAP_NEXT1(item, m) MAP_NEXT0(item, m, 0)
+#define MAP_NEXT(item, m)  MAP_NEXT1(MAP_GET_END item, m)
+
+#define MAP0(f, index, item0, item1, ...) f(index, item0) MAP_NEXT(item1, MAP1)(f, index + 1, item1, __VA_ARGS__)
+#define MAP1(f, index, item0, item1, ...) f(index, item0) MAP_NEXT(item1, MAP0)(f, index + 1, item1, __VA_ARGS__)
+#define MAP(f, ...) EVAL(MAP1(f, 0, __VA_ARGS__, ()()(), ()()(), ()()(), 0))
+
+#define DEFINE_INPUT(index, name) Definition* name() const { return InputAt(index); }
+#define DEFINE_INPUT_USE(index, name) Value* name##_use() const { return InputUseAt(index); }
+#define DEFINE_INPUT_SET(index, name) void set_##name() { SetInputAt(index, value); }
+
+#define DEFINE_INPUTS(...) MAP(DEFINE_INPUT, __VA_ARGS__) MAP(DEFINE_INPUT_USE, __VA_ARGS__)
+
 // CompileType describes type of the value produced by the definition.
 //
 // It captures the following properties:
@@ -227,7 +311,7 @@ class Value : public ZoneAllocated {
     Value* next_;
   };
 
-  explicit Value(Definition* definition)
+  explicit Value(Definition* definition = NULL)
       : definition_(definition),
         previous_use_(NULL),
         next_use_(NULL),
@@ -261,6 +345,13 @@ class Value : public ZoneAllocated {
   inline void BindTo(Definition* definition);
   inline void BindToEnvironment(Definition* definition);
 
+  // FIXME
+  Value& operator = (const Value& other) {
+    ASSERT(other.definition_ == NULL);
+    ASSERT(definition_ == NULL);
+    return *this;
+  }
+
   Value* Copy(Zone* zone) { return new (zone) Value(definition_); }
 
   // CopyWithType() must only be used when the new Value is dominated by
@@ -272,7 +363,7 @@ class Value : public ZoneAllocated {
   }
   Value* CopyWithType() { return CopyWithType(Thread::Current()->zone()); }
 
-  CompileType* Type();
+  CompileType* Type() const;
 
   void SetReachingType(CompileType* type) { reaching_type_ = type; }
   void RefineReachingType(CompileType* type);
@@ -294,7 +385,7 @@ class Value : public ZoneAllocated {
 
   // Compile time constants, Bool, Smi and Nulls do not need to update
   // the store buffer.
-  bool NeedsStoreBuffer();
+  bool NeedsStoreBuffer() const;
 
   bool Equals(Value* other) const;
 
@@ -307,9 +398,7 @@ class Value : public ZoneAllocated {
   Instruction* instruction_;
   intptr_t use_index_;
 
-  CompileType* reaching_type_;
-
-  DISALLOW_COPY_AND_ASSIGN(Value);
+  mutable CompileType* reaching_type_;
 };
 
 // An embedded container with N elements of type T.  Used (with partial
@@ -345,12 +434,12 @@ class EmbeddedArray<T, 0> {
   intptr_t length() const { return 0; }
   const T& operator[](intptr_t i) const {
     UNREACHABLE();
-    static T sentinel = 0;
+    static T sentinel;
     return sentinel;
   }
   T& operator[](intptr_t i) {
     UNREACHABLE();
-    static T sentinel = 0;
+    static T sentinel;
     return sentinel;
   }
 };
@@ -702,12 +791,16 @@ class Instruction : public ZoneAllocated {
   virtual TokenPosition token_pos() const { return TokenPosition::kNoSource; }
 
   virtual intptr_t InputCount() const = 0;
-  virtual Value* InputAt(intptr_t i) const = 0;
-  void SetInputAt(intptr_t i, Value* value) {
-    ASSERT(value != NULL);
-    value->set_instruction(this);
-    value->set_use_index(i);
-    RawSetInputAt(i, value);
+  virtual Definition* InputAt(intptr_t i) const = 0;
+  void SetInputAt(intptr_t i, Definition* defn) {
+    ASSERT(defn != NULL);
+    RawSetInputAt(i, defn);
+  }
+
+  virtual Value* InputUseAt(intptr_t i) const {
+    // FIXME
+    UNREACHABLE();
+    return NULL;
   }
 
   // Remove all inputs (including in the environment) from their
@@ -954,7 +1047,7 @@ class Instruction : public ZoneAllocated {
   friend class BranchInstr;      // For RawSetInputAt.
   friend class IfThenElseInstr;  // For RawSetInputAt.
 
-  virtual void RawSetInputAt(intptr_t i, Value* value) = 0;
+  virtual void RawSetInputAt(intptr_t i, Definition* value) = 0;
 
   enum { kNoPlaceId = -1 };
 
@@ -1018,15 +1111,24 @@ class TemplateInstruction
       : CSETrait<Instruction, PureInstruction>::Base(deopt_id), inputs_() {}
 
   virtual intptr_t InputCount() const { return N; }
-  virtual Value* InputAt(intptr_t i) const { return inputs_[i]; }
+  virtual Definition* InputAt(intptr_t i) const { return UnwrappedInputAt(i); }
 
   virtual bool MayThrow() const { return ThrowsTrait::kCanThrow; }
 
  protected:
-  EmbeddedArray<Value*, N> inputs_;
+  EmbeddedArray<Value, N> inputs_;
+
+  Definition* UnwrappedInputAt(intptr_t i) const { return inputs_[i].definition(); }
 
  private:
-  virtual void RawSetInputAt(intptr_t i, Value* value) { inputs_[i] = value; }
+  virtual void RawSetInputAt(intptr_t i, Definition* defn) {
+    Value* value = &inputs_[i];
+    value->BindTo(defn);
+
+    // TODO(XXX) REMOVE THIS LATER
+    value->set_instruction(this);
+    value->set_use_index(i);
+  }
 };
 
 class MoveOperands : public ZoneAllocated {
@@ -1200,7 +1302,7 @@ class BlockEntryInstr : public Instruction {
                      GrowableArray<intptr_t>* parent);
 
   virtual intptr_t InputCount() const { return 0; }
-  virtual Value* InputAt(intptr_t i) const {
+  virtual Definition* InputAt(intptr_t i) const {
     UNREACHABLE();
     return NULL;
   }
@@ -1273,7 +1375,7 @@ class BlockEntryInstr : public Instruction {
                              BitVector* block_marks);
 
  private:
-  virtual void RawSetInputAt(intptr_t i, Value* value) { UNREACHABLE(); }
+  virtual void RawSetInputAt(intptr_t i, Definition* value) { UNREACHABLE(); }
 
   virtual void ClearPredecessors() = 0;
   virtual void AddPredecessor(BlockEntryInstr* predecessor) = 0;
@@ -1773,8 +1875,8 @@ class Definition : public Instruction {
   bool HasUses() const {
     return (input_use_list_ != NULL) || (env_use_list_ != NULL);
   }
-  bool HasOnlyUse(Value* use) const;
-  bool HasOnlyInputUse(Value* use) const;
+  bool HasOnlyUse(Instruction* at) const;
+  bool HasSingleInputUse() const;
 
   Value* input_use_list() const { return input_use_list_; }
   void set_input_use_list(Value* head) { input_use_list_ = head; }
@@ -1836,6 +1938,16 @@ class Definition : public Instruction {
 
   virtual Definition* AsDefinition() { return this; }
 
+  bool IsConstantNull() const {
+    // FIXME
+    return false;
+  }
+
+  const Object& BoundConstant() const {
+    // FIXME
+    return Object::null_object();
+  }
+
  protected:
   friend class RangeAnalysis;
   friend class Value;
@@ -1884,18 +1996,26 @@ class TemplateDefinition : public CSETrait<Definition, PureDefinition>::Base {
       : CSETrait<Definition, PureDefinition>::Base(deopt_id), inputs_() {}
 
   virtual intptr_t InputCount() const { return N; }
-  virtual Value* InputAt(intptr_t i) const { return inputs_[i]; }
+  virtual Definition* InputAt(intptr_t i) const { return UnwrappedInputAt(i); }
 
   virtual bool MayThrow() const { return ThrowsTrait::kCanThrow; }
 
  protected:
-  EmbeddedArray<Value*, N> inputs_;
+  EmbeddedArray<Value, N> inputs_;
+
+  Definition* UnwrappedInputAt(intptr_t i) const { return inputs_[i].definition(); }
 
  private:
   friend class BranchInstr;
   friend class IfThenElseInstr;
 
-  virtual void RawSetInputAt(intptr_t i, Value* value) { inputs_[i] = value; }
+  virtual void RawSetInputAt(intptr_t i, Definition* defn) {
+    inputs_[i].BindTo(defn);
+
+    // TODO(XXX) REMOVE THIS
+    inputs_[i].set_instruction(this);
+    inputs_[i].set_use_index(i);
+  }
 };
 
 class InductionVariableInfo;
@@ -1911,7 +2031,7 @@ class PhiInstr : public Definition {
         is_alive_(false),
         is_receiver_(kUnknownReceiver) {
     for (intptr_t i = 0; i < num_inputs; ++i) {
-      inputs_.Add(NULL);
+      inputs_.Add(Value(NULL));
     }
   }
 
@@ -1924,7 +2044,7 @@ class PhiInstr : public Definition {
 
   intptr_t InputCount() const { return inputs_.length(); }
 
-  Value* InputAt(intptr_t i) const { return inputs_[i]; }
+  Definition* InputAt(intptr_t i) const { return inputs_[i].definition(); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -1986,10 +2106,16 @@ class PhiInstr : public Definition {
   // predecessors.
   friend class ConstantPropagator;
 
-  void RawSetInputAt(intptr_t i, Value* value) { inputs_[i] = value; }
+  void RawSetInputAt(intptr_t i, Definition* defn) {
+    inputs_[i].BindTo(defn);
+
+    // TODO(XXX) REMOVE THIS
+    inputs_[i].set_instruction(this);
+    inputs_[i].set_use_index(i);
+  }
 
   JoinEntryInstr* block_;
-  GrowableArray<Value*> inputs_;
+  GrowableArray<Value> inputs_;
   Representation representation_;
   BitVector* reaching_defs_;
   InductionVariableInfo* loop_variable_info_;
@@ -2015,7 +2141,7 @@ class ParameterInstr : public Definition {
   virtual BlockEntryInstr* GetBlock() { return block_; }
 
   intptr_t InputCount() const { return 0; }
-  Value* InputAt(intptr_t i) const {
+  Definition* InputAt(intptr_t i) const {
     UNREACHABLE();
     return NULL;
   }
@@ -2036,7 +2162,7 @@ class ParameterInstr : public Definition {
   PRINT_OPERANDS_TO_SUPPORT
 
  private:
-  virtual void RawSetInputAt(intptr_t i, Value* value) { UNREACHABLE(); }
+  virtual void RawSetInputAt(intptr_t i, Definition* defn) { UNREACHABLE(); }
 
   const intptr_t index_;
   const Register base_reg_;
@@ -2047,13 +2173,13 @@ class ParameterInstr : public Definition {
 
 class PushArgumentInstr : public TemplateDefinition<1, NoThrow> {
  public:
-  explicit PushArgumentInstr(Value* value) { SetInputAt(0, value); }
+  explicit PushArgumentInstr(Definition* value) { SetInputAt(0, value); }
 
   DECLARE_INSTRUCTION(PushArgument)
 
   virtual CompileType ComputeType() const;
 
-  Value* value() const { return InputAt(0); }
+  Definition* value() const { return InputAt(0); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -2070,12 +2196,12 @@ class PushArgumentInstr : public TemplateDefinition<1, NoThrow> {
 };
 
 inline Definition* Instruction::ArgumentAt(intptr_t index) const {
-  return PushArgumentAt(index)->value()->definition();
+  return PushArgumentAt(index)->value();
 }
 
 class ReturnInstr : public TemplateInstruction<1, NoThrow> {
  public:
-  ReturnInstr(TokenPosition token_pos, Value* value, intptr_t deopt_id)
+  ReturnInstr(TokenPosition token_pos, Definition* value, intptr_t deopt_id)
       : TemplateInstruction(deopt_id), token_pos_(token_pos) {
     SetInputAt(0, value);
   }
@@ -2083,7 +2209,7 @@ class ReturnInstr : public TemplateInstruction<1, NoThrow> {
   DECLARE_INSTRUCTION(Return)
 
   virtual TokenPosition token_pos() const { return token_pos_; }
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return InputAt(0); }
 
   virtual bool CanBecomeDeoptimizationTarget() const {
     // Return instruction might turn into a Goto instruction after inlining.
@@ -2251,7 +2377,7 @@ class GotoInstr : public TemplateInstruction<0, NoThrow> {
 // to IndirectGoto as an input.
 class IndirectGotoInstr : public TemplateInstruction<1, NoThrow> {
  public:
-  IndirectGotoInstr(TypedData* offsets, Value* offset_from_start)
+  IndirectGotoInstr(TypedData* offsets, Definition* offset_from_start)
       : offsets_(*offsets) {
     SetInputAt(0, offset_from_start);
   }
@@ -2282,7 +2408,7 @@ class IndirectGotoInstr : public TemplateInstruction<1, NoThrow> {
 
   virtual bool HasUnknownSideEffects() const { return false; }
 
-  Value* offset() const { return inputs_[0]; }
+  Definition* offset() const { return InputAt(0); }
   void ComputeOffsetTable();
 
   PRINT_TO_SUPPORT
@@ -2294,13 +2420,12 @@ class IndirectGotoInstr : public TemplateInstruction<1, NoThrow> {
 
 class ComparisonInstr : public Definition {
  public:
-  Value* left() const { return InputAt(0); }
-  Value* right() const { return InputAt(1); }
+  DEFINE_INPUTS(left, right)
 
   virtual TokenPosition token_pos() const { return token_pos_; }
   Token::Kind kind() const { return kind_; }
 
-  virtual ComparisonInstr* CopyWithNewOperands(Value* left, Value* right) = 0;
+  virtual ComparisonInstr* CopyWithNewOperands(Definition* left, Definition* right) = 0;
 
   // Emits instructions to do the comparison and branch to the true or false
   // label depending on the result.  This implementation will call
@@ -2391,15 +2516,18 @@ class TemplateComparison
         inputs_() {}
 
   virtual intptr_t InputCount() const { return N; }
-  virtual Value* InputAt(intptr_t i) const { return inputs_[i]; }
+  virtual Definition* InputAt(intptr_t i) const { return inputs_[i].definition(); }
 
   virtual bool MayThrow() const { return ThrowsTrait::kCanThrow; }
 
  protected:
-  EmbeddedArray<Value*, N> inputs_;
+  EmbeddedArray<Value, N> inputs_;
 
  private:
-  virtual void RawSetInputAt(intptr_t i, Value* value) { inputs_[i] = value; }
+  virtual void RawSetInputAt(intptr_t i, Definition* value) {
+    // FIXME
+    inputs_[i].BindTo(value);
+  }
 };
 
 class BranchInstr : public Instruction {
@@ -2407,9 +2535,12 @@ class BranchInstr : public Instruction {
   explicit BranchInstr(ComparisonInstr* comparison, intptr_t deopt_id)
       : Instruction(deopt_id), comparison_(comparison), constant_target_(NULL) {
     ASSERT(comparison->env() == NULL);
+    // FIXME
+#if 0
     for (intptr_t i = comparison->InputCount() - 1; i >= 0; --i) {
       comparison->InputAt(i)->set_instruction(this);
     }
+#endif
   }
 
   DECLARE_INSTRUCTION(Branch)
@@ -2420,7 +2551,7 @@ class BranchInstr : public Instruction {
 
   intptr_t InputCount() const { return comparison()->InputCount(); }
 
-  Value* InputAt(intptr_t i) const { return comparison()->InputAt(i); }
+  Definition* InputAt(intptr_t i) const { return comparison()->InputAt(i); }
 
   virtual TokenPosition token_pos() const { return comparison_->token_pos(); }
 
@@ -2471,7 +2602,8 @@ class BranchInstr : public Instruction {
   PRINT_TO_SUPPORT
 
  private:
-  virtual void RawSetInputAt(intptr_t i, Value* value) {
+  virtual void RawSetInputAt(intptr_t i, Definition* value) {
+    // TODO(XXX) set_instruction needs to happen here.
     comparison()->RawSetInputAt(i, value);
   }
 
@@ -2502,13 +2634,13 @@ class DeoptimizeInstr : public TemplateInstruction<0, NoThrow, Pure> {
 
 class RedefinitionInstr : public TemplateDefinition<1, NoThrow> {
  public:
-  explicit RedefinitionInstr(Value* value) : constrained_type_(NULL) {
+  explicit RedefinitionInstr(Definition* value) : constrained_type_(NULL) {
     SetInputAt(0, value);
   }
 
   DECLARE_INSTRUCTION(Redefinition)
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   virtual CompileType ComputeType() const;
   virtual bool RecomputeType();
@@ -2528,7 +2660,7 @@ class RedefinitionInstr : public TemplateDefinition<1, NoThrow> {
 
 class ConstraintInstr : public TemplateDefinition<1, NoThrow> {
  public:
-  ConstraintInstr(Value* value, Range* constraint)
+  ConstraintInstr(Definition* value, Range* constraint)
       : constraint_(constraint), target_(NULL) {
     SetInputAt(0, value);
   }
@@ -2546,7 +2678,7 @@ class ConstraintInstr : public TemplateDefinition<1, NoThrow> {
     return false;
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
   Range* constraint() const { return constraint_; }
 
   virtual void InferRange(RangeAnalysis* analysis, Range* range);
@@ -2620,9 +2752,9 @@ class UnboxedConstantInstr : public ConstantInstr {
 class AssertAssignableInstr : public TemplateDefinition<3, Throws, Pure> {
  public:
   AssertAssignableInstr(TokenPosition token_pos,
-                        Value* value,
-                        Value* instantiator_type_arguments,
-                        Value* function_type_arguments,
+                        Definition* value,
+                        Definition* instantiator_type_arguments,
+                        Definition* function_type_arguments,
                         const AbstractType& dst_type,
                         const String& dst_name,
                         intptr_t deopt_id)
@@ -2642,9 +2774,9 @@ class AssertAssignableInstr : public TemplateDefinition<3, Throws, Pure> {
   virtual CompileType ComputeType() const;
   virtual bool RecomputeType();
 
-  Value* value() const { return inputs_[0]; }
-  Value* instantiator_type_arguments() const { return inputs_[1]; }
-  Value* function_type_arguments() const { return inputs_[2]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
+  Definition* instantiator_type_arguments() const { return UnwrappedInputAt(1); }
+  Definition* function_type_arguments() const { return UnwrappedInputAt(2); }
 
   virtual TokenPosition token_pos() const { return token_pos_; }
   const AbstractType& dst_type() const { return dst_type_; }
@@ -2678,7 +2810,7 @@ class AssertAssignableInstr : public TemplateDefinition<3, Throws, Pure> {
 
 class AssertBooleanInstr : public TemplateDefinition<1, Throws, Pure> {
  public:
-  AssertBooleanInstr(TokenPosition token_pos, Value* value, intptr_t deopt_id)
+  AssertBooleanInstr(TokenPosition token_pos, Definition* value, intptr_t deopt_id)
       : TemplateDefinition(deopt_id), token_pos_(token_pos) {
     SetInputAt(0, value);
   }
@@ -2687,7 +2819,7 @@ class AssertBooleanInstr : public TemplateDefinition<1, Throws, Pure> {
   virtual CompileType ComputeType() const;
 
   virtual TokenPosition token_pos() const { return token_pos_; }
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   virtual bool ComputeCanDeoptimize() const { return true; }
 
@@ -2794,7 +2926,7 @@ class TemplateDartCall : public TemplateDefinition<kInputCount, Throws> {
 
 class ClosureCallInstr : public TemplateDartCall<1> {
  public:
-  ClosureCallInstr(Value* function,
+  ClosureCallInstr(Definition* function,
                    ClosureCallNode* node,
                    ZoneGrowableArray<PushArgumentInstr*>* arguments,
                    intptr_t deopt_id)
@@ -2807,7 +2939,7 @@ class ClosureCallInstr : public TemplateDartCall<1> {
     SetInputAt(0, function);
   }
 
-  ClosureCallInstr(Value* function,
+  ClosureCallInstr(Definition* function,
                    ZoneGrowableArray<PushArgumentInstr*>* arguments,
                    intptr_t type_args_len,
                    const Array& argument_names,
@@ -3010,14 +3142,14 @@ class StrictCompareInstr : public TemplateComparison<2, NoThrow, Pure> {
  public:
   StrictCompareInstr(TokenPosition token_pos,
                      Token::Kind kind,
-                     Value* left,
-                     Value* right,
+                     Definition* left,
+                     Definition* right,
                      bool needs_number_check,
                      intptr_t deopt_id);
 
   DECLARE_COMPARISON_INSTRUCTION(StrictCompare)
 
-  virtual ComparisonInstr* CopyWithNewOperands(Value* left, Value* right);
+  virtual ComparisonInstr* CopyWithNewOperands(Definition* left, Definition* right);
 
   virtual CompileType ComputeType() const;
 
@@ -3046,8 +3178,8 @@ class TestSmiInstr : public TemplateComparison<2, NoThrow, Pure> {
  public:
   TestSmiInstr(TokenPosition token_pos,
                Token::Kind kind,
-               Value* left,
-               Value* right)
+               Definition* left,
+               Definition* right)
       : TemplateComparison(token_pos, kind) {
     ASSERT(kind == Token::kEQ || kind == Token::kNE);
     SetInputAt(0, left);
@@ -3056,7 +3188,7 @@ class TestSmiInstr : public TemplateComparison<2, NoThrow, Pure> {
 
   DECLARE_COMPARISON_INSTRUCTION(TestSmi);
 
-  virtual ComparisonInstr* CopyWithNewOperands(Value* left, Value* right);
+  virtual ComparisonInstr* CopyWithNewOperands(Definition* left, Definition* right);
 
   virtual CompileType ComputeType() const;
 
@@ -3081,7 +3213,7 @@ class TestCidsInstr : public TemplateComparison<1, NoThrow, Pure> {
  public:
   TestCidsInstr(TokenPosition token_pos,
                 Token::Kind kind,
-                Value* value,
+                Definition* value,
                 const ZoneGrowableArray<intptr_t>& cid_results,
                 intptr_t deopt_id);
 
@@ -3091,7 +3223,7 @@ class TestCidsInstr : public TemplateComparison<1, NoThrow, Pure> {
 
   DECLARE_COMPARISON_INSTRUCTION(TestCids);
 
-  virtual ComparisonInstr* CopyWithNewOperands(Value* left, Value* right);
+  virtual ComparisonInstr* CopyWithNewOperands(Definition* left, Definition* right);
 
   virtual CompileType ComputeType() const;
 
@@ -3121,8 +3253,8 @@ class EqualityCompareInstr : public TemplateComparison<2, NoThrow, Pure> {
  public:
   EqualityCompareInstr(TokenPosition token_pos,
                        Token::Kind kind,
-                       Value* left,
-                       Value* right,
+                       Definition* left,
+                       Definition* right,
                        intptr_t cid,
                        intptr_t deopt_id)
       : TemplateComparison(token_pos, kind, deopt_id) {
@@ -3134,7 +3266,7 @@ class EqualityCompareInstr : public TemplateComparison<2, NoThrow, Pure> {
 
   DECLARE_COMPARISON_INSTRUCTION(EqualityCompare)
 
-  virtual ComparisonInstr* CopyWithNewOperands(Value* left, Value* right);
+  virtual ComparisonInstr* CopyWithNewOperands(Definition* left, Definition* right);
 
   virtual CompileType ComputeType() const;
 
@@ -3157,8 +3289,8 @@ class RelationalOpInstr : public TemplateComparison<2, NoThrow, Pure> {
  public:
   RelationalOpInstr(TokenPosition token_pos,
                     Token::Kind kind,
-                    Value* left,
-                    Value* right,
+                    Definition* left,
+                    Definition* right,
                     intptr_t cid,
                     intptr_t deopt_id)
       : TemplateComparison(token_pos, kind, deopt_id) {
@@ -3170,7 +3302,7 @@ class RelationalOpInstr : public TemplateComparison<2, NoThrow, Pure> {
 
   DECLARE_COMPARISON_INSTRUCTION(RelationalOp)
 
-  virtual ComparisonInstr* CopyWithNewOperands(Value* left, Value* right);
+  virtual ComparisonInstr* CopyWithNewOperands(Definition* left, Definition* right);
 
   virtual CompileType ComputeType() const;
 
@@ -3194,29 +3326,32 @@ class RelationalOpInstr : public TemplateComparison<2, NoThrow, Pure> {
 class IfThenElseInstr : public Definition {
  public:
   IfThenElseInstr(ComparisonInstr* comparison,
-                  Value* if_true,
-                  Value* if_false,
+                  Definition* if_true,
+                  Definition* if_false,
                   intptr_t deopt_id)
       : Definition(deopt_id),
         comparison_(comparison),
-        if_true_(Smi::Cast(if_true->BoundConstant()).Value()),
-        if_false_(Smi::Cast(if_false->BoundConstant()).Value()) {
+        if_true_(SmiValue(if_true)),
+        if_false_(SmiValue(if_false)) {
     // Adjust uses at the comparison.
     ASSERT(comparison->env() == NULL);
+    // FIXME
+#if 0
     for (intptr_t i = comparison->InputCount() - 1; i >= 0; --i) {
       comparison->InputAt(i)->set_instruction(this);
     }
+#endif
   }
 
   // Returns true if this combination of comparison and values flowing on
   // the true and false paths is supported on the current platform.
-  static bool Supports(ComparisonInstr* comparison, Value* v1, Value* v2);
+  static bool Supports(ComparisonInstr* comparison, Definition* v1, Definition* v2);
 
   DECLARE_INSTRUCTION(IfThenElse)
 
   intptr_t InputCount() const { return comparison()->InputCount(); }
 
-  Value* InputAt(intptr_t i) const { return comparison()->InputAt(i); }
+  Definition* InputAt(intptr_t i) const { return comparison()->InputAt(i); }
 
   virtual bool ComputeCanDeoptimize() const {
     return comparison()->ComputeCanDeoptimize();
@@ -3260,8 +3395,12 @@ class IfThenElseInstr : public Definition {
   PRINT_OPERANDS_TO_SUPPORT
 
  private:
-  virtual void RawSetInputAt(intptr_t i, Value* value) {
+  virtual void RawSetInputAt(intptr_t i, Definition* value) {
     comparison()->RawSetInputAt(i, value);
+  }
+
+  static intptr_t SmiValue(Definition* defn) {
+    return Smi::Cast(defn->AsConstant()->value()).Value();
   }
 
   ComparisonInstr* comparison_;
@@ -3423,7 +3562,7 @@ class LoadLocalInstr : public TemplateDefinition<0, NoThrow> {
 
 class DropTempsInstr : public Definition {
  public:
-  DropTempsInstr(intptr_t num_temps, Value* value)
+  DropTempsInstr(intptr_t num_temps, Definition* value)
       : num_temps_(num_temps), value_(NULL) {
     if (value != NULL) {
       SetInputAt(0, value);
@@ -3432,13 +3571,14 @@ class DropTempsInstr : public Definition {
 
   DECLARE_INSTRUCTION(DropTemps)
 
-  virtual intptr_t InputCount() const { return value_ != NULL ? 1 : 0; }
-  virtual Value* InputAt(intptr_t i) const {
-    ASSERT((value_ != NULL) && (i == 0));
-    return value_;
+  virtual intptr_t InputCount() const { return value_.definition() != NULL ? 1 : 0; }
+  virtual Definition* InputAt(intptr_t i) const {
+    ASSERT((InputCount() == 1) && (i == 0));
+    return value_.definition();
   }
 
-  Value* value() const { return value_; }
+  // TODO(XXX) WHAT IS THIS USED FOR?
+  Definition* value() const { return value_.definition(); }
 
   intptr_t num_temps() const { return num_temps_; }
 
@@ -3461,10 +3601,10 @@ class DropTempsInstr : public Definition {
   PRINT_OPERANDS_TO_SUPPORT
 
  private:
-  virtual void RawSetInputAt(intptr_t i, Value* value) { value_ = value; }
+  virtual void RawSetInputAt(intptr_t i, Definition* value) { value_.BindTo(value); }
 
   const intptr_t num_temps_;
-  Value* value_;
+  Value value_;
 
   DISALLOW_COPY_AND_ASSIGN(DropTempsInstr);
 };
@@ -3472,7 +3612,7 @@ class DropTempsInstr : public Definition {
 class StoreLocalInstr : public TemplateDefinition<1, NoThrow> {
  public:
   StoreLocalInstr(const LocalVariable& local,
-                  Value* value,
+                  Definition* value,
                   TokenPosition token_pos)
       : local_(local), is_dead_(false), is_last_(false), token_pos_(token_pos) {
     SetInputAt(0, value);
@@ -3482,7 +3622,7 @@ class StoreLocalInstr : public TemplateDefinition<1, NoThrow> {
   virtual CompileType ComputeType() const;
 
   const LocalVariable& local() const { return local_; }
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -3597,8 +3737,8 @@ enum StoreBarrierType { kNoStoreBarrier, kEmitStoreBarrier };
 class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
  public:
   StoreInstanceFieldInstr(const Field& field,
-                          Value* instance,
-                          Value* value,
+                          Definition* instance,
+                          Definition* value,
                           StoreBarrierType emit_store_barrier,
                           TokenPosition token_pos)
       : field_(field),
@@ -3612,8 +3752,8 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
   }
 
   StoreInstanceFieldInstr(intptr_t offset_in_bytes,
-                          Value* instance,
-                          Value* value,
+                          Definition* instance,
+                          Definition* value,
                           StoreBarrierType emit_store_barrier,
                           TokenPosition token_pos)
       : field_(Field::ZoneHandle()),
@@ -3631,8 +3771,8 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
 
   enum { kInstancePos = 0, kValuePos = 1 };
 
-  Value* instance() const { return inputs_[kInstancePos]; }
-  Value* value() const { return inputs_[kValuePos]; }
+  Definition* instance() const { return UnwrappedInputAt(kInstancePos); }
+  Definition* value() const { return UnwrappedInputAt(kValuePos); }
   bool is_initialization() const { return is_initialization_; }
 
   virtual TokenPosition token_pos() const { return token_pos_; }
@@ -3641,7 +3781,7 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
   intptr_t offset_in_bytes() const { return offset_in_bytes_; }
 
   bool ShouldEmitStoreBarrier() const {
-    return value()->NeedsStoreBuffer() &&
+    return inputs_[kValuePos].NeedsStoreBuffer() &&
            (emit_store_barrier_ == kEmitStoreBarrier);
   }
 
@@ -3685,13 +3825,13 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
 
 class GuardFieldInstr : public TemplateInstruction<1, NoThrow, Pure> {
  public:
-  GuardFieldInstr(Value* value, const Field& field, intptr_t deopt_id)
+  GuardFieldInstr(Definition* value, const Field& field, intptr_t deopt_id)
       : TemplateInstruction(deopt_id), field_(field) {
     SetInputAt(0, value);
     CheckField(field);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   const Field& field() const { return field_; }
 
@@ -3711,7 +3851,7 @@ class GuardFieldInstr : public TemplateInstruction<1, NoThrow, Pure> {
 
 class GuardFieldClassInstr : public GuardFieldInstr {
  public:
-  GuardFieldClassInstr(Value* value, const Field& field, intptr_t deopt_id)
+  GuardFieldClassInstr(Definition* value, const Field& field, intptr_t deopt_id)
       : GuardFieldInstr(value, field, deopt_id) {
     CheckField(field);
   }
@@ -3728,7 +3868,7 @@ class GuardFieldClassInstr : public GuardFieldInstr {
 
 class GuardFieldLengthInstr : public GuardFieldInstr {
  public:
-  GuardFieldLengthInstr(Value* value, const Field& field, intptr_t deopt_id)
+  GuardFieldLengthInstr(Definition* value, const Field& field, intptr_t deopt_id)
       : GuardFieldInstr(value, field, deopt_id) {
     CheckField(field);
   }
@@ -3745,10 +3885,9 @@ class GuardFieldLengthInstr : public GuardFieldInstr {
 
 class LoadStaticFieldInstr : public TemplateDefinition<1, NoThrow> {
  public:
-  LoadStaticFieldInstr(Value* field_value, TokenPosition token_pos)
+  LoadStaticFieldInstr(ConstantInstr* field, TokenPosition token_pos)
       : token_pos_(token_pos) {
-    ASSERT(field_value->BindsToConstant());
-    SetInputAt(0, field_value);
+    SetInputAt(0, field);
   }
 
   DECLARE_INSTRUCTION(LoadStaticField)
@@ -3756,7 +3895,7 @@ class LoadStaticFieldInstr : public TemplateDefinition<1, NoThrow> {
 
   const Field& StaticField() const;
 
-  Value* field_value() const { return inputs_[0]; }
+  Definition* field_value() const { return UnwrappedInputAt(0); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -3780,7 +3919,7 @@ class LoadStaticFieldInstr : public TemplateDefinition<1, NoThrow> {
 class StoreStaticFieldInstr : public TemplateDefinition<1, NoThrow> {
  public:
   StoreStaticFieldInstr(const Field& field,
-                        Value* value,
+                        Definition* value,
                         TokenPosition token_pos)
       : field_(field), token_pos_(token_pos) {
     ASSERT(field.IsZoneHandle());
@@ -3789,11 +3928,10 @@ class StoreStaticFieldInstr : public TemplateDefinition<1, NoThrow> {
   }
 
   enum { kValuePos = 0 };
-
+  DEFINE_INPUTS(value)
   DECLARE_INSTRUCTION(StoreStaticField)
 
   const Field& field() const { return field_; }
-  Value* value() const { return inputs_[kValuePos]; }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -3827,8 +3965,8 @@ enum AlignmentType {
 
 class LoadIndexedInstr : public TemplateDefinition<2, NoThrow> {
  public:
-  LoadIndexedInstr(Value* array,
-                   Value* index,
+  LoadIndexedInstr(Definition* array,
+                   Definition* index,
                    intptr_t index_scale,
                    intptr_t class_id,
                    AlignmentType alignment,
@@ -3848,11 +3986,11 @@ class LoadIndexedInstr : public TemplateDefinition<2, NoThrow> {
   }
 
   bool IsExternal() const {
-    return array()->definition()->representation() == kUntagged;
+    return array()->representation() == kUntagged;
   }
 
-  Value* array() const { return inputs_[0]; }
-  Value* index() const { return inputs_[1]; }
+  Definition* array() const { return UnwrappedInputAt(0); }
+  Definition* index() const { return UnwrappedInputAt(1); }
   intptr_t index_scale() const { return index_scale_; }
   intptr_t class_id() const { return class_id_; }
   bool aligned() const { return alignment_ == kAlignedAccess; }
@@ -3884,8 +4022,8 @@ class LoadIndexedInstr : public TemplateDefinition<2, NoThrow> {
 // TODO(zerny): Add support for loading into UnboxedInt32x4.
 class LoadCodeUnitsInstr : public TemplateDefinition<2, NoThrow> {
  public:
-  LoadCodeUnitsInstr(Value* str,
-                     Value* index,
+  LoadCodeUnitsInstr(Definition* str,
+                     Definition* index,
                      intptr_t element_count,
                      intptr_t class_id,
                      TokenPosition token_pos)
@@ -3914,11 +4052,11 @@ class LoadCodeUnitsInstr : public TemplateDefinition<2, NoThrow> {
   }
 
   bool IsExternal() const {
-    return array()->definition()->representation() == kUntagged;
+    return array()->representation() == kUntagged;
   }
 
-  Value* array() const { return inputs_[0]; }
-  Value* index() const { return inputs_[1]; }
+  Definition* array() const { return UnwrappedInputAt(0); }
+  Definition* index() const { return UnwrappedInputAt(1); }
   intptr_t index_scale() const { return Instance::ElementSizeFor(class_id_); }
   intptr_t class_id() const { return class_id_; }
   intptr_t element_count() const { return element_count_; }
@@ -3947,14 +4085,14 @@ class LoadCodeUnitsInstr : public TemplateDefinition<2, NoThrow> {
 class OneByteStringFromCharCodeInstr
     : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  explicit OneByteStringFromCharCodeInstr(Value* char_code) {
+  explicit OneByteStringFromCharCodeInstr(Definition* char_code) {
     SetInputAt(0, char_code);
   }
 
   DECLARE_INSTRUCTION(OneByteStringFromCharCode)
   virtual CompileType ComputeType() const;
 
-  Value* char_code() const { return inputs_[0]; }
+  Definition* char_code() const { return UnwrappedInputAt(0); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -3966,7 +4104,7 @@ class OneByteStringFromCharCodeInstr
 
 class StringToCharCodeInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  StringToCharCodeInstr(Value* str, intptr_t cid) : cid_(cid) {
+  StringToCharCodeInstr(Definition* str, intptr_t cid) : cid_(cid) {
     ASSERT(str != NULL);
     SetInputAt(0, str);
   }
@@ -3974,7 +4112,7 @@ class StringToCharCodeInstr : public TemplateDefinition<1, NoThrow, Pure> {
   DECLARE_INSTRUCTION(StringToCharCode)
   virtual CompileType ComputeType() const;
 
-  Value* str() const { return inputs_[0]; }
+  Definition* str() const { return UnwrappedInputAt(0); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -3990,7 +4128,7 @@ class StringToCharCodeInstr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class StringInterpolateInstr : public TemplateDefinition<1, Throws> {
  public:
-  StringInterpolateInstr(Value* value,
+  StringInterpolateInstr(Definition* value,
                          TokenPosition token_pos,
                          intptr_t deopt_id)
       : TemplateDefinition(deopt_id),
@@ -3999,7 +4137,7 @@ class StringInterpolateInstr : public TemplateDefinition<1, Throws> {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
   virtual TokenPosition token_pos() const { return token_pos_; }
 
   virtual CompileType ComputeType() const;
@@ -4022,9 +4160,9 @@ class StringInterpolateInstr : public TemplateDefinition<1, Throws> {
 
 class StoreIndexedInstr : public TemplateDefinition<3, NoThrow> {
  public:
-  StoreIndexedInstr(Value* array,
-                    Value* index,
-                    Value* value,
+  StoreIndexedInstr(Definition* array,
+                    Definition* index,
+                    Definition* value,
                     StoreBarrierType emit_store_barrier,
                     intptr_t index_scale,
                     intptr_t class_id,
@@ -4035,16 +4173,17 @@ class StoreIndexedInstr : public TemplateDefinition<3, NoThrow> {
 
   enum { kArrayPos = 0, kIndexPos = 1, kValuePos = 2 };
 
-  Value* array() const { return inputs_[kArrayPos]; }
-  Value* index() const { return inputs_[kIndexPos]; }
-  Value* value() const { return inputs_[kValuePos]; }
+  Definition* array() const { return UnwrappedInputAt(kArrayPos); }
+  Definition* index() const { return UnwrappedInputAt(kIndexPos); }
+  Definition* value() const { return UnwrappedInputAt(kValuePos); }
 
   intptr_t index_scale() const { return index_scale_; }
   intptr_t class_id() const { return class_id_; }
   bool aligned() const { return alignment_ == kAlignedAccess; }
 
   bool ShouldEmitStoreBarrier() const {
-    return value()->NeedsStoreBuffer() &&
+    // FIXME
+    return inputs_[kValuePos].NeedsStoreBuffer() &&
            (emit_store_barrier_ == kEmitStoreBarrier);
   }
 
@@ -4053,7 +4192,7 @@ class StoreIndexedInstr : public TemplateDefinition<3, NoThrow> {
   virtual Representation RequiredInputRepresentation(intptr_t idx) const;
 
   bool IsExternal() const {
-    return array()->definition()->representation() == kUntagged;
+    return array()->representation() == kUntagged;
   }
 
   virtual intptr_t DeoptimizationTarget() const {
@@ -4077,12 +4216,12 @@ class StoreIndexedInstr : public TemplateDefinition<3, NoThrow> {
 // Note overrideable, built-in: value ? false : true.
 class BooleanNegateInstr : public TemplateDefinition<1, NoThrow> {
  public:
-  explicit BooleanNegateInstr(Value* value) { SetInputAt(0, value); }
+  explicit BooleanNegateInstr(Definition* value) { SetInputAt(0, value); }
 
   DECLARE_INSTRUCTION(BooleanNegate)
   virtual CompileType ComputeType() const;
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -4097,9 +4236,9 @@ class BooleanNegateInstr : public TemplateDefinition<1, NoThrow> {
 class InstanceOfInstr : public TemplateDefinition<3, Throws> {
  public:
   InstanceOfInstr(TokenPosition token_pos,
-                  Value* value,
-                  Value* instantiator_type_arguments,
-                  Value* function_type_arguments,
+                  Definition* value,
+                  Definition* instantiator_type_arguments,
+                  Definition* function_type_arguments,
                   const AbstractType& type,
                   intptr_t deopt_id)
       : TemplateDefinition(deopt_id), token_pos_(token_pos), type_(type) {
@@ -4112,9 +4251,9 @@ class InstanceOfInstr : public TemplateDefinition<3, Throws> {
   DECLARE_INSTRUCTION(InstanceOf)
   virtual CompileType ComputeType() const;
 
-  Value* value() const { return inputs_[0]; }
-  Value* instantiator_type_arguments() const { return inputs_[1]; }
-  Value* function_type_arguments() const { return inputs_[2]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
+  Definition* instantiator_type_arguments() const { return UnwrappedInputAt(1); }
+  Definition* function_type_arguments() const { return UnwrappedInputAt(2); }
 
   const AbstractType& type() const { return type_; }
   virtual TokenPosition token_pos() const { return token_pos_; }
@@ -4127,8 +4266,8 @@ class InstanceOfInstr : public TemplateDefinition<3, Throws> {
 
  private:
   const TokenPosition token_pos_;
-  Value* value_;
-  Value* type_arguments_;
+  Definition* value_;
+  Definition* type_arguments_;
   const AbstractType& type_;
 
   DISALLOW_COPY_AND_ASSIGN(InstanceOfInstr);
@@ -4232,10 +4371,13 @@ class MaterializeObjectInstr : public Definition {
         visited_for_liveness_(false),
         registers_remapped_(false) {
     ASSERT(slots_.length() == values_->length());
+    // FIXME
+#if 0
     for (intptr_t i = 0; i < InputCount(); i++) {
       InputAt(i)->set_instruction(this);
       InputAt(i)->set_use_index(i);
     }
+#endif
   }
 
   MaterializeObjectInstr(AllocateUninitializedContextInstr* allocation,
@@ -4249,11 +4391,15 @@ class MaterializeObjectInstr : public Definition {
         locations_(NULL),
         visited_for_liveness_(false),
         registers_remapped_(false) {
+    // FIXME
+#if 0
     ASSERT(slots_.length() == values_->length());
+
     for (intptr_t i = 0; i < InputCount(); i++) {
       InputAt(i)->set_instruction(this);
       InputAt(i)->set_use_index(i);
     }
+#endif
   }
 
   Definition* allocation() const { return allocation_; }
@@ -4272,7 +4418,7 @@ class MaterializeObjectInstr : public Definition {
 
   virtual intptr_t InputCount() const { return values_->length(); }
 
-  virtual Value* InputAt(intptr_t i) const { return (*values_)[i]; }
+  virtual Definition* InputAt(intptr_t i) const { return (*values_)[i]->definition(); }
 
   // SelectRepresentations pass is run once more while MaterializeObject
   // instructions are still in the graph. To avoid any redundant boxing
@@ -4300,8 +4446,9 @@ class MaterializeObjectInstr : public Definition {
   PRINT_OPERANDS_TO_SUPPORT
 
  private:
-  virtual void RawSetInputAt(intptr_t i, Value* value) {
-    (*values_)[i] = value;
+  virtual void RawSetInputAt(intptr_t i, Definition* value) {
+    (*values_)[i]->BindTo(value);
+
   }
 
   Definition* allocation_;
@@ -4320,8 +4467,8 @@ class MaterializeObjectInstr : public Definition {
 class CreateArrayInstr : public TemplateDefinition<2, Throws> {
  public:
   CreateArrayInstr(TokenPosition token_pos,
-                   Value* element_type,
-                   Value* num_elements,
+                   Definition* element_type,
+                   Definition* num_elements,
                    intptr_t deopt_id)
       : TemplateDefinition(deopt_id),
         token_pos_(token_pos),
@@ -4336,8 +4483,8 @@ class CreateArrayInstr : public TemplateDefinition<2, Throws> {
   virtual CompileType ComputeType() const;
 
   virtual TokenPosition token_pos() const { return token_pos_; }
-  Value* element_type() const { return inputs_[kElementTypePos]; }
-  Value* num_elements() const { return inputs_[kLengthPos]; }
+  Definition* element_type() const { return UnwrappedInputAt(kElementTypePos); }
+  Definition* num_elements() const { return UnwrappedInputAt(kLengthPos); }
 
   // Throw needs environment, which is created only if instruction can
   // deoptimize.
@@ -4362,7 +4509,7 @@ class CreateArrayInstr : public TemplateDefinition<2, Throws> {
 // is kept alive.
 class LoadUntaggedInstr : public TemplateDefinition<1, NoThrow> {
  public:
-  LoadUntaggedInstr(Value* object, intptr_t offset) : offset_(offset) {
+  LoadUntaggedInstr(Definition* object, intptr_t offset) : offset_(offset) {
     SetInputAt(0, object);
   }
 
@@ -4376,7 +4523,7 @@ class LoadUntaggedInstr : public TemplateDefinition<1, NoThrow> {
     return kNoRepresentation;
   }
 
-  Value* object() const { return inputs_[0]; }
+  Definition* object() const { return UnwrappedInputAt(0); }
   intptr_t offset() const { return offset_; }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
@@ -4392,13 +4539,13 @@ class LoadUntaggedInstr : public TemplateDefinition<1, NoThrow> {
 
 class LoadClassIdInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  explicit LoadClassIdInstr(Value* object) { SetInputAt(0, object); }
+  explicit LoadClassIdInstr(Definition* object) { SetInputAt(0, object); }
 
   virtual Representation representation() const { return kTagged; }
   DECLARE_INSTRUCTION(LoadClassId)
   virtual CompileType ComputeType() const;
 
-  Value* object() const { return inputs_[0]; }
+  Definition* object() const { return UnwrappedInputAt(0); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -4410,7 +4557,7 @@ class LoadClassIdInstr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
  public:
-  LoadFieldInstr(Value* instance,
+  LoadFieldInstr(Definition* instance,
                  intptr_t offset_in_bytes,
                  const AbstractType& type,
                  TokenPosition token_pos)
@@ -4427,7 +4574,7 @@ class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
     SetInputAt(0, instance);
   }
 
-  LoadFieldInstr(Value* instance,
+  LoadFieldInstr(Definition* instance,
                  const Field* field,
                  const AbstractType& type,
                  TokenPosition token_pos,
@@ -4454,7 +4601,7 @@ class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
 
   void set_is_immutable(bool value) { immutable_ = value; }
 
-  Value* instance() const { return inputs_[0]; }
+  Definition* instance() const { return UnwrappedInputAt(0); }
   intptr_t offset_in_bytes() const { return offset_in_bytes_; }
   const AbstractType& type() const { return type_; }
   void set_result_cid(intptr_t value) { result_cid_ = value; }
@@ -4521,8 +4668,8 @@ class InstantiateTypeInstr : public TemplateDefinition<2, Throws> {
  public:
   InstantiateTypeInstr(TokenPosition token_pos,
                        const AbstractType& type,
-                       Value* instantiator_type_arguments,
-                       Value* function_type_arguments,
+                       Definition* instantiator_type_arguments,
+                       Definition* function_type_arguments,
                        intptr_t deopt_id)
       : TemplateDefinition(deopt_id), token_pos_(token_pos), type_(type) {
     ASSERT(type.IsZoneHandle() || type.IsReadOnlyHandle());
@@ -4532,8 +4679,8 @@ class InstantiateTypeInstr : public TemplateDefinition<2, Throws> {
 
   DECLARE_INSTRUCTION(InstantiateType)
 
-  Value* instantiator_type_arguments() const { return inputs_[0]; }
-  Value* function_type_arguments() const { return inputs_[1]; }
+  Definition* instantiator_type_arguments() const { return UnwrappedInputAt(0); }
+  Definition* function_type_arguments() const { return UnwrappedInputAt(1); }
   const AbstractType& type() const { return type_; }
   virtual TokenPosition token_pos() const { return token_pos_; }
 
@@ -4555,8 +4702,8 @@ class InstantiateTypeArgumentsInstr : public TemplateDefinition<2, Throws> {
   InstantiateTypeArgumentsInstr(TokenPosition token_pos,
                                 const TypeArguments& type_arguments,
                                 const Class& instantiator_class,
-                                Value* instantiator_type_arguments,
-                                Value* function_type_arguments,
+                                Definition* instantiator_type_arguments,
+                                Definition* function_type_arguments,
                                 intptr_t deopt_id)
       : TemplateDefinition(deopt_id),
         token_pos_(token_pos),
@@ -4569,8 +4716,8 @@ class InstantiateTypeArgumentsInstr : public TemplateDefinition<2, Throws> {
 
   DECLARE_INSTRUCTION(InstantiateTypeArguments)
 
-  Value* instantiator_type_arguments() const { return inputs_[0]; }
-  Value* function_type_arguments() const { return inputs_[1]; }
+  Definition* instantiator_type_arguments() const { return UnwrappedInputAt(0); }
+  Definition* function_type_arguments() const { return UnwrappedInputAt(1); }
   const TypeArguments& type_arguments() const { return type_arguments_; }
   const Class& instantiator_class() const { return instantiator_class_; }
   virtual TokenPosition token_pos() const { return token_pos_; }
@@ -4617,7 +4764,7 @@ class AllocateContextInstr : public TemplateDefinition<0, NoThrow> {
 
 class InitStaticFieldInstr : public TemplateInstruction<1, Throws> {
  public:
-  InitStaticFieldInstr(Value* input, const Field& field, intptr_t deopt_id)
+  InitStaticFieldInstr(Definition* input, const Field& field, intptr_t deopt_id)
       : TemplateInstruction(deopt_id), field_(field) {
     SetInputAt(0, input);
     CheckField(field);
@@ -4641,14 +4788,14 @@ class InitStaticFieldInstr : public TemplateInstruction<1, Throws> {
 class CloneContextInstr : public TemplateDefinition<1, NoThrow> {
  public:
   CloneContextInstr(TokenPosition token_pos,
-                    Value* context_value,
+                    Definition* context_value,
                     intptr_t deopt_id)
       : TemplateDefinition(deopt_id), token_pos_(token_pos) {
     SetInputAt(0, context_value);
   }
 
   virtual TokenPosition token_pos() const { return token_pos_; }
-  Value* context_value() const { return inputs_[0]; }
+  Definition* context_value() const { return UnwrappedInputAt(0); }
 
   DECLARE_INSTRUCTION(CloneContext)
   virtual CompileType ComputeType() const;
@@ -4665,14 +4812,14 @@ class CloneContextInstr : public TemplateDefinition<1, NoThrow> {
 
 class CheckEitherNonSmiInstr : public TemplateInstruction<2, NoThrow, Pure> {
  public:
-  CheckEitherNonSmiInstr(Value* left, Value* right, intptr_t deopt_id)
+  CheckEitherNonSmiInstr(Definition* left, Definition* right, intptr_t deopt_id)
       : TemplateInstruction(deopt_id), licm_hoisted_(false) {
     SetInputAt(0, left);
     SetInputAt(1, right);
   }
 
-  Value* left() const { return inputs_[0]; }
-  Value* right() const { return inputs_[1]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
+  Definition* right() const { return UnwrappedInputAt(1); }
 
   DECLARE_INSTRUCTION(CheckEitherNonSmi)
 
@@ -4751,9 +4898,9 @@ class Boxing : public AllStatic {
 
 class BoxInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  static BoxInstr* Create(Representation from, Value* value);
+  static BoxInstr* Create(Representation from, Definition* value);
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
   Representation from_representation() const { return from_representation_; }
 
   DECLARE_INSTRUCTION(Box)
@@ -4776,7 +4923,7 @@ class BoxInstr : public TemplateDefinition<1, NoThrow, Pure> {
   virtual TokenPosition token_pos() const { return TokenPosition::kBox; }
 
  protected:
-  BoxInstr(Representation from_representation, Value* value)
+  BoxInstr(Representation from_representation, Definition* value)
       : from_representation_(from_representation) {
     SetInputAt(0, value);
   }
@@ -4793,7 +4940,7 @@ class BoxInstr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class BoxIntegerInstr : public BoxInstr {
  public:
-  BoxIntegerInstr(Representation representation, Value* value)
+  BoxIntegerInstr(Representation representation, Definition* value)
       : BoxInstr(representation, value) {}
 
   virtual bool ValueFitsSmi() const;
@@ -4813,7 +4960,7 @@ class BoxIntegerInstr : public BoxInstr {
 
 class BoxInteger32Instr : public BoxIntegerInstr {
  public:
-  BoxInteger32Instr(Representation representation, Value* value)
+  BoxInteger32Instr(Representation representation, Definition* value)
       : BoxIntegerInstr(representation, value) {}
 
   DECLARE_INSTRUCTION_BACKEND()
@@ -4824,7 +4971,7 @@ class BoxInteger32Instr : public BoxIntegerInstr {
 
 class BoxInt32Instr : public BoxInteger32Instr {
  public:
-  explicit BoxInt32Instr(Value* value)
+  explicit BoxInt32Instr(Definition* value)
       : BoxInteger32Instr(kUnboxedInt32, value) {}
 
   DECLARE_INSTRUCTION_NO_BACKEND(BoxInt32)
@@ -4835,7 +4982,7 @@ class BoxInt32Instr : public BoxInteger32Instr {
 
 class BoxUint32Instr : public BoxInteger32Instr {
  public:
-  explicit BoxUint32Instr(Value* value)
+  explicit BoxUint32Instr(Definition* value)
       : BoxInteger32Instr(kUnboxedUint32, value) {}
 
   DECLARE_INSTRUCTION_NO_BACKEND(BoxUint32)
@@ -4846,7 +4993,7 @@ class BoxUint32Instr : public BoxInteger32Instr {
 
 class BoxInt64Instr : public BoxIntegerInstr {
  public:
-  explicit BoxInt64Instr(Value* value)
+  explicit BoxInt64Instr(Definition* value)
       : BoxIntegerInstr(kUnboxedInt64, value) {}
 
   virtual Definition* Canonicalize(FlowGraph* flow_graph);
@@ -4859,9 +5006,9 @@ class BoxInt64Instr : public BoxIntegerInstr {
 
 class UnboxInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  static UnboxInstr* Create(Representation to, Value* value, intptr_t deopt_id);
+  static UnboxInstr* Create(Representation to, Definition* value, intptr_t deopt_id);
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   virtual bool ComputeCanDeoptimize() const {
     const intptr_t value_cid = value()->Type()->ToCid();
@@ -4906,7 +5053,7 @@ class UnboxInstr : public TemplateDefinition<1, NoThrow, Pure> {
   virtual TokenPosition token_pos() const { return TokenPosition::kBox; }
 
  protected:
-  UnboxInstr(Representation representation, Value* value, intptr_t deopt_id)
+  UnboxInstr(Representation representation, Definition* value, intptr_t deopt_id)
       : TemplateDefinition(deopt_id), representation_(representation) {
     SetInputAt(0, value);
   }
@@ -4931,7 +5078,7 @@ class UnboxIntegerInstr : public UnboxInstr {
 
   UnboxIntegerInstr(Representation representation,
                     TruncationMode truncation_mode,
-                    Value* value,
+                    Definition* value,
                     intptr_t deopt_id)
       : UnboxInstr(representation, value, deopt_id),
         is_truncating_(truncation_mode == kTruncate) {}
@@ -4962,7 +5109,7 @@ class UnboxInteger32Instr : public UnboxIntegerInstr {
  public:
   UnboxInteger32Instr(Representation representation,
                       TruncationMode truncation_mode,
-                      Value* value,
+                      Definition* value,
                       intptr_t deopt_id)
       : UnboxIntegerInstr(representation, truncation_mode, value, deopt_id) {}
 
@@ -4974,7 +5121,7 @@ class UnboxInteger32Instr : public UnboxIntegerInstr {
 
 class UnboxUint32Instr : public UnboxInteger32Instr {
  public:
-  UnboxUint32Instr(Value* value, intptr_t deopt_id)
+  UnboxUint32Instr(Definition* value, intptr_t deopt_id)
       : UnboxInteger32Instr(kUnboxedUint32, kTruncate, value, deopt_id) {
     ASSERT(is_truncating());
   }
@@ -4992,7 +5139,7 @@ class UnboxUint32Instr : public UnboxInteger32Instr {
 class UnboxInt32Instr : public UnboxInteger32Instr {
  public:
   UnboxInt32Instr(TruncationMode truncation_mode,
-                  Value* value,
+                  Definition* value,
                   intptr_t deopt_id)
       : UnboxInteger32Instr(kUnboxedInt32, truncation_mode, value, deopt_id) {}
 
@@ -5010,7 +5157,7 @@ class UnboxInt32Instr : public UnboxInteger32Instr {
 
 class UnboxInt64Instr : public UnboxIntegerInstr {
  public:
-  UnboxInt64Instr(Value* value, intptr_t deopt_id)
+  UnboxInt64Instr(Definition* value, intptr_t deopt_id)
       : UnboxIntegerInstr(kUnboxedInt64, kNoTruncation, value, deopt_id) {}
 
   virtual void InferRange(RangeAnalysis* analysis, Range* range);
@@ -5033,12 +5180,12 @@ class MathUnaryInstr : public TemplateDefinition<1, NoThrow, Pure> {
     kSqrt,
     kDoubleSquare,
   };
-  MathUnaryInstr(MathUnaryKind kind, Value* value, intptr_t deopt_id)
+  MathUnaryInstr(MathUnaryKind kind, Definition* value, intptr_t deopt_id)
       : TemplateDefinition(deopt_id), kind_(kind) {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
   MathUnaryKind kind() const { return kind_; }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
@@ -5084,10 +5231,10 @@ class MathUnaryInstr : public TemplateDefinition<1, NoThrow, Pure> {
 class CaseInsensitiveCompareUC16Instr
     : public TemplateDefinition<4, NoThrow, Pure> {
  public:
-  CaseInsensitiveCompareUC16Instr(Value* str,
-                                  Value* lhs_index,
-                                  Value* rhs_index,
-                                  Value* length,
+  CaseInsensitiveCompareUC16Instr(Definition* str,
+                                  Definition* lhs_index,
+                                  Definition* rhs_index,
+                                  Definition* length,
                                   intptr_t cid)
       : cid_(cid) {
     ASSERT(cid == kTwoByteStringCid || cid == kExternalTwoByteStringCid);
@@ -5098,10 +5245,10 @@ class CaseInsensitiveCompareUC16Instr
     SetInputAt(3, length);
   }
 
-  Value* str() const { return inputs_[0]; }
-  Value* lhs_index() const { return inputs_[1]; }
-  Value* rhs_index() const { return inputs_[2]; }
-  Value* length() const { return inputs_[3]; }
+  Definition* str() const { return UnwrappedInputAt(0); }
+  Definition* lhs_index() const { return UnwrappedInputAt(1); }
+  Definition* rhs_index() const { return UnwrappedInputAt(2); }
+  Definition* length() const { return UnwrappedInputAt(3); }
 
   const RuntimeEntry& TargetFunction() const;
   bool IsExternal() const { return cid_ == kExternalTwoByteStringCid; }
@@ -5129,8 +5276,8 @@ class CaseInsensitiveCompareUC16Instr
 class MathMinMaxInstr : public TemplateDefinition<2, NoThrow, Pure> {
  public:
   MathMinMaxInstr(MethodRecognizer::Kind op_kind,
-                  Value* left_value,
-                  Value* right_value,
+                  Definition* left_value,
+                  Definition* right_value,
                   intptr_t deopt_id,
                   intptr_t result_cid)
       : TemplateDefinition(deopt_id),
@@ -5143,8 +5290,8 @@ class MathMinMaxInstr : public TemplateDefinition<2, NoThrow, Pure> {
 
   MethodRecognizer::Kind op_kind() const { return op_kind_; }
 
-  Value* left() const { return inputs_[0]; }
-  Value* right() const { return inputs_[1]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
+  Definition* right() const { return UnwrappedInputAt(1); }
 
   intptr_t result_cid() const { return result_cid_; }
 
@@ -5186,8 +5333,8 @@ class MathMinMaxInstr : public TemplateDefinition<2, NoThrow, Pure> {
 class BinaryDoubleOpInstr : public TemplateDefinition<2, NoThrow, Pure> {
  public:
   BinaryDoubleOpInstr(Token::Kind op_kind,
-                      Value* left,
-                      Value* right,
+                      Definition* left,
+                      Definition* right,
                       intptr_t deopt_id,
                       TokenPosition token_pos)
       : TemplateDefinition(deopt_id), op_kind_(op_kind), token_pos_(token_pos) {
@@ -5195,8 +5342,8 @@ class BinaryDoubleOpInstr : public TemplateDefinition<2, NoThrow, Pure> {
     SetInputAt(1, right);
   }
 
-  Value* left() const { return inputs_[0]; }
-  Value* right() const { return inputs_[1]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
+  Definition* right() const { return UnwrappedInputAt(1); }
 
   Token::Kind op_kind() const { return op_kind_; }
 
@@ -5238,14 +5385,14 @@ class BinaryDoubleOpInstr : public TemplateDefinition<2, NoThrow, Pure> {
 class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
  public:
   DoubleTestOpInstr(MethodRecognizer::Kind op_kind,
-                    Value* value,
+                    Definition* value,
                     intptr_t deopt_id,
                     TokenPosition token_pos)
       : TemplateComparison(token_pos, Token::kEQ, deopt_id), op_kind_(op_kind) {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return InputAt(0); }
+  Definition* value() const { return InputAt(0); }
 
   MethodRecognizer::Kind op_kind() const { return op_kind_; }
 
@@ -5269,7 +5416,7 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
            ComparisonInstr::AttributesEqual(other);
   }
 
-  virtual ComparisonInstr* CopyWithNewOperands(Value* left, Value* right);
+  virtual ComparisonInstr* CopyWithNewOperands(Definition* left, Definition* right);
 
  private:
   const MethodRecognizer::Kind op_kind_;
@@ -5280,16 +5427,16 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
 class BinaryFloat32x4OpInstr : public TemplateDefinition<2, NoThrow, Pure> {
  public:
   BinaryFloat32x4OpInstr(Token::Kind op_kind,
-                         Value* left,
-                         Value* right,
+                         Definition* left,
+                         Definition* right,
                          intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind) {
     SetInputAt(0, left);
     SetInputAt(1, right);
   }
 
-  Value* left() const { return inputs_[0]; }
-  Value* right() const { return inputs_[1]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
+  Definition* right() const { return UnwrappedInputAt(1); }
 
   Token::Kind op_kind() const { return op_kind_; }
 
@@ -5326,14 +5473,14 @@ class BinaryFloat32x4OpInstr : public TemplateDefinition<2, NoThrow, Pure> {
 class Simd32x4ShuffleInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
   Simd32x4ShuffleInstr(MethodRecognizer::Kind op_kind,
-                       Value* value,
+                       Definition* value,
                        intptr_t mask,
                        intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind), mask_(mask) {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   MethodRecognizer::Kind op_kind() const { return op_kind_; }
 
@@ -5394,8 +5541,8 @@ class Simd32x4ShuffleInstr : public TemplateDefinition<1, NoThrow, Pure> {
 class Simd32x4ShuffleMixInstr : public TemplateDefinition<2, NoThrow, Pure> {
  public:
   Simd32x4ShuffleMixInstr(MethodRecognizer::Kind op_kind,
-                          Value* xy,
-                          Value* zw,
+                          Definition* xy,
+                          Definition* zw,
                           intptr_t mask,
                           intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind), mask_(mask) {
@@ -5403,8 +5550,8 @@ class Simd32x4ShuffleMixInstr : public TemplateDefinition<2, NoThrow, Pure> {
     SetInputAt(1, zw);
   }
 
-  Value* xy() const { return inputs_[0]; }
-  Value* zw() const { return inputs_[1]; }
+  Definition* xy() const { return UnwrappedInputAt(0); }
+  Definition* zw() const { return UnwrappedInputAt(1); }
 
   MethodRecognizer::Kind op_kind() const { return op_kind_; }
 
@@ -5454,10 +5601,10 @@ class Simd32x4ShuffleMixInstr : public TemplateDefinition<2, NoThrow, Pure> {
 
 class Float32x4ConstructorInstr : public TemplateDefinition<4, NoThrow, Pure> {
  public:
-  Float32x4ConstructorInstr(Value* value0,
-                            Value* value1,
-                            Value* value2,
-                            Value* value3,
+  Float32x4ConstructorInstr(Definition* value0,
+                            Definition* value1,
+                            Definition* value2,
+                            Definition* value3,
                             intptr_t deopt_id)
       : TemplateDefinition(deopt_id) {
     SetInputAt(0, value0);
@@ -5466,10 +5613,10 @@ class Float32x4ConstructorInstr : public TemplateDefinition<4, NoThrow, Pure> {
     SetInputAt(3, value3);
   }
 
-  Value* value0() const { return inputs_[0]; }
-  Value* value1() const { return inputs_[1]; }
-  Value* value2() const { return inputs_[2]; }
-  Value* value3() const { return inputs_[3]; }
+  Definition* value0() const { return UnwrappedInputAt(0); }
+  Definition* value1() const { return UnwrappedInputAt(1); }
+  Definition* value2() const { return UnwrappedInputAt(2); }
+  Definition* value3() const { return UnwrappedInputAt(3); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -5499,12 +5646,12 @@ class Float32x4ConstructorInstr : public TemplateDefinition<4, NoThrow, Pure> {
 
 class Float32x4SplatInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  Float32x4SplatInstr(Value* value, intptr_t deopt_id)
+  Float32x4SplatInstr(Definition* value, intptr_t deopt_id)
       : TemplateDefinition(deopt_id) {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -5553,16 +5700,16 @@ class Float32x4ZeroInstr : public TemplateDefinition<0, NoThrow, Pure> {
 class Float32x4ComparisonInstr : public TemplateDefinition<2, NoThrow, Pure> {
  public:
   Float32x4ComparisonInstr(MethodRecognizer::Kind op_kind,
-                           Value* left,
-                           Value* right,
+                           Definition* left,
+                           Definition* right,
                            intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind) {
     SetInputAt(0, left);
     SetInputAt(1, right);
   }
 
-  Value* left() const { return inputs_[0]; }
-  Value* right() const { return inputs_[1]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
+  Definition* right() const { return UnwrappedInputAt(1); }
 
   MethodRecognizer::Kind op_kind() const { return op_kind_; }
 
@@ -5599,16 +5746,16 @@ class Float32x4ComparisonInstr : public TemplateDefinition<2, NoThrow, Pure> {
 class Float32x4MinMaxInstr : public TemplateDefinition<2, NoThrow, Pure> {
  public:
   Float32x4MinMaxInstr(MethodRecognizer::Kind op_kind,
-                       Value* left,
-                       Value* right,
+                       Definition* left,
+                       Definition* right,
                        intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind) {
     SetInputAt(0, left);
     SetInputAt(1, right);
   }
 
-  Value* left() const { return inputs_[0]; }
-  Value* right() const { return inputs_[1]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
+  Definition* right() const { return UnwrappedInputAt(1); }
 
   MethodRecognizer::Kind op_kind() const { return op_kind_; }
 
@@ -5645,16 +5792,16 @@ class Float32x4MinMaxInstr : public TemplateDefinition<2, NoThrow, Pure> {
 class Float32x4ScaleInstr : public TemplateDefinition<2, NoThrow, Pure> {
  public:
   Float32x4ScaleInstr(MethodRecognizer::Kind op_kind,
-                      Value* left,
-                      Value* right,
+                      Definition* left,
+                      Definition* right,
                       intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind) {
     SetInputAt(0, left);
     SetInputAt(1, right);
   }
 
-  Value* left() const { return inputs_[0]; }
-  Value* right() const { return inputs_[1]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
+  Definition* right() const { return UnwrappedInputAt(1); }
 
   MethodRecognizer::Kind op_kind() const { return op_kind_; }
 
@@ -5694,13 +5841,13 @@ class Float32x4ScaleInstr : public TemplateDefinition<2, NoThrow, Pure> {
 class Float32x4SqrtInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
   Float32x4SqrtInstr(MethodRecognizer::Kind op_kind,
-                     Value* left,
+                     Definition* left,
                      intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind) {
     SetInputAt(0, left);
   }
 
-  Value* left() const { return inputs_[0]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
 
   MethodRecognizer::Kind op_kind() const { return op_kind_; }
 
@@ -5738,13 +5885,13 @@ class Float32x4SqrtInstr : public TemplateDefinition<1, NoThrow, Pure> {
 class Float32x4ZeroArgInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
   Float32x4ZeroArgInstr(MethodRecognizer::Kind op_kind,
-                        Value* left,
+                        Definition* left,
                         intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind) {
     SetInputAt(0, left);
   }
 
-  Value* left() const { return inputs_[0]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
 
   MethodRecognizer::Kind op_kind() const { return op_kind_; }
 
@@ -5780,9 +5927,9 @@ class Float32x4ZeroArgInstr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class Float32x4ClampInstr : public TemplateDefinition<3, NoThrow, Pure> {
  public:
-  Float32x4ClampInstr(Value* left,
-                      Value* lower,
-                      Value* upper,
+  Float32x4ClampInstr(Definition* left,
+                      Definition* lower,
+                      Definition* upper,
                       intptr_t deopt_id)
       : TemplateDefinition(deopt_id) {
     SetInputAt(0, left);
@@ -5790,9 +5937,9 @@ class Float32x4ClampInstr : public TemplateDefinition<3, NoThrow, Pure> {
     SetInputAt(2, upper);
   }
 
-  Value* left() const { return inputs_[0]; }
-  Value* lower() const { return inputs_[1]; }
-  Value* upper() const { return inputs_[2]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
+  Definition* lower() const { return UnwrappedInputAt(1); }
+  Definition* upper() const { return UnwrappedInputAt(2); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -5823,16 +5970,16 @@ class Float32x4ClampInstr : public TemplateDefinition<3, NoThrow, Pure> {
 class Float32x4WithInstr : public TemplateDefinition<2, NoThrow, Pure> {
  public:
   Float32x4WithInstr(MethodRecognizer::Kind op_kind,
-                     Value* left,
-                     Value* replacement,
+                     Definition* left,
+                     Definition* replacement,
                      intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind) {
     SetInputAt(0, replacement);
     SetInputAt(1, left);
   }
 
-  Value* left() const { return inputs_[1]; }
-  Value* replacement() const { return inputs_[0]; }
+  Definition* left() const { return UnwrappedInputAt(1); }
+  Definition* replacement() const { return UnwrappedInputAt(0); }
 
   MethodRecognizer::Kind op_kind() const { return op_kind_; }
 
@@ -5872,14 +6019,14 @@ class Float32x4WithInstr : public TemplateDefinition<2, NoThrow, Pure> {
 class Simd64x2ShuffleInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
   Simd64x2ShuffleInstr(MethodRecognizer::Kind op_kind,
-                       Value* value,
+                       Definition* value,
                        intptr_t mask,
                        intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind), mask_(mask) {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   MethodRecognizer::Kind op_kind() const { return op_kind_; }
 
@@ -5931,12 +6078,12 @@ class Simd64x2ShuffleInstr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class Float32x4ToInt32x4Instr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  Float32x4ToInt32x4Instr(Value* left, intptr_t deopt_id)
+  Float32x4ToInt32x4Instr(Definition* left, intptr_t deopt_id)
       : TemplateDefinition(deopt_id) {
     SetInputAt(0, left);
   }
 
-  Value* left() const { return inputs_[0]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -5966,12 +6113,12 @@ class Float32x4ToInt32x4Instr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class Float32x4ToFloat64x2Instr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  Float32x4ToFloat64x2Instr(Value* left, intptr_t deopt_id)
+  Float32x4ToFloat64x2Instr(Definition* left, intptr_t deopt_id)
       : TemplateDefinition(deopt_id) {
     SetInputAt(0, left);
   }
 
-  Value* left() const { return inputs_[0]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -6001,12 +6148,12 @@ class Float32x4ToFloat64x2Instr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class Float64x2ToFloat32x4Instr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  Float64x2ToFloat32x4Instr(Value* left, intptr_t deopt_id)
+  Float64x2ToFloat32x4Instr(Definition* left, intptr_t deopt_id)
       : TemplateDefinition(deopt_id) {
     SetInputAt(0, left);
   }
 
-  Value* left() const { return inputs_[0]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -6036,14 +6183,14 @@ class Float64x2ToFloat32x4Instr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class Float64x2ConstructorInstr : public TemplateDefinition<2, NoThrow, Pure> {
  public:
-  Float64x2ConstructorInstr(Value* value0, Value* value1, intptr_t deopt_id)
+  Float64x2ConstructorInstr(Definition* value0, Definition* value1, intptr_t deopt_id)
       : TemplateDefinition(deopt_id) {
     SetInputAt(0, value0);
     SetInputAt(1, value1);
   }
 
-  Value* value0() const { return inputs_[0]; }
-  Value* value1() const { return inputs_[1]; }
+  Definition* value0() const { return UnwrappedInputAt(0); }
+  Definition* value1() const { return UnwrappedInputAt(1); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -6073,12 +6220,12 @@ class Float64x2ConstructorInstr : public TemplateDefinition<2, NoThrow, Pure> {
 
 class Float64x2SplatInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  Float64x2SplatInstr(Value* value, intptr_t deopt_id)
+  Float64x2SplatInstr(Definition* value, intptr_t deopt_id)
       : TemplateDefinition(deopt_id) {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -6127,13 +6274,13 @@ class Float64x2ZeroInstr : public TemplateDefinition<0, NoThrow, Pure> {
 class Float64x2ZeroArgInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
   Float64x2ZeroArgInstr(MethodRecognizer::Kind op_kind,
-                        Value* left,
+                        Definition* left,
                         intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind) {
     SetInputAt(0, left);
   }
 
-  Value* left() const { return inputs_[0]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
 
   MethodRecognizer::Kind op_kind() const { return op_kind_; }
 
@@ -6176,16 +6323,16 @@ class Float64x2ZeroArgInstr : public TemplateDefinition<1, NoThrow, Pure> {
 class Float64x2OneArgInstr : public TemplateDefinition<2, NoThrow, Pure> {
  public:
   Float64x2OneArgInstr(MethodRecognizer::Kind op_kind,
-                       Value* left,
-                       Value* right,
+                       Definition* left,
+                       Definition* right,
                        intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind) {
     SetInputAt(0, left);
     SetInputAt(1, right);
   }
 
-  Value* left() const { return inputs_[0]; }
-  Value* right() const { return inputs_[1]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
+  Definition* right() const { return UnwrappedInputAt(1); }
 
   MethodRecognizer::Kind op_kind() const { return op_kind_; }
 
@@ -6229,10 +6376,10 @@ class Float64x2OneArgInstr : public TemplateDefinition<2, NoThrow, Pure> {
 
 class Int32x4ConstructorInstr : public TemplateDefinition<4, NoThrow, Pure> {
  public:
-  Int32x4ConstructorInstr(Value* value0,
-                          Value* value1,
-                          Value* value2,
-                          Value* value3,
+  Int32x4ConstructorInstr(Definition* value0,
+                          Definition* value1,
+                          Definition* value2,
+                          Definition* value3,
                           intptr_t deopt_id)
       : TemplateDefinition(deopt_id) {
     SetInputAt(0, value0);
@@ -6241,10 +6388,10 @@ class Int32x4ConstructorInstr : public TemplateDefinition<4, NoThrow, Pure> {
     SetInputAt(3, value3);
   }
 
-  Value* value0() const { return inputs_[0]; }
-  Value* value1() const { return inputs_[1]; }
-  Value* value2() const { return inputs_[2]; }
-  Value* value3() const { return inputs_[3]; }
+  Definition* value0() const { return UnwrappedInputAt(0); }
+  Definition* value1() const { return UnwrappedInputAt(1); }
+  Definition* value2() const { return UnwrappedInputAt(2); }
+  Definition* value3() const { return UnwrappedInputAt(3); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -6275,10 +6422,10 @@ class Int32x4ConstructorInstr : public TemplateDefinition<4, NoThrow, Pure> {
 class Int32x4BoolConstructorInstr
     : public TemplateDefinition<4, NoThrow, Pure> {
  public:
-  Int32x4BoolConstructorInstr(Value* value0,
-                              Value* value1,
-                              Value* value2,
-                              Value* value3,
+  Int32x4BoolConstructorInstr(Definition* value0,
+                              Definition* value1,
+                              Definition* value2,
+                              Definition* value3,
                               intptr_t deopt_id)
       : TemplateDefinition(deopt_id) {
     SetInputAt(0, value0);
@@ -6287,10 +6434,10 @@ class Int32x4BoolConstructorInstr
     SetInputAt(3, value3);
   }
 
-  Value* value0() const { return inputs_[0]; }
-  Value* value1() const { return inputs_[1]; }
-  Value* value2() const { return inputs_[2]; }
-  Value* value3() const { return inputs_[3]; }
+  Definition* value0() const { return UnwrappedInputAt(0); }
+  Definition* value1() const { return UnwrappedInputAt(1); }
+  Definition* value2() const { return UnwrappedInputAt(2); }
+  Definition* value3() const { return UnwrappedInputAt(3); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -6321,13 +6468,13 @@ class Int32x4BoolConstructorInstr
 class Int32x4GetFlagInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
   Int32x4GetFlagInstr(MethodRecognizer::Kind op_kind,
-                      Value* value,
+                      Definition* value,
                       intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind) {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   MethodRecognizer::Kind op_kind() const { return op_kind_; }
 
@@ -6364,13 +6511,13 @@ class Int32x4GetFlagInstr : public TemplateDefinition<1, NoThrow, Pure> {
 class Simd32x4GetSignMaskInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
   Simd32x4GetSignMaskInstr(MethodRecognizer::Kind op_kind,
-                           Value* value,
+                           Definition* value,
                            intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind) {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   MethodRecognizer::Kind op_kind() const { return op_kind_; }
 
@@ -6410,9 +6557,9 @@ class Simd32x4GetSignMaskInstr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class Int32x4SelectInstr : public TemplateDefinition<3, NoThrow, Pure> {
  public:
-  Int32x4SelectInstr(Value* mask,
-                     Value* trueValue,
-                     Value* falseValue,
+  Int32x4SelectInstr(Definition* mask,
+                     Definition* trueValue,
+                     Definition* falseValue,
                      intptr_t deopt_id)
       : TemplateDefinition(deopt_id) {
     SetInputAt(0, mask);
@@ -6420,9 +6567,9 @@ class Int32x4SelectInstr : public TemplateDefinition<3, NoThrow, Pure> {
     SetInputAt(2, falseValue);
   }
 
-  Value* mask() const { return inputs_[0]; }
-  Value* trueValue() const { return inputs_[1]; }
-  Value* falseValue() const { return inputs_[2]; }
+  Definition* mask() const { return UnwrappedInputAt(0); }
+  Definition* trueValue() const { return UnwrappedInputAt(1); }
+  Definition* falseValue() const { return UnwrappedInputAt(2); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -6456,16 +6603,16 @@ class Int32x4SelectInstr : public TemplateDefinition<3, NoThrow, Pure> {
 class Int32x4SetFlagInstr : public TemplateDefinition<2, NoThrow, Pure> {
  public:
   Int32x4SetFlagInstr(MethodRecognizer::Kind op_kind,
-                      Value* value,
-                      Value* flagValue,
+                      Definition* value,
+                      Definition* flagValue,
                       intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind) {
     SetInputAt(0, value);
     SetInputAt(1, flagValue);
   }
 
-  Value* value() const { return inputs_[0]; }
-  Value* flagValue() const { return inputs_[1]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
+  Definition* flagValue() const { return UnwrappedInputAt(1); }
 
   MethodRecognizer::Kind op_kind() const { return op_kind_; }
 
@@ -6504,12 +6651,12 @@ class Int32x4SetFlagInstr : public TemplateDefinition<2, NoThrow, Pure> {
 
 class Int32x4ToFloat32x4Instr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  Int32x4ToFloat32x4Instr(Value* left, intptr_t deopt_id)
+  Int32x4ToFloat32x4Instr(Definition* left, intptr_t deopt_id)
       : TemplateDefinition(deopt_id) {
     SetInputAt(0, left);
   }
 
-  Value* left() const { return inputs_[0]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -6540,16 +6687,16 @@ class Int32x4ToFloat32x4Instr : public TemplateDefinition<1, NoThrow, Pure> {
 class BinaryInt32x4OpInstr : public TemplateDefinition<2, NoThrow, Pure> {
  public:
   BinaryInt32x4OpInstr(Token::Kind op_kind,
-                       Value* left,
-                       Value* right,
+                       Definition* left,
+                       Definition* right,
                        intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind) {
     SetInputAt(0, left);
     SetInputAt(1, right);
   }
 
-  Value* left() const { return inputs_[0]; }
-  Value* right() const { return inputs_[1]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
+  Definition* right() const { return UnwrappedInputAt(1); }
 
   Token::Kind op_kind() const { return op_kind_; }
 
@@ -6586,16 +6733,16 @@ class BinaryInt32x4OpInstr : public TemplateDefinition<2, NoThrow, Pure> {
 class BinaryFloat64x2OpInstr : public TemplateDefinition<2, NoThrow, Pure> {
  public:
   BinaryFloat64x2OpInstr(Token::Kind op_kind,
-                         Value* left,
-                         Value* right,
+                         Definition* left,
+                         Definition* right,
                          intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind) {
     SetInputAt(0, left);
     SetInputAt(1, right);
   }
 
-  Value* left() const { return inputs_[0]; }
-  Value* right() const { return inputs_[1]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
+  Definition* right() const { return UnwrappedInputAt(1); }
 
   Token::Kind op_kind() const { return op_kind_; }
 
@@ -6631,7 +6778,7 @@ class BinaryFloat64x2OpInstr : public TemplateDefinition<2, NoThrow, Pure> {
 
 class UnaryIntegerOpInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  UnaryIntegerOpInstr(Token::Kind op_kind, Value* value, intptr_t deopt_id)
+  UnaryIntegerOpInstr(Token::Kind op_kind, Definition* value, intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind) {
     ASSERT((op_kind == Token::kNEGATE) || (op_kind == Token::kBIT_NOT));
     SetInputAt(0, value);
@@ -6639,11 +6786,11 @@ class UnaryIntegerOpInstr : public TemplateDefinition<1, NoThrow, Pure> {
 
   static UnaryIntegerOpInstr* Make(Representation representation,
                                    Token::Kind op_kind,
-                                   Value* value,
+                                   Definition* value,
                                    intptr_t deopt_id,
                                    Range* range);
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
   Token::Kind op_kind() const { return op_kind_; }
 
   virtual bool AttributesEqual(Instruction* other) const {
@@ -6669,7 +6816,7 @@ class UnaryIntegerOpInstr : public TemplateDefinition<1, NoThrow, Pure> {
 // Handles both Smi operations: BIT_OR and NEGATE.
 class UnarySmiOpInstr : public UnaryIntegerOpInstr {
  public:
-  UnarySmiOpInstr(Token::Kind op_kind, Value* value, intptr_t deopt_id)
+  UnarySmiOpInstr(Token::Kind op_kind, Definition* value, intptr_t deopt_id)
       : UnaryIntegerOpInstr(op_kind, value, deopt_id) {}
 
   virtual bool ComputeCanDeoptimize() const {
@@ -6686,7 +6833,7 @@ class UnarySmiOpInstr : public UnaryIntegerOpInstr {
 
 class UnaryUint32OpInstr : public UnaryIntegerOpInstr {
  public:
-  UnaryUint32OpInstr(Token::Kind op_kind, Value* value, intptr_t deopt_id)
+  UnaryUint32OpInstr(Token::Kind op_kind, Definition* value, intptr_t deopt_id)
       : UnaryIntegerOpInstr(op_kind, value, deopt_id) {
     ASSERT(op_kind == Token::kBIT_NOT);
   }
@@ -6710,7 +6857,7 @@ class UnaryUint32OpInstr : public UnaryIntegerOpInstr {
 
 class UnaryInt64OpInstr : public UnaryIntegerOpInstr {
  public:
-  UnaryInt64OpInstr(Token::Kind op_kind, Value* value, intptr_t deopt_id)
+  UnaryInt64OpInstr(Token::Kind op_kind, Definition* value, intptr_t deopt_id)
       : UnaryIntegerOpInstr(op_kind, value, deopt_id) {
     ASSERT(op_kind == Token::kBIT_NOT);
   }
@@ -6735,8 +6882,8 @@ class UnaryInt64OpInstr : public UnaryIntegerOpInstr {
 class CheckedSmiOpInstr : public TemplateDefinition<2, Throws> {
  public:
   CheckedSmiOpInstr(Token::Kind op_kind,
-                    Value* left,
-                    Value* right,
+                    Definition* left,
+                    Definition* right,
                     InstanceCallInstr* call)
       : TemplateDefinition(call->deopt_id()), call_(call), op_kind_(op_kind) {
     ASSERT(call->type_args_len() == 0);
@@ -6746,8 +6893,8 @@ class CheckedSmiOpInstr : public TemplateDefinition<2, Throws> {
 
   InstanceCallInstr* call() const { return call_; }
   Token::Kind op_kind() const { return op_kind_; }
-  Value* left() const { return inputs_[0]; }
-  Value* right() const { return inputs_[1]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
+  Definition* right() const { return UnwrappedInputAt(1); }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -6770,8 +6917,8 @@ class CheckedSmiOpInstr : public TemplateDefinition<2, Throws> {
 class CheckedSmiComparisonInstr : public TemplateComparison<2, Throws> {
  public:
   CheckedSmiComparisonInstr(Token::Kind op_kind,
-                            Value* left,
-                            Value* right,
+                            Definition* left,
+                            Definition* right,
                             InstanceCallInstr* call)
       : TemplateComparison(call->token_pos(), op_kind, call->deopt_id()),
         call_(call),
@@ -6815,7 +6962,7 @@ class CheckedSmiComparisonInstr : public TemplateComparison<2, Throws> {
   }
 #endif
 
-  virtual ComparisonInstr* CopyWithNewOperands(Value* left, Value* right);
+  virtual ComparisonInstr* CopyWithNewOperands(Definition* left, Definition* right);
 
  private:
   InstanceCallInstr* call_;
@@ -6826,8 +6973,8 @@ class CheckedSmiComparisonInstr : public TemplateComparison<2, Throws> {
 class BinaryIntegerOpInstr : public TemplateDefinition<2, NoThrow, Pure> {
  public:
   BinaryIntegerOpInstr(Token::Kind op_kind,
-                       Value* left,
-                       Value* right,
+                       Definition* left,
+                       Definition* right,
                        intptr_t deopt_id)
       : TemplateDefinition(deopt_id),
         op_kind_(op_kind),
@@ -6839,16 +6986,16 @@ class BinaryIntegerOpInstr : public TemplateDefinition<2, NoThrow, Pure> {
 
   static BinaryIntegerOpInstr* Make(Representation representation,
                                     Token::Kind op_kind,
-                                    Value* left,
-                                    Value* right,
+                                    Definition* left,
+                                    Definition* right,
                                     intptr_t deopt_id,
                                     bool can_overflow,
                                     bool is_truncating,
                                     Range* range);
 
   Token::Kind op_kind() const { return op_kind_; }
-  Value* left() const { return inputs_[0]; }
-  Value* right() const { return inputs_[1]; }
+  Definition* left() const { return UnwrappedInputAt(0); }
+  Definition* right() const { return UnwrappedInputAt(1); }
 
   bool can_overflow() const { return can_overflow_; }
   void set_can_overflow(bool overflow) {
@@ -6895,8 +7042,8 @@ class BinaryIntegerOpInstr : public TemplateDefinition<2, NoThrow, Pure> {
 class BinarySmiOpInstr : public BinaryIntegerOpInstr {
  public:
   BinarySmiOpInstr(Token::Kind op_kind,
-                   Value* left,
-                   Value* right,
+                   Definition* left,
+                   Definition* right,
                    intptr_t deopt_id)
       : BinaryIntegerOpInstr(op_kind, left, right, deopt_id),
         right_range_(NULL) {}
@@ -6919,15 +7066,15 @@ class BinarySmiOpInstr : public BinaryIntegerOpInstr {
 class BinaryInt32OpInstr : public BinaryIntegerOpInstr {
  public:
   BinaryInt32OpInstr(Token::Kind op_kind,
-                     Value* left,
-                     Value* right,
+                     Definition* left,
+                     Definition* right,
                      intptr_t deopt_id)
       : BinaryIntegerOpInstr(op_kind, left, right, deopt_id) {
     SetInputAt(0, left);
     SetInputAt(1, right);
   }
 
-  static bool IsSupported(Token::Kind op, Value* left, Value* right) {
+  static bool IsSupported(Token::Kind op, Definition* left, Definition* right) {
 #if defined(TARGET_ARCH_IA32) || defined(TARGET_ARCH_ARM)
     switch (op) {
       case Token::kADD:
@@ -6975,8 +7122,8 @@ class BinaryInt32OpInstr : public BinaryIntegerOpInstr {
 class BinaryUint32OpInstr : public BinaryIntegerOpInstr {
  public:
   BinaryUint32OpInstr(Token::Kind op_kind,
-                      Value* left,
-                      Value* right,
+                      Definition* left,
+                      Definition* right,
                       intptr_t deopt_id)
       : BinaryIntegerOpInstr(op_kind, left, right, deopt_id) {
     mark_truncating();
@@ -7002,8 +7149,8 @@ class BinaryUint32OpInstr : public BinaryIntegerOpInstr {
 class ShiftUint32OpInstr : public BinaryIntegerOpInstr {
  public:
   ShiftUint32OpInstr(Token::Kind op_kind,
-                     Value* left,
-                     Value* right,
+                     Definition* left,
+                     Definition* right,
                      intptr_t deopt_id)
       : BinaryIntegerOpInstr(op_kind, left, right, deopt_id) {
     ASSERT((op_kind == Token::kSHR) || (op_kind == Token::kSHL));
@@ -7029,8 +7176,8 @@ class ShiftUint32OpInstr : public BinaryIntegerOpInstr {
 class BinaryInt64OpInstr : public BinaryIntegerOpInstr {
  public:
   BinaryInt64OpInstr(Token::Kind op_kind,
-                     Value* left,
-                     Value* right,
+                     Definition* left,
+                     Definition* right,
                      intptr_t deopt_id)
       : BinaryIntegerOpInstr(op_kind, left, right, deopt_id) {
     if (FLAG_limit_ints_to_64_bits) {
@@ -7076,8 +7223,8 @@ class BinaryInt64OpInstr : public BinaryIntegerOpInstr {
 class ShiftInt64OpInstr : public BinaryIntegerOpInstr {
  public:
   ShiftInt64OpInstr(Token::Kind op_kind,
-                    Value* left,
-                    Value* right,
+                    Definition* left,
+                    Definition* right,
                     intptr_t deopt_id)
       : BinaryIntegerOpInstr(op_kind, left, right, deopt_id),
         shift_range_(NULL) {
@@ -7121,13 +7268,13 @@ class ShiftInt64OpInstr : public BinaryIntegerOpInstr {
 // Handles only NEGATE.
 class UnaryDoubleOpInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  UnaryDoubleOpInstr(Token::Kind op_kind, Value* value, intptr_t deopt_id)
+  UnaryDoubleOpInstr(Token::Kind op_kind, Definition* value, intptr_t deopt_id)
       : TemplateDefinition(deopt_id), op_kind_(op_kind) {
     ASSERT(op_kind == Token::kNEGATE);
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
   Token::Kind op_kind() const { return op_kind_; }
 
   DECLARE_INSTRUCTION(UnaryDoubleOp)
@@ -7207,12 +7354,12 @@ class CheckStackOverflowInstr : public TemplateInstruction<0, NoThrow> {
 // TODO(vegorov): remove this instruction in favor of Int32ToDouble.
 class SmiToDoubleInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  SmiToDoubleInstr(Value* value, TokenPosition token_pos)
+  SmiToDoubleInstr(Definition* value, TokenPosition token_pos)
       : token_pos_(token_pos) {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
   virtual TokenPosition token_pos() const { return token_pos_; }
 
   DECLARE_INSTRUCTION(SmiToDouble)
@@ -7232,9 +7379,9 @@ class SmiToDoubleInstr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class Int32ToDoubleInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  explicit Int32ToDoubleInstr(Value* value) { SetInputAt(0, value); }
+  explicit Int32ToDoubleInstr(Definition* value) { SetInputAt(0, value); }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   DECLARE_INSTRUCTION(Int32ToDouble)
   virtual CompileType ComputeType() const;
@@ -7256,12 +7403,12 @@ class Int32ToDoubleInstr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class MintToDoubleInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  MintToDoubleInstr(Value* value, intptr_t deopt_id)
+  MintToDoubleInstr(Definition* value, intptr_t deopt_id)
       : TemplateDefinition(deopt_id) {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   DECLARE_INSTRUCTION(MintToDouble)
   virtual CompileType ComputeType() const;
@@ -7288,13 +7435,13 @@ class MintToDoubleInstr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class DoubleToIntegerInstr : public TemplateDefinition<1, Throws> {
  public:
-  DoubleToIntegerInstr(Value* value, InstanceCallInstr* instance_call)
+  DoubleToIntegerInstr(Definition* value, InstanceCallInstr* instance_call)
       : TemplateDefinition(instance_call->deopt_id()),
         instance_call_(instance_call) {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
   InstanceCallInstr* instance_call() const { return instance_call_; }
 
   DECLARE_INSTRUCTION(DoubleToInteger)
@@ -7316,12 +7463,12 @@ class DoubleToIntegerInstr : public TemplateDefinition<1, Throws> {
 // and creates a Smi.
 class DoubleToSmiInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  DoubleToSmiInstr(Value* value, intptr_t deopt_id)
+  DoubleToSmiInstr(Definition* value, intptr_t deopt_id)
       : TemplateDefinition(deopt_id) {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   DECLARE_INSTRUCTION(DoubleToSmi)
   virtual CompileType ComputeType() const;
@@ -7343,14 +7490,14 @@ class DoubleToSmiInstr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class DoubleToDoubleInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  DoubleToDoubleInstr(Value* value,
+  DoubleToDoubleInstr(Definition* value,
                       MethodRecognizer::Kind recognized_kind,
                       intptr_t deopt_id)
       : TemplateDefinition(deopt_id), recognized_kind_(recognized_kind) {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   MethodRecognizer::Kind recognized_kind() const { return recognized_kind_; }
 
@@ -7380,12 +7527,12 @@ class DoubleToDoubleInstr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class DoubleToFloatInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  DoubleToFloatInstr(Value* value, intptr_t deopt_id)
+  DoubleToFloatInstr(Definition* value, intptr_t deopt_id)
       : TemplateDefinition(deopt_id) {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   DECLARE_INSTRUCTION(DoubleToFloat)
 
@@ -7418,12 +7565,12 @@ class DoubleToFloatInstr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class FloatToDoubleInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  FloatToDoubleInstr(Value* value, intptr_t deopt_id)
+  FloatToDoubleInstr(Definition* value, intptr_t deopt_id)
       : TemplateDefinition(deopt_id) {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   DECLARE_INSTRUCTION(FloatToDouble)
 
@@ -7479,7 +7626,7 @@ class InvokeMathCFunctionInstr : public PureDefinition {
 
   virtual intptr_t InputCount() const { return inputs_->length(); }
 
-  virtual Value* InputAt(intptr_t i) const { return (*inputs_)[i]; }
+  virtual Definition* InputAt(intptr_t i) const { return (*inputs_)[i]->definition(); }
 
   virtual bool AttributesEqual(Instruction* other) const {
     InvokeMathCFunctionInstr* other_invoke = other->AsInvokeMathCFunction();
@@ -7495,8 +7642,11 @@ class InvokeMathCFunctionInstr : public PureDefinition {
   PRINT_OPERANDS_TO_SUPPORT
 
  private:
-  virtual void RawSetInputAt(intptr_t i, Value* value) {
-    (*inputs_)[i] = value;
+  virtual void RawSetInputAt(intptr_t i, Definition* value) {
+    // FIXME
+    (*inputs_)[i]->BindTo(value);
+    (*inputs_)[i]->set_instruction(this);
+    (*inputs_)[i]->set_use_index(i);
   }
 
   ZoneGrowableArray<Value*>* inputs_;
@@ -7509,7 +7659,7 @@ class InvokeMathCFunctionInstr : public PureDefinition {
 class ExtractNthOutputInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
   // Extract the Nth output register from value.
-  ExtractNthOutputInstr(Value* value,
+  ExtractNthOutputInstr(Definition* value,
                         intptr_t n,
                         Representation definition_rep,
                         intptr_t definition_cid)
@@ -7519,7 +7669,7 @@ class ExtractNthOutputInstr : public TemplateDefinition<1, NoThrow, Pure> {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   DECLARE_INSTRUCTION(ExtractNthOutput)
 
@@ -7556,7 +7706,7 @@ class ExtractNthOutputInstr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class TruncDivModInstr : public TemplateDefinition<2, NoThrow, Pure> {
  public:
-  TruncDivModInstr(Value* lhs, Value* rhs, intptr_t deopt_id);
+  TruncDivModInstr(Definition* lhs, Definition* rhs, intptr_t deopt_id);
 
   static intptr_t OutputIndexOf(Token::Kind token);
 
@@ -7589,7 +7739,7 @@ class TruncDivModInstr : public TemplateDefinition<2, NoThrow, Pure> {
     // bugs when range information gets out of sync with the final decision
     // whether some instruction can deoptimize or not made in
     // EliminateEnvironments().
-    return InputAt(1)->definition()->range();
+    return InputAt(1)->range();
   }
 
   DISALLOW_COPY_AND_ASSIGN(TruncDivModInstr);
@@ -7597,7 +7747,7 @@ class TruncDivModInstr : public TemplateDefinition<2, NoThrow, Pure> {
 
 class CheckClassInstr : public TemplateInstruction<1, NoThrow> {
  public:
-  CheckClassInstr(Value* value,
+  CheckClassInstr(Definition* value,
                   intptr_t deopt_id,
                   const Cids& cids,
                   TokenPosition token_pos);
@@ -7608,7 +7758,7 @@ class CheckClassInstr : public TemplateInstruction<1, NoThrow> {
 
   virtual TokenPosition token_pos() const { return token_pos_; }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   const Cids& cids() const { return cids_; }
 
@@ -7659,14 +7809,14 @@ class CheckClassInstr : public TemplateInstruction<1, NoThrow> {
 
 class CheckSmiInstr : public TemplateInstruction<1, NoThrow, Pure> {
  public:
-  CheckSmiInstr(Value* value, intptr_t deopt_id, TokenPosition token_pos)
+  CheckSmiInstr(Definition* value, intptr_t deopt_id, TokenPosition token_pos)
       : TemplateInstruction(deopt_id),
         token_pos_(token_pos),
         licm_hoisted_(false) {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
   virtual TokenPosition token_pos() const { return token_pos_; }
 
   DECLARE_INSTRUCTION(CheckSmi)
@@ -7689,12 +7839,12 @@ class CheckSmiInstr : public TemplateInstruction<1, NoThrow, Pure> {
 
 class CheckClassIdInstr : public TemplateInstruction<1, NoThrow> {
  public:
-  CheckClassIdInstr(Value* value, CidRange cids, intptr_t deopt_id)
+  CheckClassIdInstr(Definition* value, CidRange cids, intptr_t deopt_id)
       : TemplateInstruction(deopt_id), cids_(cids) {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
   const CidRange& cids() const { return cids_; }
 
   DECLARE_INSTRUCTION(CheckClassId)
@@ -7720,7 +7870,7 @@ class CheckClassIdInstr : public TemplateInstruction<1, NoThrow> {
 
 class CheckArrayBoundInstr : public TemplateInstruction<2, NoThrow, Pure> {
  public:
-  CheckArrayBoundInstr(Value* length, Value* index, intptr_t deopt_id)
+  CheckArrayBoundInstr(Definition* length, Definition* index, intptr_t deopt_id)
       : TemplateInstruction(deopt_id),
         generalized_(false),
         licm_hoisted_(false) {
@@ -7728,8 +7878,8 @@ class CheckArrayBoundInstr : public TemplateInstruction<2, NoThrow, Pure> {
     SetInputAt(kIndexPos, index);
   }
 
-  Value* length() const { return inputs_[kLengthPos]; }
-  Value* index() const { return inputs_[kIndexPos]; }
+  Definition* length() const { return UnwrappedInputAt(kLengthPos); }
+  Definition* index() const { return UnwrappedInputAt(kIndexPos); }
 
   DECLARE_INSTRUCTION(CheckArrayBound)
 
@@ -7762,14 +7912,14 @@ class CheckArrayBoundInstr : public TemplateInstruction<2, NoThrow, Pure> {
 
 class GenericCheckBoundInstr : public TemplateInstruction<2, Throws, NoCSE> {
  public:
-  GenericCheckBoundInstr(Value* length, Value* index, intptr_t deopt_id)
+  GenericCheckBoundInstr(Definition* length, Definition* index, intptr_t deopt_id)
       : TemplateInstruction(deopt_id) {
     SetInputAt(kLengthPos, length);
     SetInputAt(kIndexPos, index);
   }
 
-  Value* length() const { return inputs_[kLengthPos]; }
-  Value* index() const { return inputs_[kIndexPos]; }
+  Definition* length() const { return UnwrappedInputAt(kLengthPos); }
+  Definition* index() const { return UnwrappedInputAt(kIndexPos); }
 
   virtual bool HasUnknownSideEffects() const { return false; }
 
@@ -7788,7 +7938,7 @@ class UnboxedIntConverterInstr : public TemplateDefinition<1, NoThrow> {
  public:
   UnboxedIntConverterInstr(Representation from,
                            Representation to,
-                           Value* value,
+                           Definition* value,
                            intptr_t deopt_id)
       : TemplateDefinition(deopt_id),
         from_representation_(from),
@@ -7802,7 +7952,7 @@ class UnboxedIntConverterInstr : public TemplateDefinition<1, NoThrow> {
     SetInputAt(0, value);
   }
 
-  Value* value() const { return inputs_[0]; }
+  Definition* value() const { return UnwrappedInputAt(0); }
 
   Representation from() const { return from_representation_; }
   Representation to() const { return to_representation_; }

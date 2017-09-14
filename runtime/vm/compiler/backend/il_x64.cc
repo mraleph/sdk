@@ -740,9 +740,9 @@ void NativeCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   __ popq(result);
 }
 
-static bool CanBeImmediateIndex(Value* index, intptr_t cid) {
-  if (!index->definition()->IsConstant()) return false;
-  const Object& constant = index->definition()->AsConstant()->value();
+static bool CanBeImmediateIndex(Definition* index, intptr_t cid) {
+  if (!index->IsConstant()) return false;
+  const Object& constant = index->AsConstant()->value();
   if (!constant.IsSmi()) return false;
   const Smi& smi_const = Smi::Cast(constant);
   const intptr_t scale = Instance::ElementSizeFor(cid);
@@ -828,10 +828,10 @@ LocationSummary* LoadUntaggedInstr::MakeLocationSummary(Zone* zone,
 void LoadUntaggedInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   Register obj = locs()->in(0).reg();
   Register result = locs()->out(0).reg();
-  if (object()->definition()->representation() == kUntagged) {
+  if (object()->representation() == kUntagged) {
     __ movq(result, Address(obj, offset()));
   } else {
-    ASSERT(object()->definition()->representation() == kTagged);
+    ASSERT(object()->representation() == kTagged);
     __ movq(result, FieldAddress(obj, offset()));
   }
 }
@@ -956,12 +956,12 @@ LocationSummary* LoadIndexedInstr::MakeLocationSummary(Zone* zone,
   if (index_scale() == 1) {
     locs->set_in(1,
                  CanBeImmediateIndex(index(), class_id())
-                     ? Location::Constant(index()->definition()->AsConstant())
+                     ? Location::Constant(index()->AsConstant())
                      : Location::WritableRegister());
   } else {
     locs->set_in(1,
                  CanBeImmediateIndex(index(), class_id())
-                     ? Location::Constant(index()->definition()->AsConstant())
+                     ? Location::Constant(index()->AsConstant())
                      : Location::RequiresRegister());
   }
   if ((representation() == kUnboxedDouble) ||
@@ -1193,12 +1193,12 @@ LocationSummary* StoreIndexedInstr::MakeLocationSummary(Zone* zone,
   if (index_scale() == 1) {
     locs->set_in(1,
                  CanBeImmediateIndex(index(), class_id())
-                     ? Location::Constant(index()->definition()->AsConstant())
+                     ? Location::Constant(index()->AsConstant())
                      : Location::WritableRegister());
   } else {
     locs->set_in(1,
                  CanBeImmediateIndex(index(), class_id())
-                     ? Location::Constant(index()->definition()->AsConstant())
+                     ? Location::Constant(index()->AsConstant())
                      : Location::RequiresRegister());
   }
   switch (class_id()) {
@@ -1886,14 +1886,14 @@ LocationSummary* StoreStaticFieldInstr::MakeLocationSummary(Zone* zone,
                                                             bool opt) const {
   LocationSummary* locs =
       new (zone) LocationSummary(zone, 1, 1, LocationSummary::kNoCall);
-  locs->set_in(0, value()->NeedsStoreBuffer() ? Location::WritableRegister()
+  locs->set_in(0, value_use()->NeedsStoreBuffer() ? Location::WritableRegister()
                                               : Location::RequiresRegister());
   locs->set_temp(0, Location::RequiresRegister());
   return locs;
 }
 
 void StoreStaticFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  Register value = locs()->in(0).reg();
+  Register value = locs()->in(0).reg(aaa, aaa);
   Register temp = locs()->temp(0).reg();
 
   __ LoadObject(temp, Field::ZoneHandle(Z, field().Original()));
@@ -2981,7 +2981,7 @@ LocationSummary* BinarySmiOpInstr::MakeLocationSummary(Zone* zone,
                                                        bool opt) const {
   const intptr_t kNumInputs = 2;
 
-  ConstantInstr* right_constant = right()->definition()->AsConstant();
+  ConstantInstr* right_constant = right()->AsConstant();
   if ((right_constant != NULL) && (op_kind() != Token::kTRUNCDIV) &&
       (op_kind() != Token::kSHL) && (op_kind() != Token::kMUL) &&
       (op_kind() != Token::kMOD) && CanBeImmediate(right_constant->value())) {
@@ -3000,7 +3000,7 @@ LocationSummary* BinarySmiOpInstr::MakeLocationSummary(Zone* zone,
         LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
     if (RightIsPowerOfTwoConstant()) {
       summary->set_in(0, Location::RequiresRegister());
-      ConstantInstr* right_constant = right()->definition()->AsConstant();
+      ConstantInstr* right_constant = right()->AsConstant();
       summary->set_in(1, Location::Constant(right_constant));
       summary->set_temp(0, Location::RequiresRegister());
       summary->set_out(0, Location::SameAsFirstInput());
@@ -3051,7 +3051,7 @@ LocationSummary* BinarySmiOpInstr::MakeLocationSummary(Zone* zone,
     LocationSummary* summary = new (zone)
         LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
     summary->set_in(0, Location::RequiresRegister());
-    ConstantInstr* constant = right()->definition()->AsConstant();
+    ConstantInstr* constant = right()->AsConstant();
     if (constant != NULL) {
       summary->set_in(1, Location::RegisterOrSmiConstant(right()));
     } else {

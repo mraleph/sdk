@@ -323,12 +323,12 @@ class Location : public ValueObject {
   intptr_t ToStackSlotOffset() const;
 
   // Constants.
-  static Location RegisterOrConstant(Value* value);
-  static Location RegisterOrSmiConstant(Value* value);
-  static Location WritableRegisterOrSmiConstant(Value* value);
-  static Location FixedRegisterOrConstant(Value* value, Register reg);
-  static Location FixedRegisterOrSmiConstant(Value* value, Register reg);
-  static Location AnyOrConstant(Value* value);
+  static Location RegisterOrConstant(Definition* value);
+  static Location RegisterOrSmiConstant(Definition* value);
+  static Location WritableRegisterOrSmiConstant(Definition* value);
+  static Location FixedRegisterOrConstant(Definition* value, Register reg);
+  static Location FixedRegisterOrSmiConstant(Definition* value, Register reg);
+  static Location AnyOrConstant(Definition* value);
 
   const char* Name() const;
   void PrintTo(BufferFormatter* f) const;

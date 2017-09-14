@@ -67,43 +67,43 @@ PairLocation* Location::AsPairLocation() const {
   return reinterpret_cast<PairLocation*>(value_ & ~kLocationTagMask);
 }
 
-Location Location::RegisterOrConstant(Value* value) {
-  ConstantInstr* constant = value->definition()->AsConstant();
+Location Location::RegisterOrConstant(Definition* value) {
+  ConstantInstr* constant = value->AsConstant();
   return ((constant != NULL) && Assembler::IsSafe(constant->value()))
              ? Location::Constant(constant)
              : Location::RequiresRegister();
 }
 
-Location Location::RegisterOrSmiConstant(Value* value) {
-  ConstantInstr* constant = value->definition()->AsConstant();
+Location Location::RegisterOrSmiConstant(Definition* value) {
+  ConstantInstr* constant = value->AsConstant();
   return ((constant != NULL) && Assembler::IsSafeSmi(constant->value()))
              ? Location::Constant(constant)
              : Location::RequiresRegister();
 }
 
-Location Location::WritableRegisterOrSmiConstant(Value* value) {
-  ConstantInstr* constant = value->definition()->AsConstant();
+Location Location::WritableRegisterOrSmiConstant(Definition* value) {
+  ConstantInstr* constant = value->AsConstant();
   return ((constant != NULL) && Assembler::IsSafeSmi(constant->value()))
              ? Location::Constant(constant)
              : Location::WritableRegister();
 }
 
-Location Location::FixedRegisterOrConstant(Value* value, Register reg) {
-  ConstantInstr* constant = value->definition()->AsConstant();
+Location Location::FixedRegisterOrConstant(Definition* value, Register reg) {
+  ConstantInstr* constant = value->AsConstant();
   return ((constant != NULL) && Assembler::IsSafe(constant->value()))
              ? Location::Constant(constant)
              : Location::RegisterLocation(reg);
 }
 
-Location Location::FixedRegisterOrSmiConstant(Value* value, Register reg) {
-  ConstantInstr* constant = value->definition()->AsConstant();
+Location Location::FixedRegisterOrSmiConstant(Definition* value, Register reg) {
+  ConstantInstr* constant = value->AsConstant();
   return ((constant != NULL) && Assembler::IsSafeSmi(constant->value()))
              ? Location::Constant(constant)
              : Location::RegisterLocation(reg);
 }
 
-Location Location::AnyOrConstant(Value* value) {
-  ConstantInstr* constant = value->definition()->AsConstant();
+Location Location::AnyOrConstant(Definition* value) {
+  ConstantInstr* constant = value->AsConstant();
   return ((constant != NULL) && Assembler::IsSafe(constant->value()))
              ? Location::Constant(constant)
              : Location::Any();

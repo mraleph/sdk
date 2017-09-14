@@ -223,7 +223,7 @@ void IRRegExpMacroAssembler::GenerateBacktrackBlock() {
       PushArgument(Bind(new (Z) ConstantInstr(offsets)));
   PushArgumentInstr* block_id_push = PushArgument(Bind(PopStack()));
 
-  Value* offset_value =
+  Definition* offset_value =
       Bind(InstanceCall(InstanceCallDescriptor::FromToken(Token::kINDEX),
                         block_offsets_push, block_id_push));
 
@@ -241,10 +241,10 @@ void IRRegExpMacroAssembler::GenerateSuccessBlock() {
   set_current_instruction(success_block_);
   TAG();
 
-  Value* type = Bind(new (Z) ConstantInstr(
+  Definition* type = Bind(new (Z) ConstantInstr(
       TypeArguments::ZoneHandle(Z, TypeArguments::null())));
-  Value* length = Bind(Uint64Constant(saved_registers_count_));
-  Value* array = Bind(new (Z) CreateArrayInstr(TokenPosition::kNoSource, type,
+  Definition* length = Bind(Uint64Constant(saved_registers_count_));
+  Definition* array = Bind(new (Z) CreateArrayInstr(TokenPosition::kNoSource, type,
                                                length, GetNextDeoptId()));
   StoreLocal(result_, array);
 
@@ -425,9 +425,9 @@ ComparisonInstr* IRRegExpMacroAssembler::Comparison(ComparisonKind kind,
 
   ASSERT(intermediate_operator != Token::kILLEGAL);
 
-  Value* lhs_value = Bind(InstanceCall(
+  Definition* lhs_value = Bind(InstanceCall(
       InstanceCallDescriptor::FromToken(intermediate_operator), lhs, rhs));
-  Value* rhs_value = Bind(BoolConstant(true));
+  Definition* rhs_value = Bind(BoolConstant(true));
 
   return new (Z)
       StrictCompareInstr(TokenPosition::kNoSource, strict_comparison, lhs_value,
@@ -530,7 +530,7 @@ LoadLocalInstr* IRRegExpMacroAssembler::LoadLocal(LocalVariable* local) const {
   return new (Z) LoadLocalInstr(*local, TokenPosition::kNoSource);
 }
 
-void IRRegExpMacroAssembler::StoreLocal(LocalVariable* local, Value* value) {
+void IRRegExpMacroAssembler::StoreLocal(LocalVariable* local, Definition* value) {
   Do(new (Z) StoreLocalInstr(*local, value, TokenPosition::kNoSource));
 }
 
@@ -538,18 +538,18 @@ void IRRegExpMacroAssembler::set_current_instruction(Instruction* instruction) {
   current_instruction_ = instruction;
 }
 
-Value* IRRegExpMacroAssembler::Bind(Definition* definition) {
+Definition* IRRegExpMacroAssembler::Bind(Definition* definition) {
   AppendInstruction(definition);
   definition->set_temp_index(temp_id_.Alloc());
 
-  return new (Z) Value(definition);
+  return definition;
 }
 
 void IRRegExpMacroAssembler::Do(Definition* definition) {
   AppendInstruction(definition);
 }
 
-Value* IRRegExpMacroAssembler::BindLoadLocal(const LocalVariable& local) {
+Definition* IRRegExpMacroAssembler::BindLoadLocal(const LocalVariable& local) {
   if (local.IsConst()) {
     return Bind(new (Z) ConstantInstr(*local.ConstValue()));
   }
@@ -619,7 +619,7 @@ void IRRegExpMacroAssembler::GoTo(JoinEntryInstr* to) {
   set_current_instruction(NULL);
 }
 
-PushArgumentInstr* IRRegExpMacroAssembler::PushArgument(Value* value) {
+PushArgumentInstr* IRRegExpMacroAssembler::PushArgument(Definition* value) {
   arg_id_.Alloc();
   PushArgumentInstr* push = new (Z) PushArgumentInstr(value);
   // Do *not* use Do() for push argument instructions.
@@ -659,7 +659,7 @@ void IRRegExpMacroAssembler::AdvanceCurrentPosition(intptr_t by) {
     PushArgumentInstr* cur_pos_push = PushLocal(current_position_);
     PushArgumentInstr* by_push = PushArgument(Bind(Int64Constant(by)));
 
-    Value* new_pos_value = Bind(Add(cur_pos_push, by_push));
+    Definition* new_pos_value = Bind(Add(cur_pos_push, by_push));
     StoreLocal(current_position_, new_pos_value);
   }
 }
@@ -708,7 +708,7 @@ intptr_t IRRegExpMacroAssembler::GetNextLocalIndex() {
   return kFirstLocalSlotFromFp - id;
 }
 
-Value* IRRegExpMacroAssembler::LoadRegister(intptr_t index) {
+Definition* IRRegExpMacroAssembler::LoadRegister(intptr_t index) {
   PushArgumentInstr* registers_push = PushLocal(registers_);
   PushArgumentInstr* index_push = PushRegisterIndex(index);
   return Bind(InstanceCall(InstanceCallDescriptor::FromToken(Token::kINDEX),
@@ -941,10 +941,10 @@ void IRRegExpMacroAssembler::CheckNotBackReferenceIgnoreCase(
   } else {
     ASSERT(mode_ == UC16);
 
-    Value* string_value = Bind(LoadLocal(string_param_));
-    Value* lhs_index_value = Bind(LoadLocal(match_start_index_));
-    Value* rhs_index_value = Bind(LoadLocal(capture_start_index_));
-    Value* length_value = Bind(LoadLocal(capture_length_));
+    Definition* string_value = Bind(LoadLocal(string_param_));
+    Definition* lhs_index_value = Bind(LoadLocal(match_start_index_));
+    Definition* rhs_index_value = Bind(LoadLocal(capture_start_index_));
+    Definition* length_value = Bind(LoadLocal(capture_length_));
 
     Definition* is_match_def = new (Z) CaseInsensitiveCompareUC16Instr(
         string_value, lhs_index_value, rhs_index_value, length_value,
@@ -1689,19 +1689,19 @@ void IRRegExpMacroAssembler::LoadCurrentCharacterUnchecked(
   StoreLocal(index_temp_, Bind(Add(off_pos_arg, len_arg)));
 
   // Load and store the code units.
-  Value* code_unit_value = LoadCodeUnitsAt(index_temp_, characters);
+  Definition* code_unit_value = LoadCodeUnitsAt(index_temp_, characters);
   StoreLocal(current_character_, code_unit_value);
   PRINT(PushLocal(current_character_));
 }
 
-Value* IRRegExpMacroAssembler::CharacterAt(LocalVariable* index) {
+Definition* IRRegExpMacroAssembler::CharacterAt(LocalVariable* index) {
   return LoadCodeUnitsAt(index, 1);
 }
 
-Value* IRRegExpMacroAssembler::LoadCodeUnitsAt(LocalVariable* index,
+Definition* IRRegExpMacroAssembler::LoadCodeUnitsAt(LocalVariable* index,
                                                intptr_t characters) {
   // Bind the pattern as the load receiver.
-  Value* pattern_val = BindLoadLocal(*string_param_);
+  Definition* pattern_val = BindLoadLocal(*string_param_);
   if (RawObject::IsExternalStringClassId(specialization_cid_)) {
     // The data of an external string is stored through two indirections.
     intptr_t external_offset = 0;
@@ -1718,13 +1718,13 @@ Value* IRRegExpMacroAssembler::LoadCodeUnitsAt(LocalVariable* index,
     // This pushes untagged values on the stack which are immediately consumed:
     // the first value is consumed to obtain the second value which is consumed
     // by LoadCodeUnitsAtInstr below.
-    Value* external_val =
+    Definition* external_val =
         Bind(new (Z) LoadUntaggedInstr(pattern_val, external_offset));
     pattern_val = Bind(new (Z) LoadUntaggedInstr(external_val, data_offset));
   }
 
   // Here pattern_val might be untagged so this must not trigger a GC.
-  Value* index_val = BindLoadLocal(*index);
+  Definition* index_val = BindLoadLocal(*index);
 
   return Bind(new (Z) LoadCodeUnitsInstr(pattern_val, index_val, characters,
                                          specialization_cid_,

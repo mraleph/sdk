@@ -70,7 +70,7 @@ class InlineExitCollector : public ZoneAllocated {
     return ReturnAt(i)->previous();
   }
 
-  Value* ValueAt(intptr_t i) const { return ReturnAt(i)->value(); }
+  Definition* ValueAt(intptr_t i) const { return ReturnAt(i)->value(); }
 
   ReturnInstr* ReturnAt(intptr_t i) const { return exits_[i].exit_return; }
 
@@ -262,7 +262,7 @@ class EffectGraphVisitor : public AstNodeVisitor {
   // Append a graph fragment to this graph.  Assumes this graph is open.
   void Append(const EffectGraphVisitor& other_fragment);
   // Append a definition that can have uses.  Assumes this graph is open.
-  Value* Bind(Definition* definition);
+  Definition* Bind(Definition* definition);
   // Append a computation with no uses.  Assumes this graph is open.
   void Do(Definition* definition);
   // Append a single (non-Definition, non-Entry) instruction.  Assumes this
@@ -446,7 +446,7 @@ class EffectGraphVisitor : public AstNodeVisitor {
   friend class TempLocalScope;  // For ReturnDefinition.
 
   // Helper to drop the result value.
-  virtual void ReturnValue(Value* value) { Do(new DropTempsInstr(0, value)); }
+  virtual void ReturnValue(Definition* value) { Do(new DropTempsInstr(0, value)); }
 
   // Specify a definition of the final result.  Adds the definition to
   // the graph, but normally overridden in subclasses.
@@ -493,15 +493,15 @@ class ValueGraphVisitor : public EffectGraphVisitor {
   virtual void VisitLetNode(LetNode* node);
   virtual void VisitInstanceCallNode(InstanceCallNode* node);
 
-  Value* value() const { return value_; }
+  Definition* value() const { return value_; }
 
  protected:
   // Output parameters.
-  Value* value_;
+  Definition* value_;
 
  private:
   // Helper to set the output state to return a Value.
-  virtual void ReturnValue(Value* value) { value_ = value; }
+  virtual void ReturnValue(Definition* value) { value_ = value; }
 
   // Specify a definition of the final result.  Adds the definition to
   // the graph and returns a use of it (i.e., set the visitor's output
@@ -549,7 +549,7 @@ class TestGraphVisitor : public ValueGraphVisitor {
  private:
   // Construct and concatenate a Branch instruction to this graph fragment.
   // Closes the fragment and sets the output parameters.
-  virtual void ReturnValue(Value* value);
+  virtual void ReturnValue(Definition* value);
 
   // Either merges the definition into a BranchInstr (Comparison, BooleanNegate)
   // or adds the definition to the graph and returns a use of its value.

@@ -1071,7 +1071,7 @@ void DeoptInfoBuilder::AddPp(const Function& function, intptr_t dest_index) {
   instructions_.Add(new (zone()) DeoptPpInstr(object_table_index));
 }
 
-void DeoptInfoBuilder::AddCopy(Value* value,
+void DeoptInfoBuilder::AddCopy(Definition* value,
                                const Location& source_loc,
                                const intptr_t dest_index) {
   DeoptInstr* deopt_instr = NULL;
@@ -1079,18 +1079,18 @@ void DeoptInfoBuilder::AddCopy(Value* value,
     intptr_t object_table_index = FindOrAddObjectInTable(source_loc.constant());
     deopt_instr = new (zone()) DeoptConstantInstr(object_table_index);
   } else if (source_loc.IsInvalid() &&
-             value->definition()->IsMaterializeObject()) {
+             value->IsMaterializeObject()) {
     const intptr_t index =
-        FindMaterialization(value->definition()->AsMaterializeObject());
+        FindMaterialization(value->AsMaterializeObject());
     ASSERT(index >= 0);
     deopt_instr = new (zone()) DeoptMaterializedObjectRefInstr(index);
   } else {
     ASSERT(!source_loc.IsInvalid());
 #if defined(TARGET_ARCH_DBC)
     Representation rep =
-        (value == NULL) ? kTagged : value->definition()->representation();
+        (value == NULL) ? kTagged : value->representation();
 #else
-    Representation rep = value->definition()->representation();
+    Representation rep = value->representation();
 #endif
     switch (rep) {
       case kTagged:
@@ -1177,7 +1177,7 @@ void DeoptInfoBuilder::AddMaterialization(MaterializeObjectInstr* mat) {
   // initialized by default.
   intptr_t non_null_fields = 0;
   for (intptr_t i = 0; i < mat->InputCount(); i++) {
-    if (!mat->InputAt(i)->BindsToConstantNull()) {
+    if (!mat->InputAt(i)->IsConstantNull()) {
       non_null_fields++;
     }
   }
@@ -1186,7 +1186,7 @@ void DeoptInfoBuilder::AddMaterialization(MaterializeObjectInstr* mat) {
 
   for (intptr_t i = 0; i < mat->InputCount(); i++) {
     MaterializeObjectInstr* nested_mat =
-        mat->InputAt(i)->definition()->AsMaterializeObject();
+        mat->InputAt(i)->AsMaterializeObject();
     if (nested_mat != NULL) {
       AddMaterialization(nested_mat);
     }
@@ -1201,7 +1201,7 @@ intptr_t DeoptInfoBuilder::EmitMaterializationArguments(intptr_t dest_index) {
     AddConstant(mat->cls(), dest_index++);
     AddConstant(Smi::ZoneHandle(Smi::New(mat->num_variables())), dest_index++);
     for (intptr_t i = 0; i < mat->InputCount(); i++) {
-      if (!mat->InputAt(i)->BindsToConstantNull()) {
+      if (!mat->InputAt(i)->IsConstantNull()) {
         // Emit offset-value pair.
         AddConstant(Smi::ZoneHandle(Smi::New(mat->FieldOffsetAt(i))),
                     dest_index++);

@@ -249,7 +249,7 @@ Definition* ConstantPropagator::UnwrapPhi(Definition* defn) {
     for (intptr_t i = 0; i < defn->InputCount(); ++i) {
       if (reachable_->Contains(block->PredecessorAt(i)->preorder_number())) {
         if (input == NULL) {
-          input = defn->InputAt(i)->definition();
+          input = defn->InputAt(i);
         } else {
           return defn;
         }
@@ -278,7 +278,7 @@ void ConstantPropagator::VisitPhi(PhiInstr* instr) {
   for (intptr_t pred_idx = 0; pred_idx < instr->InputCount(); ++pred_idx) {
     if (reachable_->Contains(
             block->PredecessorAt(pred_idx)->preorder_number())) {
-      Join(&value, instr->InputAt(pred_idx)->definition()->constant_value());
+      Join(&value, instr->InputAt(pred_idx)->constant_value());
     }
   }
   if (!SetValue(instr, value) &&
@@ -289,7 +289,7 @@ void ConstantPropagator::VisitPhi(PhiInstr* instr) {
 }
 
 void ConstantPropagator::VisitRedefinition(RedefinitionInstr* instr) {
-  const Object& value = instr->value()->definition()->constant_value();
+  const Object& value = instr->value()->constant_value();
   if (IsConstant(value)) {
     SetValue(instr, value);
   } else {
@@ -302,11 +302,11 @@ void ConstantPropagator::VisitParameter(ParameterInstr* instr) {
 }
 
 void ConstantPropagator::VisitPushArgument(PushArgumentInstr* instr) {
-  SetValue(instr, instr->value()->definition()->constant_value());
+  SetValue(instr, instr->value()->constant_value());
 }
 
 void ConstantPropagator::VisitAssertAssignable(AssertAssignableInstr* instr) {
-  const Object& value = instr->value()->definition()->constant_value();
+  const Object& value = instr->value()->constant_value();
   if (IsNonConstant(value)) {
     SetValue(instr, non_constant_);
   } else if (IsConstant(value)) {
@@ -321,7 +321,7 @@ void ConstantPropagator::VisitAssertAssignable(AssertAssignableInstr* instr) {
 }
 
 void ConstantPropagator::VisitAssertBoolean(AssertBooleanInstr* instr) {
-  const Object& value = instr->value()->definition()->constant_value();
+  const Object& value = instr->value()->constant_value();
   if (IsNonConstant(value)) {
     SetValue(instr, non_constant_);
   } else if (IsConstant(value)) {
@@ -384,8 +384,8 @@ void ConstantPropagator::VisitIfThenElse(IfThenElseInstr* instr) {
 }
 
 void ConstantPropagator::VisitStrictCompare(StrictCompareInstr* instr) {
-  Definition* left_defn = instr->left()->definition();
-  Definition* right_defn = instr->right()->definition();
+  Definition* left_defn = instr->left();
+  Definition* right_defn = instr->right();
 
   Definition* unwrapped_left_defn = UnwrapPhi(left_defn);
   Definition* unwrapped_right_defn = UnwrapPhi(right_defn);
@@ -461,8 +461,8 @@ static bool CompareIntegers(Token::Kind kind,
 // Comparison instruction that is equivalent to the (left & right) == 0
 // comparison pattern.
 void ConstantPropagator::VisitTestSmi(TestSmiInstr* instr) {
-  const Object& left = instr->left()->definition()->constant_value();
-  const Object& right = instr->right()->definition()->constant_value();
+  const Object& left = instr->left()->constant_value();
+  const Object& right = instr->right()->constant_value();
   if (IsNonConstant(left) || IsNonConstant(right)) {
     SetValue(instr, non_constant_);
   } else if (IsConstant(left) && IsConstant(right)) {
@@ -487,8 +487,8 @@ void ConstantPropagator::VisitTestCids(TestCidsInstr* instr) {
 }
 
 void ConstantPropagator::VisitEqualityCompare(EqualityCompareInstr* instr) {
-  Definition* left_defn = instr->left()->definition();
-  Definition* right_defn = instr->right()->definition();
+  Definition* left_defn = instr->left();
+  Definition* right_defn = instr->right();
 
   if (RawObject::IsIntegerClassId(instr->operation_cid())) {
     // Fold x == x, and x != x to true/false for numbers comparisons.
@@ -526,8 +526,8 @@ void ConstantPropagator::VisitEqualityCompare(EqualityCompareInstr* instr) {
 }
 
 void ConstantPropagator::VisitRelationalOp(RelationalOpInstr* instr) {
-  const Object& left = instr->left()->definition()->constant_value();
-  const Object& right = instr->right()->definition()->constant_value();
+  const Object& left = instr->left()->constant_value();
+  const Object& right = instr->right()->constant_value();
   if (IsNonConstant(left) || IsNonConstant(right)) {
     SetValue(instr, non_constant_);
   } else if (IsConstant(left) && IsConstant(right)) {
@@ -554,7 +554,7 @@ void ConstantPropagator::VisitDebugStepCheck(DebugStepCheckInstr* instr) {
 
 void ConstantPropagator::VisitOneByteStringFromCharCode(
     OneByteStringFromCharCodeInstr* instr) {
-  const Object& o = instr->char_code()->definition()->constant_value();
+  const Object& o = instr->char_code()->constant_value();
   if (o.IsNull() || IsNonConstant(o)) {
     SetValue(instr, non_constant_);
   } else if (IsConstant(o)) {
@@ -570,7 +570,7 @@ void ConstantPropagator::VisitOneByteStringFromCharCode(
 }
 
 void ConstantPropagator::VisitStringToCharCode(StringToCharCodeInstr* instr) {
-  const Object& o = instr->str()->definition()->constant_value();
+  const Object& o = instr->str()->constant_value();
   if (o.IsNull() || IsNonConstant(o)) {
     SetValue(instr, non_constant_);
   } else if (IsConstant(o)) {
@@ -586,8 +586,8 @@ void ConstantPropagator::VisitStringInterpolate(StringInterpolateInstr* instr) {
 }
 
 void ConstantPropagator::VisitLoadIndexed(LoadIndexedInstr* instr) {
-  const Object& array_obj = instr->array()->definition()->constant_value();
-  const Object& index_obj = instr->index()->definition()->constant_value();
+  const Object& array_obj = instr->array()->constant_value();
+  const Object& index_obj = instr->index()->constant_value();
   if (IsNonConstant(array_obj) || IsNonConstant(index_obj)) {
     SetValue(instr, non_constant_);
   } else if (IsConstant(array_obj) && IsConstant(index_obj)) {
@@ -627,12 +627,12 @@ void ConstantPropagator::VisitLoadCodeUnits(LoadCodeUnitsInstr* instr) {
 }
 
 void ConstantPropagator::VisitStoreIndexed(StoreIndexedInstr* instr) {
-  SetValue(instr, instr->value()->definition()->constant_value());
+  SetValue(instr, instr->value()->constant_value());
 }
 
 void ConstantPropagator::VisitStoreInstanceField(
     StoreInstanceFieldInstr* instr) {
-  SetValue(instr, instr->value()->definition()->constant_value());
+  SetValue(instr, instr->value()->constant_value());
 }
 
 void ConstantPropagator::VisitInitStaticField(InitStaticFieldInstr* instr) {
@@ -656,11 +656,11 @@ void ConstantPropagator::VisitLoadStaticField(LoadStaticFieldInstr* instr) {
 }
 
 void ConstantPropagator::VisitStoreStaticField(StoreStaticFieldInstr* instr) {
-  SetValue(instr, instr->value()->definition()->constant_value());
+  SetValue(instr, instr->value()->constant_value());
 }
 
 void ConstantPropagator::VisitBooleanNegate(BooleanNegateInstr* instr) {
-  const Object& value = instr->value()->definition()->constant_value();
+  const Object& value = instr->value()->constant_value();
   if (IsNonConstant(value)) {
     SetValue(instr, non_constant_);
   } else if (IsConstant(value)) {
@@ -670,11 +670,11 @@ void ConstantPropagator::VisitBooleanNegate(BooleanNegateInstr* instr) {
 }
 
 void ConstantPropagator::VisitInstanceOf(InstanceOfInstr* instr) {
-  Definition* def = instr->value()->definition();
+  Definition* def = instr->value();
   const Object& value = def->constant_value();
   if (IsNonConstant(value)) {
     const AbstractType& checked_type = instr->type();
-    intptr_t value_cid = instr->value()->definition()->Type()->ToCid();
+    intptr_t value_cid = instr->value()->Type()->ToCid();
     Representation rep = def->representation();
     if ((checked_type.IsFloat32x4Type() && (rep == kUnboxedFloat32x4)) ||
         (checked_type.IsInt32x4Type() && (rep == kUnboxedInt32x4)) ||
@@ -695,8 +695,8 @@ void ConstantPropagator::VisitInstanceOf(InstanceOfInstr* instr) {
     if (value.IsInstance()) {
       const Instance& instance = Instance::Cast(value);
       const AbstractType& checked_type = instr->type();
-      if (instr->instantiator_type_arguments()->BindsToConstantNull() &&
-          instr->function_type_arguments()->BindsToConstantNull()) {
+      if (instr->instantiator_type_arguments()->IsConstantNull() &&
+          instr->function_type_arguments()->IsConstantNull()) {
         Error& bound_error = Error::Handle();
         bool is_instance =
             instance.IsInstanceOf(checked_type, Object::null_type_arguments(),
@@ -730,7 +730,7 @@ void ConstantPropagator::VisitLoadClassId(LoadClassIdInstr* instr) {
     return;
   }
 
-  const Object& object = instr->object()->definition()->constant_value();
+  const Object& object = instr->object()->constant_value();
   if (IsConstant(object)) {
     cid = object.GetClassId();
     SetValue(instr, Smi::ZoneHandle(Z, Smi::New(cid)));
@@ -740,15 +740,12 @@ void ConstantPropagator::VisitLoadClassId(LoadClassIdInstr* instr) {
 }
 
 void ConstantPropagator::VisitLoadField(LoadFieldInstr* instr) {
-  Value* instance = instr->instance();
+  Definition* instance = instr->instance()->OriginalDefinition();
   if ((instr->recognized_kind() == MethodRecognizer::kObjectArrayLength) &&
-      instance->definition()->OriginalDefinition()->IsCreateArray()) {
-    Value* num_elements = instance->definition()
-                              ->OriginalDefinition()
-                              ->AsCreateArray()
-                              ->num_elements();
-    if (num_elements->BindsToConstant() &&
-        num_elements->BoundConstant().IsSmi()) {
+      instance->IsCreateArray()) {
+    Definition* num_elements = instance->AsCreateArray()->num_elements();
+    if (num_elements->IsConstant() &&
+        num_elements->AsConstant()->value().IsSmi()) {
       intptr_t length = Smi::Cast(num_elements->BoundConstant()).Value();
       const Object& result = Smi::ZoneHandle(Z, Smi::New(length));
       SetValue(instr, result);
@@ -756,7 +753,7 @@ void ConstantPropagator::VisitLoadField(LoadFieldInstr* instr) {
     }
   }
 
-  const Object& constant = instance->definition()->constant_value();
+  const Object& constant = instance->constant_value();
   if (IsConstant(constant)) {
     if (instr->IsImmutableLengthLoad()) {
       if (constant.IsString()) {
@@ -788,7 +785,7 @@ void ConstantPropagator::VisitLoadField(LoadFieldInstr* instr) {
 
 void ConstantPropagator::VisitInstantiateType(InstantiateTypeInstr* instr) {
   const Object& object =
-      instr->instantiator_type_arguments()->definition()->constant_value();
+      instr->instantiator_type_arguments()->constant_value();
   if (IsNonConstant(object)) {
     SetValue(instr, non_constant_);
     return;
@@ -813,9 +810,9 @@ void ConstantPropagator::VisitInstantiateType(InstantiateTypeInstr* instr) {
 void ConstantPropagator::VisitInstantiateTypeArguments(
     InstantiateTypeArgumentsInstr* instr) {
   const Object& instantiator_type_args =
-      instr->instantiator_type_arguments()->definition()->constant_value();
+      instr->instantiator_type_arguments()->constant_value();
   const Object& function_type_args =
-      instr->function_type_arguments()->definition()->constant_value();
+      instr->function_type_arguments()->constant_value();
   if (IsNonConstant(instantiator_type_args) ||
       IsNonConstant(function_type_args)) {
     SetValue(instr, non_constant_);
@@ -860,8 +857,8 @@ void ConstantPropagator::VisitCloneContext(CloneContextInstr* instr) {
 }
 
 void ConstantPropagator::VisitBinaryIntegerOp(BinaryIntegerOpInstr* binary_op) {
-  const Object& left = binary_op->left()->definition()->constant_value();
-  const Object& right = binary_op->right()->definition()->constant_value();
+  const Object& left = binary_op->left()->constant_value();
+  const Object& right = binary_op->right()->constant_value();
   if (IsConstant(left) && IsConstant(right)) {
     if (left.IsInteger() && right.IsInteger()) {
       const Integer& left_int = Integer::Cast(left);
@@ -922,7 +919,7 @@ void ConstantPropagator::VisitUnboxInt64(UnboxInt64Instr* instr) {
 }
 
 void ConstantPropagator::VisitUnaryIntegerOp(UnaryIntegerOpInstr* unary_op) {
-  const Object& value = unary_op->value()->definition()->constant_value();
+  const Object& value = unary_op->value()->constant_value();
   if (IsConstant(value) && value.IsInteger()) {
     const Integer& value_int = Integer::Cast(value);
     const Integer& result = Integer::Handle(Z, unary_op->Evaluate(value_int));
@@ -944,7 +941,7 @@ void ConstantPropagator::VisitUnarySmiOp(UnarySmiOpInstr* instr) {
 }
 
 void ConstantPropagator::VisitUnaryDoubleOp(UnaryDoubleOpInstr* instr) {
-  const Object& value = instr->value()->definition()->constant_value();
+  const Object& value = instr->value()->constant_value();
   if (IsNonConstant(value)) {
     SetValue(instr, non_constant_);
   } else if (IsConstant(value)) {
@@ -954,7 +951,7 @@ void ConstantPropagator::VisitUnaryDoubleOp(UnaryDoubleOpInstr* instr) {
 }
 
 void ConstantPropagator::VisitSmiToDouble(SmiToDoubleInstr* instr) {
-  const Object& value = instr->value()->definition()->constant_value();
+  const Object& value = instr->value()->constant_value();
   if (IsConstant(value) && value.IsInteger()) {
     SetValue(instr,
              Double::Handle(Z, Double::New(Integer::Cast(value).AsDoubleValue(),
@@ -965,7 +962,7 @@ void ConstantPropagator::VisitSmiToDouble(SmiToDoubleInstr* instr) {
 }
 
 void ConstantPropagator::VisitMintToDouble(MintToDoubleInstr* instr) {
-  const Object& value = instr->value()->definition()->constant_value();
+  const Object& value = instr->value()->constant_value();
   if (IsConstant(value) && value.IsInteger()) {
     SetValue(instr,
              Double::Handle(Z, Double::New(Integer::Cast(value).AsDoubleValue(),
@@ -976,7 +973,7 @@ void ConstantPropagator::VisitMintToDouble(MintToDoubleInstr* instr) {
 }
 
 void ConstantPropagator::VisitInt32ToDouble(Int32ToDoubleInstr* instr) {
-  const Object& value = instr->value()->definition()->constant_value();
+  const Object& value = instr->value()->constant_value();
   if (IsConstant(value) && value.IsInteger()) {
     SetValue(instr,
              Double::Handle(Z, Double::New(Integer::Cast(value).AsDoubleValue(),
@@ -1054,8 +1051,8 @@ static double ToDouble(const Object& value) {
 }
 
 void ConstantPropagator::VisitBinaryDoubleOp(BinaryDoubleOpInstr* instr) {
-  const Object& left = instr->left()->definition()->constant_value();
-  const Object& right = instr->right()->definition()->constant_value();
+  const Object& left = instr->left()->constant_value();
+  const Object& right = instr->right()->constant_value();
   if (IsNonConstant(left) || IsNonConstant(right)) {
     SetValue(instr, non_constant_);
   } else if (left.IsInteger() && right.IsInteger()) {
@@ -1086,7 +1083,7 @@ void ConstantPropagator::VisitBinaryDoubleOp(BinaryDoubleOpInstr* instr) {
 }
 
 void ConstantPropagator::VisitDoubleTestOp(DoubleTestOpInstr* instr) {
-  const Object& value = instr->value()->definition()->constant_value();
+  const Object& value = instr->value()->constant_value();
   const bool is_negated = instr->kind() != Token::kEQ;
   if (value.IsInteger()) {
     SetValue(instr, is_negated ? Bool::True() : Bool::False());
@@ -1111,8 +1108,8 @@ void ConstantPropagator::VisitDoubleTestOp(DoubleTestOpInstr* instr) {
 }
 
 void ConstantPropagator::VisitBinaryFloat32x4Op(BinaryFloat32x4OpInstr* instr) {
-  const Object& left = instr->left()->definition()->constant_value();
-  const Object& right = instr->right()->definition()->constant_value();
+  const Object& left = instr->left()->constant_value();
+  const Object& right = instr->right()->constant_value();
   if (IsNonConstant(left) || IsNonConstant(right)) {
     SetValue(instr, non_constant_);
   } else if (IsConstant(left) && IsConstant(right)) {
@@ -1255,7 +1252,7 @@ void ConstantPropagator::VisitFloat64x2OneArg(Float64x2OneArgInstr* instr) {
 }
 
 void ConstantPropagator::VisitMathUnary(MathUnaryInstr* instr) {
-  const Object& value = instr->value()->definition()->constant_value();
+  const Object& value = instr->value()->constant_value();
   if (IsNonConstant(value)) {
     SetValue(instr, non_constant_);
   } else if (IsConstant(value)) {
@@ -1265,8 +1262,8 @@ void ConstantPropagator::VisitMathUnary(MathUnaryInstr* instr) {
 }
 
 void ConstantPropagator::VisitMathMinMax(MathMinMaxInstr* instr) {
-  const Object& left = instr->left()->definition()->constant_value();
-  const Object& right = instr->right()->definition()->constant_value();
+  const Object& left = instr->left()->constant_value();
+  const Object& right = instr->right()->constant_value();
   if (IsNonConstant(left) || IsNonConstant(right)) {
     SetValue(instr, non_constant_);
   } else if (IsConstant(left) && IsConstant(right)) {
@@ -1281,7 +1278,7 @@ void ConstantPropagator::VisitCaseInsensitiveCompareUC16(
 }
 
 void ConstantPropagator::VisitUnbox(UnboxInstr* instr) {
-  const Object& value = instr->value()->definition()->constant_value();
+  const Object& value = instr->value()->constant_value();
   if (IsNonConstant(value)) {
     SetValue(instr, non_constant_);
   } else if (IsConstant(value)) {
@@ -1291,7 +1288,7 @@ void ConstantPropagator::VisitUnbox(UnboxInstr* instr) {
 }
 
 void ConstantPropagator::VisitBox(BoxInstr* instr) {
-  const Object& value = instr->value()->definition()->constant_value();
+  const Object& value = instr->value()->constant_value();
   if (IsNonConstant(value)) {
     SetValue(instr, non_constant_);
   } else if (IsConstant(value)) {
@@ -1474,7 +1471,7 @@ void ConstantPropagator::Transform() {
             for (PhiIterator it(join); !it.Done(); it.Advance()) {
               PhiInstr* phi = it.Current();
               ASSERT(phi != NULL);
-              phi->InputAt(pred_idx)->RemoveFromUseList();
+              phi->InputUseAt(pred_idx)->RemoveFromUseList();
             }
           }
         }
@@ -1484,7 +1481,7 @@ void ConstantPropagator::Transform() {
             PhiInstr* phi = (*phis)[from_idx];
             ASSERT(phi != NULL);
             if (FLAG_remove_redundant_phis && (live_count == 1)) {
-              Value* input = phi->InputAt(0);
+              Value* input = phi->InputUseAt(0);
               phi->ReplaceUsesWith(input->definition());
               input->RemoveFromUseList();
             } else {

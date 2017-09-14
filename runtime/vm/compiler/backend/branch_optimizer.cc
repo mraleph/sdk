@@ -50,11 +50,11 @@ bool BranchSimplifier::Match(JoinEntryInstr* block) {
   if (comparison->CanDeoptimize() || comparison->MayThrow()) {
     return false;
   }
-  Value* left = comparison->left();
+  Value* left = comparison->InputUseAt(0);
   PhiInstr* phi = left->definition()->AsPhi();
-  Value* right = comparison->right();
+  Definition* right = comparison->right();
   ConstantInstr* constant =
-      (right == NULL) ? NULL : right->definition()->AsConstant();
+      (right == NULL) ? NULL : right->AsConstant();
   return (phi != NULL) && (constant != NULL) && (phi->GetBlock() == block) &&
          PhiHasSingleUse(phi, left) && (block->next() == branch) &&
          (block->phis()->length() == 1);
@@ -76,8 +76,9 @@ JoinEntryInstr* BranchSimplifier::ToJoinEntry(Zone* zone,
 
 BranchInstr* BranchSimplifier::CloneBranch(Zone* zone,
                                            BranchInstr* branch,
-                                           Value* new_left,
-                                           Value* new_right) {
+                                           Definition* new_left,
+                                           Definition* new_right) {
+  // FIXME
   ComparisonInstr* comparison = branch->comparison();
   ComparisonInstr* new_comparison =
       comparison->CopyWithNewOperands(new_left, new_right);
@@ -132,8 +133,8 @@ void BranchSimplifier::Simplify(FlowGraph* flow_graph) {
       JoinEntryInstr* join_false = ToJoinEntry(zone, branch->false_successor());
 
       ComparisonInstr* comparison = branch->comparison();
-      PhiInstr* phi = comparison->left()->definition()->AsPhi();
-      ConstantInstr* constant = comparison->right()->definition()->AsConstant();
+      PhiInstr* phi = comparison->left()->AsPhi();
+      ConstantInstr* constant = comparison->right()->AsConstant();
       ASSERT(constant != NULL);
       // Copy the constant and branch and push it to all the predecessors.
       for (intptr_t i = 0, count = block->PredecessorCount(); i < count; ++i) {
@@ -143,10 +144,8 @@ void BranchSimplifier::Simplify(FlowGraph* flow_graph) {
 
         // Replace the goto in each predecessor with a rewritten branch,
         // rewritten to use the corresponding phi input instead of the phi.
-        Value* new_left = phi->InputAt(i)->Copy(zone);
-        Value* new_right = new (zone) Value(constant);
         BranchInstr* new_branch =
-            CloneBranch(zone, branch, new_left, new_right);
+            CloneBranch(zone, branch, phi->InputAt(i), constant);
         if (branch->env() == NULL) {
           new_branch->InheritDeoptTarget(zone, old_goto);
         } else {
@@ -162,7 +161,7 @@ void BranchSimplifier::Simplify(FlowGraph* flow_graph) {
                it.Advance()) {
             Value* use = it.CurrentValue();
             if (use->definition() == phi) {
-              Definition* replacement = phi->InputAt(i)->definition();
+              Definition* replacement = phi->InputAt(i);
               use->RemoveFromUseList();
               use->set_definition(replacement);
               replacement->AddEnvUse(use);
@@ -276,11 +275,11 @@ void IfConverter::Simplify(FlowGraph* flow_graph) {
       BlockEntryInstr* pred2 = block->PredecessorAt(1);
 
       PhiInstr* phi = (*join->phis())[0];
-      Value* v1 = phi->InputAt(0);
-      Value* v2 = phi->InputAt(1);
+      Definition* v1 = phi->InputAt(0);
+      Definition* v2 = phi->InputAt(1);
 
-      if (IsTrivialBlock(pred1, v1->definition()) &&
-          IsTrivialBlock(pred2, v2->definition()) &&
+      if (IsTrivialBlock(pred1, v1) &&
+          IsTrivialBlock(pred2, v2) &&
           (pred1->PredecessorAt(0) == pred2->PredecessorAt(0))) {
         BlockEntryInstr* pred = pred1->PredecessorAt(0);
         BranchInstr* branch = pred->last_instruction()->AsBranch();
@@ -290,14 +289,13 @@ void IfConverter::Simplify(FlowGraph* flow_graph) {
         // for the given combination of comparison and values flowing from
         // false and true paths.
         if (IfThenElseInstr::Supports(comparison, v1, v2)) {
-          Value* if_true = (pred1 == branch->true_successor()) ? v1 : v2;
-          Value* if_false = (pred2 == branch->true_successor()) ? v1 : v2;
+          Definition* if_true = (pred1 == branch->true_successor()) ? v1 : v2;
+          Definition* if_false = (pred2 == branch->true_successor()) ? v1 : v2;
 
           ComparisonInstr* new_comparison = comparison->CopyWithNewOperands(
-              comparison->left()->Copy(zone), comparison->right()->Copy(zone));
+              comparison->left(), comparison->right());
           IfThenElseInstr* if_then_else = new (zone)
-              IfThenElseInstr(new_comparison, if_true->Copy(zone),
-                              if_false->Copy(zone), Thread::kNoDeoptId);
+              IfThenElseInstr(new_comparison, if_true, if_false, Thread::kNoDeoptId);
           flow_graph->InsertBefore(branch, if_then_else, NULL,
                                    FlowGraph::kValue);
 
@@ -317,8 +315,8 @@ void IfConverter::Simplify(FlowGraph* flow_graph) {
 
           // If v1 and v2 were defined inside eliminated blocks pred1/pred2
           // move them out to the place before inserted IfThenElse instruction.
-          EliminateTrivialBlock(pred1, v1->definition(), if_then_else);
-          EliminateTrivialBlock(pred2, v2->definition(), if_then_else);
+          EliminateTrivialBlock(pred1, v1, if_then_else);
+          EliminateTrivialBlock(pred2, v2, if_then_else);
 
           // Update use lists to reflect changes in the graph.
           phi->UnuseAllInputs();

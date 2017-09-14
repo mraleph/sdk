@@ -119,8 +119,8 @@ static void DeepLiveness(MaterializeObjectInstr* mat, BitVector* live_in) {
   mat->mark_visited_for_liveness();
 
   for (intptr_t i = 0; i < mat->InputCount(); i++) {
-    if (!mat->InputAt(i)->BindsToConstant()) {
-      Definition* defn = mat->InputAt(i)->definition();
+    Definition* defn = mat->InputAt(i);
+    if (!defn->IsConstant()) {
       MaterializeObjectInstr* inner_mat = defn->AsMaterializeObject();
       if (inner_mat != NULL) {
         DeepLiveness(inner_mat, live_in);
@@ -175,14 +175,14 @@ void SSALivenessAnalysis::ComputeInitialSets() {
       // Handle uses.
       ASSERT(locs->input_count() == current->InputCount());
       for (intptr_t j = 0; j < current->InputCount(); j++) {
-        Value* input = current->InputAt(j);
+        Definition* input = current->InputAt(j);
 
-        ASSERT(!locs->in(j).IsConstant() || input->BindsToConstant());
+        ASSERT(!locs->in(j).IsConstant() || input->IsConstant());
         if (locs->in(j).IsConstant()) continue;
 
-        live_in->Add(input->definition()->ssa_temp_index());
-        if (input->definition()->HasPairRepresentation()) {
-          live_in->Add(ToSecondPairVreg(input->definition()->ssa_temp_index()));
+        live_in->Add(input->ssa_temp_index());
+        if (input->HasPairRepresentation()) {
+          live_in->Add(ToSecondPairVreg(input->ssa_temp_index()));
         }
       }
 
@@ -222,11 +222,11 @@ void SSALivenessAnalysis::ComputeInitialSets() {
         // If a phi input is not defined by the corresponding predecessor it
         // must be marked live-in for that predecessor.
         for (intptr_t k = 0; k < phi->InputCount(); k++) {
-          Value* val = phi->InputAt(k);
-          if (val->BindsToConstant()) continue;
+          Definition* val = phi->InputAt(k);
+          if (val->IsConstant()) continue;
 
           BlockEntryInstr* pred = block->PredecessorAt(k);
-          const intptr_t use = val->definition()->ssa_temp_index();
+          const intptr_t use = val->ssa_temp_index();
           if (!kill_[pred->postorder_number()]->Contains(use)) {
             live_in_[pred->postorder_number()]->Add(use);
           }

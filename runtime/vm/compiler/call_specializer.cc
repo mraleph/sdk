@@ -311,7 +311,7 @@ void CallSpecializer::ReplaceCall(Definition* call, Definition* replacement) {
   // Remove the original push arguments.
   for (intptr_t i = 0; i < call->ArgumentCount(); ++i) {
     PushArgumentInstr* push = call->PushArgumentAt(i);
-    push->ReplaceUsesWith(push->value()->definition());
+    push->ReplaceUsesWith(push->value());
     push->RemoveFromGraph();
   }
   call->ReplaceWith(replacement, current_iterator());
@@ -420,7 +420,7 @@ bool CallSpecializer::TryStringLengthOneEquality(InstanceCallInstr* call,
       // Use input of string-from-charcode as left value.
       OneByteStringFromCharCodeInstr* instr =
           left->AsOneByteStringFromCharCode();
-      left_val = new (Z) Value(instr->char_code()->definition());
+      left_val = new (Z) Value(instr->char_code());
       to_remove_left = instr;
     } else {
       // IsLengthOneString(left) should have been false.
@@ -433,7 +433,7 @@ bool CallSpecializer::TryStringLengthOneEquality(InstanceCallInstr* call,
       // Skip string-from-char-code, and use its input as right value.
       OneByteStringFromCharCodeInstr* right_instr =
           right->AsOneByteStringFromCharCode();
-      right_val = new (Z) Value(right_instr->char_code()->definition());
+      right_val = new (Z) Value(right_instr->char_code());
       to_remove_right = right_instr;
     } else {
       AddChecksForArgNr(call, right, /* arg_number = */ 1);
@@ -1360,7 +1360,7 @@ void CallSpecializer::ReplaceWithInstanceOf(InstanceCallInstr* call) {
       ConstantInstr* bool_const = flow_graph()->GetConstant(as_bool);
       for (intptr_t i = 0; i < call->ArgumentCount(); ++i) {
         PushArgumentInstr* push = call->PushArgumentAt(i);
-        push->ReplaceUsesWith(push->value()->definition());
+        push->ReplaceUsesWith(push->value());
         push->RemoveFromGraph();
       }
       call->ReplaceUsesWith(bool_const);
@@ -1439,7 +1439,7 @@ void CallSpecializer::ReplaceWithTypeCast(InstanceCallInstr* call) {
     Environment* copy =
         call->env()->DeepCopy(Z, call->env()->Length() - call->ArgumentCount());
     for (intptr_t i = 0; i < args->length(); ++i) {
-      copy->PushValue(new (Z) Value((*args)[i]->value()->definition()));
+      copy->PushValue(new (Z) Value((*args)[i]->value()));
     }
     call->RemoveEnvironment();
     ReplaceCall(call, new_call);
@@ -1469,7 +1469,7 @@ void CallSpecializer::ReplaceWithTypeCast(InstanceCallInstr* call) {
       // Remove the original push arguments.
       for (intptr_t i = 0; i < call->ArgumentCount(); ++i) {
         PushArgumentInstr* push = call->PushArgumentAt(i);
-        push->ReplaceUsesWith(push->value()->definition());
+        push->ReplaceUsesWith(push->value());
         push->RemoveFromGraph();
       }
       // Remove call, replace it with 'left'.
@@ -1545,9 +1545,9 @@ void CallSpecializer::VisitStaticCall(StaticCallInstr* call) {
               recognized_kind, new (Z) Value(call->ArgumentAt(0)),
               new (Z) Value(call->ArgumentAt(1)), call->deopt_id(), result_cid);
           const Cids* cids = Cids::Create(Z, ic_data, /* argument_number =*/0);
-          AddCheckClass(min_max->left()->definition(), *cids, call->deopt_id(),
+          AddCheckClass(min_max->left(), *cids, call->deopt_id(),
                         call->env(), call);
-          AddCheckClass(min_max->right()->definition(), *cids, call->deopt_id(),
+          AddCheckClass(min_max->right(), *cids, call->deopt_id(),
                         call->env(), call);
           ReplaceCall(call, min_max);
         }
