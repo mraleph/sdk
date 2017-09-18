@@ -800,7 +800,7 @@ static bool BuildFloat32x4Shuffle(FlowGraph* flow_graph,
                             /* is_checked = */ true);
 
   Definition* unboxed_result = builder.AddDefinition(BinarySimdOpInstr::Create(
-      kind, new Value(unboxed_receiver), 0, Thread::kNoDeoptId));
+      kind, new Value(unboxed_receiver), Thread::kNoDeoptId));
 
   Definition* result = builder.AddDefinition(
       BoxInstr::Create(kUnboxedDouble, new Value(unboxed_result)));

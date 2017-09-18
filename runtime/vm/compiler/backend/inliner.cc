@@ -2929,9 +2929,7 @@ static bool InlineFloat32x4Method(FlowGraph* flow_graph,
     case MethodRecognizer::kFloat32x4ShuffleY:
     case MethodRecognizer::kFloat32x4ShuffleZ:
     case MethodRecognizer::kFloat32x4ShuffleW: {
-      *last = BinarySimdOpInstr::Create(kind, new (Z) Value(receiver),
-                                        0,  // mask ignored.
-                                        call->deopt_id());
+      *last = BinarySimdOpInstr::Create(kind, new (Z) Value(receiver), call->deopt_id());
       break;
     }
     case MethodRecognizer::kFloat32x4GetSignMask: {
@@ -2944,18 +2942,12 @@ static bool InlineFloat32x4Method(FlowGraph* flow_graph,
     case MethodRecognizer::kFloat32x4GreaterThanOrEqual:
     case MethodRecognizer::kFloat32x4LessThan:
     case MethodRecognizer::kFloat32x4LessThanOrEqual:
-    case MethodRecognizer::kFloat32x4NotEqual: {
-      Definition* left = receiver;
-      Definition* right = call->ArgumentAt(1);
-      *last = new (Z) Float32x4ComparisonInstr(
-          kind, new (Z) Value(left), new (Z) Value(right), call->deopt_id());
-      break;
-    }
+    case MethodRecognizer::kFloat32x4NotEqual:
     case MethodRecognizer::kFloat32x4Min:
     case MethodRecognizer::kFloat32x4Max: {
       Definition* left = receiver;
       Definition* right = call->ArgumentAt(1);
-      *last = new (Z) Float32x4MinMaxInstr(
+      *last = BinarySimdOpInstr::Create(
           kind, new (Z) Value(left), new (Z) Value(right), call->deopt_id());
       break;
     }

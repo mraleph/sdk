@@ -3804,7 +3804,15 @@ LocationSummary* BinarySimdOpInstr::MakeLocationSummary(Zone* zone,
   V(Int32x4Sub, subpl)                                                         \
   V(Int32x4BitAnd, andps)                                                      \
   V(Int32x4BitOr, orps)                                                        \
-  V(Int32x4BitXor, xorps)
+  V(Int32x4BitXor, xorps) \
+  V(Float32x4Equal, cmppseq) \
+  V(Float32x4NotEqual, cmppsneq) \
+  V(Float32x4GreaterThan, cmppsnle) \
+  V(Float32x4GreaterThanOrEqual, cmppsnlt) \
+  V(Float32x4LessThan, cmppslt) \
+  V(Float32x4LessThanOrEqual, cmppsle) \
+  V(Float32x4Min, minps) \
+  V(Float32x4Max, maxps) \
 
 void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   XmmRegister left = locs()->in(0).fpu_reg();
@@ -3921,79 +3929,6 @@ LocationSummary* Float32x4ZeroInstr::MakeLocationSummary(Zone* zone,
 void Float32x4ZeroInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   XmmRegister value = locs()->out(0).fpu_reg();
   __ xorps(value, value);
-}
-
-LocationSummary* Float32x4ComparisonInstr::MakeLocationSummary(Zone* zone,
-                                                               bool opt) const {
-  const intptr_t kNumInputs = 2;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_in(1, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Float32x4ComparisonInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister left = locs()->in(0).fpu_reg();
-  XmmRegister right = locs()->in(1).fpu_reg();
-
-  ASSERT(locs()->out(0).fpu_reg() == left);
-
-  switch (op_kind()) {
-    case MethodRecognizer::kFloat32x4Equal:
-      __ cmppseq(left, right);
-      break;
-    case MethodRecognizer::kFloat32x4NotEqual:
-      __ cmppsneq(left, right);
-      break;
-    case MethodRecognizer::kFloat32x4GreaterThan:
-      __ cmppsnle(left, right);
-      break;
-    case MethodRecognizer::kFloat32x4GreaterThanOrEqual:
-      __ cmppsnlt(left, right);
-      break;
-    case MethodRecognizer::kFloat32x4LessThan:
-      __ cmppslt(left, right);
-      break;
-    case MethodRecognizer::kFloat32x4LessThanOrEqual:
-      __ cmppsle(left, right);
-      break;
-
-    default:
-      UNREACHABLE();
-  }
-}
-
-LocationSummary* Float32x4MinMaxInstr::MakeLocationSummary(Zone* zone,
-                                                           bool opt) const {
-  const intptr_t kNumInputs = 2;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_in(1, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Float32x4MinMaxInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister left = locs()->in(0).fpu_reg();
-  XmmRegister right = locs()->in(1).fpu_reg();
-
-  ASSERT(locs()->out(0).fpu_reg() == left);
-
-  switch (op_kind()) {
-    case MethodRecognizer::kFloat32x4Min:
-      __ minps(left, right);
-      break;
-    case MethodRecognizer::kFloat32x4Max:
-      __ maxps(left, right);
-      break;
-    default:
-      UNREACHABLE();
-  }
 }
 
 LocationSummary* Float32x4ScaleInstr::MakeLocationSummary(Zone* zone,

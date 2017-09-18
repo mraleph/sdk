@@ -1130,15 +1130,6 @@ void ConstantPropagator::VisitFloat32x4Zero(Float32x4ZeroInstr* instr) {
   SetValue(instr, non_constant_);
 }
 
-void ConstantPropagator::VisitFloat32x4Comparison(
-    Float32x4ComparisonInstr* instr) {
-  SetValue(instr, non_constant_);
-}
-
-void ConstantPropagator::VisitFloat32x4MinMax(Float32x4MinMaxInstr* instr) {
-  SetValue(instr, non_constant_);
-}
-
 void ConstantPropagator::VisitFloat32x4Scale(Float32x4ScaleInstr* instr) {
   SetValue(instr, non_constant_);
 }

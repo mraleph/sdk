@@ -798,21 +798,6 @@ void Float32x4ConstructorInstr::PrintOperandsTo(BufferFormatter* f) const {
   f->Print(")");
 }
 
-void Float32x4ComparisonInstr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("Float32x4 Comparison %s, ",
-           MethodRecognizer::KindToCString(op_kind()));
-  left()->PrintTo(f);
-  f->Print(", ");
-  right()->PrintTo(f);
-}
-
-void Float32x4MinMaxInstr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("%s, ", MethodRecognizer::KindToCString(op_kind()));
-  left()->PrintTo(f);
-  f->Print(", ");
-  right()->PrintTo(f);
-}
-
 void Float32x4SqrtInstr::PrintOperandsTo(BufferFormatter* f) const {
   f->Print("%s, ", MethodRecognizer::KindToCString(op_kind()));
   left()->PrintTo(f);

@@ -461,8 +461,6 @@ class EmbeddedArray<T, 0> {
   M(Simd32x4GetSignMask)                                                       \
   M(Float32x4Constructor)                                                      \
   M(Float32x4Zero)                                                             \
-  M(Float32x4Comparison)                                                       \
-  M(Float32x4MinMax)                                                           \
   M(Float32x4Scale)                                                            \
   M(Float32x4Sqrt)                                                             \
   M(Float32x4ZeroArg)                                                          \
@@ -5299,6 +5297,14 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
   BINARY(MASK, Float32x4ShuffleMix, Float32x4, Float32x4, Float32x4)           \
   BINARY(MASK, Int32x4ShuffleMix, Int32x4, Int32x4, Int32x4) \
   UNARY(_, Float32x4Splat, Double, Float32x4) \
+  BINARY(_, Float32x4Equal, Float32x4, Float32x4, Int32x4) \
+  BINARY(_, Float32x4GreaterThan, Float32x4, Float32x4, Int32x4) \
+  BINARY(_, Float32x4GreaterThanOrEqual, Float32x4, Float32x4, Int32x4) \
+  BINARY(_, Float32x4LessThan, Float32x4, Float32x4, Int32x4) \
+  BINARY(_, Float32x4LessThanOrEqual, Float32x4, Float32x4, Int32x4) \
+  BINARY(_, Float32x4NotEqual, Float32x4, Float32x4, Int32x4) \
+  BINARY(_, Float32x4Min, Float32x4, Float32x4, Float32x4) \
+  BINARY(_, Float32x4Max, Float32x4, Float32x4, Float32x4) \
 
 class BinarySimdOpInstr : public Definition {
  public:
@@ -5335,6 +5341,14 @@ class BinarySimdOpInstr : public Definition {
                                    intptr_t mask,
                                    intptr_t deopt_id) {
     return new BinarySimdOpInstr(KindForMethod(kind), left, mask, deopt_id);
+  }
+
+  static BinarySimdOpInstr* Create(MethodRecognizer::Kind kind,
+                                   Value* left,
+                                   Value* right,
+                                   intptr_t deopt_id) {
+    return new BinarySimdOpInstr(KindForMethod(kind), left, right,
+                                 deopt_id);
   }
 
   static BinarySimdOpInstr* Create(MethodRecognizer::Kind kind,
@@ -5485,98 +5499,6 @@ class Float32x4ZeroInstr : public TemplateDefinition<0, NoThrow, Pure> {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(Float32x4ZeroInstr);
-};
-
-class Float32x4ComparisonInstr : public TemplateDefinition<2, NoThrow, Pure> {
- public:
-  Float32x4ComparisonInstr(MethodRecognizer::Kind op_kind,
-                           Value* left,
-                           Value* right,
-                           intptr_t deopt_id)
-      : TemplateDefinition(deopt_id), op_kind_(op_kind) {
-    SetInputAt(0, left);
-    SetInputAt(1, right);
-  }
-
-  Value* left() const { return inputs_[0]; }
-  Value* right() const { return inputs_[1]; }
-
-  MethodRecognizer::Kind op_kind() const { return op_kind_; }
-
-  virtual bool ComputeCanDeoptimize() const { return false; }
-
-  virtual Representation representation() const { return kUnboxedInt32x4; }
-
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
-    ASSERT((idx == 0) || (idx == 1));
-    return kUnboxedFloat32x4;
-  }
-
-  virtual intptr_t DeoptimizationTarget() const {
-    // Direct access since this instruction cannot deoptimize, and the deopt-id
-    // was inherited from another instruction that could deoptimize.
-    return GetDeoptId();
-  }
-
-  DECLARE_INSTRUCTION(Float32x4Comparison)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AttributesEqual(Instruction* other) const {
-    return op_kind() == other->AsFloat32x4Comparison()->op_kind();
-  }
-
-  PRINT_OPERANDS_TO_SUPPORT
-
- private:
-  const MethodRecognizer::Kind op_kind_;
-
-  DISALLOW_COPY_AND_ASSIGN(Float32x4ComparisonInstr);
-};
-
-class Float32x4MinMaxInstr : public TemplateDefinition<2, NoThrow, Pure> {
- public:
-  Float32x4MinMaxInstr(MethodRecognizer::Kind op_kind,
-                       Value* left,
-                       Value* right,
-                       intptr_t deopt_id)
-      : TemplateDefinition(deopt_id), op_kind_(op_kind) {
-    SetInputAt(0, left);
-    SetInputAt(1, right);
-  }
-
-  Value* left() const { return inputs_[0]; }
-  Value* right() const { return inputs_[1]; }
-
-  MethodRecognizer::Kind op_kind() const { return op_kind_; }
-
-  virtual bool ComputeCanDeoptimize() const { return false; }
-
-  virtual Representation representation() const { return kUnboxedFloat32x4; }
-
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
-    ASSERT((idx == 0) || (idx == 1));
-    return kUnboxedFloat32x4;
-  }
-
-  virtual intptr_t DeoptimizationTarget() const {
-    // Direct access since this instruction cannot deoptimize, and the deopt-id
-    // was inherited from another instruction that could deoptimize.
-    return GetDeoptId();
-  }
-
-  DECLARE_INSTRUCTION(Float32x4MinMax)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AttributesEqual(Instruction* other) const {
-    return op_kind() == other->AsFloat32x4MinMax()->op_kind();
-  }
-
-  PRINT_OPERANDS_TO_SUPPORT
-
- private:
-  const MethodRecognizer::Kind op_kind_;
-
-  DISALLOW_COPY_AND_ASSIGN(Float32x4MinMaxInstr);
 };
 
 class Float32x4ScaleInstr : public TemplateDefinition<2, NoThrow, Pure> {
