@@ -1121,10 +1121,6 @@ void ConstantPropagator::VisitFloat32x4Constructor(
   SetValue(instr, non_constant_);
 }
 
-void ConstantPropagator::VisitSimd32x4Shuffle(Simd32x4ShuffleInstr* instr) {
-  SetValue(instr, non_constant_);
-}
-
 void ConstantPropagator::VisitSimd32x4ShuffleMix(
     Simd32x4ShuffleMixInstr* instr) {
   SetValue(instr, non_constant_);

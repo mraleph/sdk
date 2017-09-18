@@ -1300,27 +1300,15 @@ CompileType DoubleTestOpInstr::ComputeType() const {
 }
 
 static const intptr_t simd_op_result_cids[] = {
-#define CASE(Name, Arg0, Arg1, Result) k##Result##Cid,
-    SIMD_OP_LIST(CASE)
-#undef CASE
+#define CASE_BINARY(Name, Arg0, Arg1, Result) k##Result##Cid,
+#define CASE_UNARY(Name, Arg0, Result) k##Result##Cid,
+    SIMD_OP_LIST(CASE_BINARY, CASE_UNARY)
+#undef CASE_BINARY
+#undef CASE_UNARY
 };
 
 CompileType BinarySimdOpInstr::ComputeType() const {
   return CompileType::FromCid(simd_op_result_cids[kind()]);
-}
-
-CompileType Simd32x4ShuffleInstr::ComputeType() const {
-  if ((op_kind() == MethodRecognizer::kFloat32x4ShuffleX) ||
-      (op_kind() == MethodRecognizer::kFloat32x4ShuffleY) ||
-      (op_kind() == MethodRecognizer::kFloat32x4ShuffleZ) ||
-      (op_kind() == MethodRecognizer::kFloat32x4ShuffleW)) {
-    return CompileType::FromCid(kDoubleCid);
-  }
-  if ((op_kind() == MethodRecognizer::kInt32x4Shuffle)) {
-    return CompileType::FromCid(kInt32x4Cid);
-  }
-  ASSERT((op_kind() == MethodRecognizer::kFloat32x4Shuffle));
-  return CompileType::FromCid(kFloat32x4Cid);
 }
 
 CompileType Simd32x4ShuffleMixInstr::ComputeType() const {

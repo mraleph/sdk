@@ -3780,12 +3780,13 @@ Condition DoubleTestOpInstr::EmitComparisonCode(FlowGraphCompiler* compiler,
 
 LocationSummary* BinarySimdOpInstr::MakeLocationSummary(Zone* zone,
                                                         bool opt) const {
-  const intptr_t kNumInputs = 2;
+  const intptr_t kNumInputs = InputCount();
   const intptr_t kNumTemps = 0;
   LocationSummary* summary = new (zone)
       LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_in(1, Location::RequiresFpuRegister());
+  for (intptr_t i = 0; i < InputCount(); i++) {
+    summary->set_in(i, Location::RequiresFpuRegister());
+  }
   summary->set_out(0, Location::SameAsFirstInput());
   return summary;
 }
@@ -3807,7 +3808,7 @@ LocationSummary* BinarySimdOpInstr::MakeLocationSummary(Zone* zone,
 
 void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   XmmRegister left = locs()->in(0).fpu_reg();
-  XmmRegister right = locs()->in(1).fpu_reg();
+  XmmRegister right = InputCount() == 2 ? locs()->in(1).fpu_reg() : kNoFpuRegister;
 
   ASSERT(locs()->out(0).fpu_reg() == left);
 
@@ -3818,48 +3819,26 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     break;
     SIMD_OP_BACKEND(CASE)
 #undef CASE
-  }
-}
-
-LocationSummary* Simd32x4ShuffleInstr::MakeLocationSummary(Zone* zone,
-                                                           bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Simd32x4ShuffleInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister value = locs()->in(0).fpu_reg();
-
-  ASSERT(locs()->out(0).fpu_reg() == value);
-
-  switch (op_kind()) {
-    case MethodRecognizer::kFloat32x4ShuffleX:
+    case kFloat32x4ShuffleX:
       // Shuffle not necessary.
-      __ cvtss2sd(value, value);
+      __ cvtss2sd(left, left);
       break;
-    case MethodRecognizer::kFloat32x4ShuffleY:
-      __ shufps(value, value, Immediate(0x55));
-      __ cvtss2sd(value, value);
+    case kFloat32x4ShuffleY:
+      __ shufps(left, left, Immediate(0x55));
+      __ cvtss2sd(left, left);
       break;
-    case MethodRecognizer::kFloat32x4ShuffleZ:
-      __ shufps(value, value, Immediate(0xAA));
-      __ cvtss2sd(value, value);
+    case kFloat32x4ShuffleZ:
+      __ shufps(left, left, Immediate(0xAA));
+      __ cvtss2sd(left, left);
       break;
-    case MethodRecognizer::kFloat32x4ShuffleW:
-      __ shufps(value, value, Immediate(0xFF));
-      __ cvtss2sd(value, value);
+    case kFloat32x4ShuffleW:
+      __ shufps(left, left, Immediate(0xFF));
+      __ cvtss2sd(left, left);
       break;
-    case MethodRecognizer::kFloat32x4Shuffle:
-    case MethodRecognizer::kInt32x4Shuffle:
-      __ shufps(value, value, Immediate(mask_));
+    case kFloat32x4Shuffle:
+    case kInt32x4Shuffle:
+      __ shufps(left, left, Immediate(mask()));
       break;
-    default:
-      UNREACHABLE();
   }
 }
 

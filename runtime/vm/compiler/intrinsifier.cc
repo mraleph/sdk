@@ -762,7 +762,7 @@ static bool BuildBinarySimdOp(FlowGraph* flow_graph,
   Definition* right_simd = builder.AddUnboxInstr(rep, new Value(right),
                                                  /* is_checked = */ true);
 
-  Definition* unboxed_result = builder.AddDefinition(new BinarySimdOpInstr(
+  Definition* unboxed_result = builder.AddDefinition(BinarySimdOpInstr::Create(
       BinarySimdOpInstr::KindForOperator(cid, kind), new Value(left_simd),
       new Value(right_simd), Thread::kNoDeoptId));
   Definition* result =
@@ -799,7 +799,7 @@ static bool BuildFloat32x4Shuffle(FlowGraph* flow_graph,
       builder.AddUnboxInstr(kUnboxedFloat32x4, new Value(receiver),
                             /* is_checked = */ true);
 
-  Definition* unboxed_result = builder.AddDefinition(new Simd32x4ShuffleInstr(
+  Definition* unboxed_result = builder.AddDefinition(BinarySimdOpInstr::Create(
       kind, new Value(unboxed_receiver), 0, Thread::kNoDeoptId));
 
   Definition* result = builder.AddDefinition(

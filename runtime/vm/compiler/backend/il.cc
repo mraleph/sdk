@@ -4218,10 +4218,39 @@ BinarySimdOpInstr::Kind BinarySimdOpInstr::KindForOperator(intptr_t cid,
   return kFloat32x4Add;
 }
 
+BinarySimdOpInstr::Kind BinarySimdOpInstr::KindForMethod(MethodRecognizer::Kind kind) {
+  switch (kind) {
+#define CASE_BINARY(Name, Arg0, Arg1, Result)
+#define CASE_UNARY(Name, Arg0, Result) case MethodRecognizer::k##Name: return k##Name;
+SIMD_OP_LIST(CASE_BINARY, CASE_UNARY)
+#undef CASE_BINARY
+#undef CASE_UNARY
+    default:
+      break;
+  }
+
+  UNREACHABLE();
+  return kFloat32x4Add;
+}
+
+static const intptr_t simd_op_input_count[] = {
+#define CASE_BINARY(Name, Arg0, Arg1, Result) 2,
+#define CASE_UNARY(Name, Arg0, Result) 1,
+    SIMD_OP_LIST(CASE_BINARY, CASE_UNARY)
+#undef CASE_UNARY
+#undef CASE_BINARY
+};
+
+intptr_t BinarySimdOpInstr::InputCount() const {
+  return simd_op_input_count[kind()];
+}
+
 static const Representation simd_op_result_representations[] = {
-#define CASE(Name, Arg0, Arg1, Result) kUnboxed##Result,
-    SIMD_OP_LIST(CASE)
-#undef CASE
+#define CASE_BINARY(Name, Arg0, Arg1, Result) kUnboxed##Result,
+#define CASE_UNARY(Name, Arg0, Result) kUnboxed##Result,
+    SIMD_OP_LIST(CASE_BINARY, CASE_UNARY)
+#undef CASE_UNARY
+#undef CASE_BINARY
 };
 
 Representation BinarySimdOpInstr::representation() const {
@@ -4229,9 +4258,11 @@ Representation BinarySimdOpInstr::representation() const {
 }
 
 static const Representation simd_op_input_representations[] = {
-#define CASE(Name, Arg0, Arg1, Result) kUnboxed##Arg0, kUnboxed##Arg1,
-    SIMD_OP_LIST(CASE)
-#undef CASE
+#define CASE_BINARY(Name, Arg0, Arg1, Result) kUnboxed##Arg0, kUnboxed##Arg1,
+#define CASE_UNARY(Name, Arg0, Result) kUnboxed##Arg0, kNoRepresentation,
+    SIMD_OP_LIST(CASE_BINARY, CASE_UNARY)
+#undef CASE_BINARY
+#undef CASE_UNARY
 };
 
 Representation BinarySimdOpInstr::RequiredInputRepresentation(
