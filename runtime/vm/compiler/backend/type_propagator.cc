@@ -1323,10 +1323,6 @@ CompileType Float32x4ZeroInstr::ComputeType() const {
   return CompileType::FromCid(kFloat32x4Cid);
 }
 
-CompileType Float32x4SplatInstr::ComputeType() const {
-  return CompileType::FromCid(kFloat32x4Cid);
-}
-
 CompileType Float32x4ComparisonInstr::ComputeType() const {
   return CompileType::FromCid(kInt32x4Cid);
 }

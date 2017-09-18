@@ -1130,10 +1130,6 @@ void ConstantPropagator::VisitFloat32x4Zero(Float32x4ZeroInstr* instr) {
   SetValue(instr, non_constant_);
 }
 
-void ConstantPropagator::VisitFloat32x4Splat(Float32x4SplatInstr* instr) {
-  SetValue(instr, non_constant_);
-}
-
 void ConstantPropagator::VisitFloat32x4Comparison(
     Float32x4ComparisonInstr* instr) {
   SetValue(instr, non_constant_);

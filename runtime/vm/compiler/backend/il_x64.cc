@@ -3844,6 +3844,11 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     case kInt32x4ShuffleMix:
       __ shufps(left, right, Immediate(mask()));
       break;
+    case kFloat32x4Splat:  // Convert to Float32.
+      __ cvtsd2ss(left, left);
+      // Splat across all lanes.
+      __ shufps(left, left, Immediate(0x00));
+      break;
   }
 }
 
@@ -3916,26 +3921,6 @@ LocationSummary* Float32x4ZeroInstr::MakeLocationSummary(Zone* zone,
 void Float32x4ZeroInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   XmmRegister value = locs()->out(0).fpu_reg();
   __ xorps(value, value);
-}
-
-LocationSummary* Float32x4SplatInstr::MakeLocationSummary(Zone* zone,
-                                                          bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Float32x4SplatInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister value = locs()->out(0).fpu_reg();
-  ASSERT(locs()->in(0).fpu_reg() == locs()->out(0).fpu_reg());
-  // Convert to Float32.
-  __ cvtsd2ss(value, value);
-  // Splat across all lanes.
-  __ shufps(value, value, Immediate(0x00));
 }
 
 LocationSummary* Float32x4ComparisonInstr::MakeLocationSummary(Zone* zone,
