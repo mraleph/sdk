@@ -457,7 +457,7 @@ class EmbeddedArray<T, 0> {
   M(GuardFieldClass)                                                           \
   M(GuardFieldLength)                                                          \
   M(IfThenElse)                                                                \
-  M(BinaryFloat32x4Op)                                                         \
+  M(BinarySimdOp)                                                              \
   M(Simd32x4Shuffle)                                                           \
   M(Simd32x4ShuffleMix)                                                        \
   M(Simd32x4GetSignMask)                                                       \
@@ -479,10 +479,8 @@ class EmbeddedArray<T, 0> {
   M(Int32x4Select)                                                             \
   M(Int32x4SetFlag)                                                            \
   M(Int32x4ToFloat32x4)                                                        \
-  M(BinaryInt32x4Op)                                                           \
   M(TestSmi)                                                                   \
   M(TestCids)                                                                  \
-  M(BinaryFloat64x2Op)                                                         \
   M(Float64x2Zero)                                                             \
   M(Float64x2Constructor)                                                      \
   M(Float64x2Splat)                                                            \
@@ -5278,30 +5276,50 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
   DISALLOW_COPY_AND_ASSIGN(DoubleTestOpInstr);
 };
 
-class BinaryFloat32x4OpInstr : public TemplateDefinition<2, NoThrow, Pure> {
+#define SIMD_BINARY_FLOAT_OP_LIST(V, T)                                        \
+  V(T##Add, T, T, T)                                                           \
+  V(T##Sub, T, T, T)                                                           \
+  V(T##Mul, T, T, T)                                                           \
+  V(T##Div, T, T, T)
+
+#define SIMD_BINARY_INTEGER_OP_LIST(V, T)                                      \
+  V(T##Add, T, T, T)                                                           \
+  V(T##Sub, T, T, T)                                                           \
+  V(T##BitAnd, T, T, T)                                                        \
+  V(T##BitOr, T, T, T)                                                         \
+  V(T##BitXor, T, T, T)
+
+#define SIMD_OP_LIST(V)                                                        \
+  SIMD_BINARY_FLOAT_OP_LIST(V, Float32x4)                                      \
+  SIMD_BINARY_FLOAT_OP_LIST(V, Float64x2)                                      \
+  SIMD_BINARY_INTEGER_OP_LIST(V, Int32x4)
+
+class BinarySimdOpInstr : public TemplateDefinition<2, NoThrow, Pure> {
  public:
-  BinaryFloat32x4OpInstr(Token::Kind op_kind,
-                         Value* left,
-                         Value* right,
-                         intptr_t deopt_id)
-      : TemplateDefinition(deopt_id), op_kind_(op_kind) {
+  enum Kind {
+#define DECLARE_ENUM(Name, Arg0, Arg1, Result) k##Name,
+    SIMD_OP_LIST(DECLARE_ENUM)
+#undef DECLARE_ENUM
+  };
+
+  BinarySimdOpInstr(Kind kind, Value* left, Value* right, intptr_t deopt_id)
+      : TemplateDefinition(deopt_id), kind_(kind) {
     SetInputAt(0, left);
     SetInputAt(1, right);
   }
 
+  static Kind KindForOperator(intptr_t cid, Token::Kind op);
+
   Value* left() const { return inputs_[0]; }
   Value* right() const { return inputs_[1]; }
 
-  Token::Kind op_kind() const { return op_kind_; }
+  Kind kind() const { return kind_; }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
-  virtual Representation representation() const { return kUnboxedFloat32x4; }
+  virtual Representation representation() const;
 
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
-    ASSERT((idx == 0) || (idx == 1));
-    return kUnboxedFloat32x4;
-  }
+  virtual Representation RequiredInputRepresentation(intptr_t idx) const;
 
   virtual intptr_t DeoptimizationTarget() const {
     // Direct access since this instruction cannot deoptimize, and the deopt-id
@@ -5309,19 +5327,19 @@ class BinaryFloat32x4OpInstr : public TemplateDefinition<2, NoThrow, Pure> {
     return GetDeoptId();
   }
 
-  DECLARE_INSTRUCTION(BinaryFloat32x4Op)
+  DECLARE_INSTRUCTION(BinarySimdOp)
   virtual CompileType ComputeType() const;
 
   virtual bool AttributesEqual(Instruction* other) const {
-    return op_kind() == other->AsBinaryFloat32x4Op()->op_kind();
+    return kind() == other->AsBinarySimdOp()->kind();
   }
 
   PRINT_OPERANDS_TO_SUPPORT
 
  private:
-  const Token::Kind op_kind_;
+  const Kind kind_;
 
-  DISALLOW_COPY_AND_ASSIGN(BinaryFloat32x4OpInstr);
+  DISALLOW_COPY_AND_ASSIGN(BinarySimdOpInstr);
 };
 
 class Simd32x4ShuffleInstr : public TemplateDefinition<1, NoThrow, Pure> {
@@ -6536,98 +6554,6 @@ class Int32x4ToFloat32x4Instr : public TemplateDefinition<1, NoThrow, Pure> {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(Int32x4ToFloat32x4Instr);
-};
-
-class BinaryInt32x4OpInstr : public TemplateDefinition<2, NoThrow, Pure> {
- public:
-  BinaryInt32x4OpInstr(Token::Kind op_kind,
-                       Value* left,
-                       Value* right,
-                       intptr_t deopt_id)
-      : TemplateDefinition(deopt_id), op_kind_(op_kind) {
-    SetInputAt(0, left);
-    SetInputAt(1, right);
-  }
-
-  Value* left() const { return inputs_[0]; }
-  Value* right() const { return inputs_[1]; }
-
-  Token::Kind op_kind() const { return op_kind_; }
-
-  virtual bool ComputeCanDeoptimize() const { return false; }
-
-  virtual Representation representation() const { return kUnboxedInt32x4; }
-
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
-    ASSERT((idx == 0) || (idx == 1));
-    return kUnboxedInt32x4;
-  }
-
-  virtual intptr_t DeoptimizationTarget() const {
-    // Direct access since this instruction cannot deoptimize, and the deopt-id
-    // was inherited from another instruction that could deoptimize.
-    return GetDeoptId();
-  }
-
-  DECLARE_INSTRUCTION(BinaryInt32x4Op)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AttributesEqual(Instruction* other) const {
-    return op_kind() == other->AsBinaryInt32x4Op()->op_kind();
-  }
-
-  PRINT_OPERANDS_TO_SUPPORT
-
- private:
-  const Token::Kind op_kind_;
-
-  DISALLOW_COPY_AND_ASSIGN(BinaryInt32x4OpInstr);
-};
-
-class BinaryFloat64x2OpInstr : public TemplateDefinition<2, NoThrow, Pure> {
- public:
-  BinaryFloat64x2OpInstr(Token::Kind op_kind,
-                         Value* left,
-                         Value* right,
-                         intptr_t deopt_id)
-      : TemplateDefinition(deopt_id), op_kind_(op_kind) {
-    SetInputAt(0, left);
-    SetInputAt(1, right);
-  }
-
-  Value* left() const { return inputs_[0]; }
-  Value* right() const { return inputs_[1]; }
-
-  Token::Kind op_kind() const { return op_kind_; }
-
-  virtual bool ComputeCanDeoptimize() const { return false; }
-
-  virtual Representation representation() const { return kUnboxedFloat64x2; }
-
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
-    ASSERT((idx == 0) || (idx == 1));
-    return kUnboxedFloat64x2;
-  }
-
-  virtual intptr_t DeoptimizationTarget() const {
-    // Direct access since this instruction cannot deoptimize, and the deopt-id
-    // was inherited from another instruction that could deoptimize.
-    return GetDeoptId();
-  }
-
-  DECLARE_INSTRUCTION(BinaryFloat64x2Op)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AttributesEqual(Instruction* other) const {
-    return op_kind() == other->AsBinaryFloat64x2Op()->op_kind();
-  }
-
-  PRINT_OPERANDS_TO_SUPPORT
-
- private:
-  const Token::Kind op_kind_;
-
-  DISALLOW_COPY_AND_ASSIGN(BinaryFloat64x2OpInstr);
 };
 
 class UnaryIntegerOpInstr : public TemplateDefinition<1, NoThrow, Pure> {

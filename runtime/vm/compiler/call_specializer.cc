@@ -743,12 +743,9 @@ bool CallSpecializer::TryReplaceWithBinaryOp(InstanceCallInstr* call,
           op_kind, new (Z) Value(left), new (Z) Value(right), call->deopt_id());
       ReplaceCall(call, bin_op);
     }
-  } else if (operands_type == kFloat32x4Cid) {
-    return InlineFloat32x4BinaryOp(call, op_kind);
-  } else if (operands_type == kInt32x4Cid) {
-    return InlineInt32x4BinaryOp(call, op_kind);
-  } else if (operands_type == kFloat64x2Cid) {
-    return InlineFloat64x2BinaryOp(call, op_kind);
+  } else if (operands_type == kFloat32x4Cid || operands_type == kInt32x4Cid ||
+             operands_type == kFloat64x2Cid) {
+    return InlineSimdBinaryOp(call, operands_type, op_kind);
   } else if (op_kind == Token::kMOD) {
     ASSERT(operands_type == kSmiCid);
     if (right->IsConstant()) {
@@ -964,8 +961,9 @@ bool CallSpecializer::TryInlineInstanceSetter(InstanceCallInstr* instr,
   return true;
 }
 
-bool CallSpecializer::InlineFloat32x4BinaryOp(InstanceCallInstr* call,
-                                              Token::Kind op_kind) {
+bool CallSpecializer::InlineSimdBinaryOp(InstanceCallInstr* call,
+                                         intptr_t cid,
+                                         Token::Kind op_kind) {
   if (!ShouldInlineSimd()) {
     return false;
   }
@@ -977,48 +975,11 @@ bool CallSpecializer::InlineFloat32x4BinaryOp(InstanceCallInstr* call,
   AddChecksForArgNr(call, left, /* arg_number = */ 0);
   AddChecksForArgNr(call, right, /* arg_number = */ 1);
   // Replace call.
-  BinaryFloat32x4OpInstr* float32x4_bin_op = new (Z) BinaryFloat32x4OpInstr(
-      op_kind, new (Z) Value(left), new (Z) Value(right), call->deopt_id());
-  ReplaceCall(call, float32x4_bin_op);
+  BinarySimdOpInstr* op = new (Z) BinarySimdOpInstr(
+      BinarySimdOpInstr::KindForOperator(cid, op_kind), new (Z) Value(left),
+      new (Z) Value(right), call->deopt_id());
+  ReplaceCall(call, op);
 
-  return true;
-}
-
-bool CallSpecializer::InlineInt32x4BinaryOp(InstanceCallInstr* call,
-                                            Token::Kind op_kind) {
-  if (!ShouldInlineSimd()) {
-    return false;
-  }
-  ASSERT(call->type_args_len() == 0);
-  ASSERT(call->ArgumentCount() == 2);
-  Definition* const left = call->ArgumentAt(0);
-  Definition* const right = call->ArgumentAt(1);
-  // Type check left and right.
-  AddChecksForArgNr(call, left, /* arg_number = */ 0);
-  AddChecksForArgNr(call, right, /* arg_number = */ 1);
-  // Replace call.
-  BinaryInt32x4OpInstr* int32x4_bin_op = new (Z) BinaryInt32x4OpInstr(
-      op_kind, new (Z) Value(left), new (Z) Value(right), call->deopt_id());
-  ReplaceCall(call, int32x4_bin_op);
-  return true;
-}
-
-bool CallSpecializer::InlineFloat64x2BinaryOp(InstanceCallInstr* call,
-                                              Token::Kind op_kind) {
-  if (!ShouldInlineSimd()) {
-    return false;
-  }
-  ASSERT(call->type_args_len() == 0);
-  ASSERT(call->ArgumentCount() == 2);
-  Definition* const left = call->ArgumentAt(0);
-  Definition* const right = call->ArgumentAt(1);
-  // Type check left and right.
-  AddChecksForArgNr(call, left, /* arg_number = */ 0);
-  AddChecksForArgNr(call, right, /* arg_number = */ 1);
-  // Replace call.
-  BinaryFloat64x2OpInstr* float64x2_bin_op = new (Z) BinaryFloat64x2OpInstr(
-      op_kind, new (Z) Value(left), new (Z) Value(right), call->deopt_id());
-  ReplaceCall(call, float64x2_bin_op);
   return true;
 }
 

@@ -1299,8 +1299,14 @@ CompileType DoubleTestOpInstr::ComputeType() const {
   return CompileType::FromCid(kBoolCid);
 }
 
-CompileType BinaryFloat32x4OpInstr::ComputeType() const {
-  return CompileType::FromCid(kFloat32x4Cid);
+static const intptr_t simd_op_result_cids[] = {
+#define CASE(Name, Arg0, Arg1, Result) k##Result##Cid,
+    SIMD_OP_LIST(CASE)
+#undef CASE
+};
+
+CompileType BinarySimdOpInstr::ComputeType() const {
+  return CompileType::FromCid(simd_op_result_cids[kind()]);
 }
 
 CompileType Simd32x4ShuffleInstr::ComputeType() const {
@@ -1435,14 +1441,6 @@ CompileType Int32x4SetFlagInstr::ComputeType() const {
 
 CompileType Int32x4ToFloat32x4Instr::ComputeType() const {
   return CompileType::FromCid(kFloat32x4Cid);
-}
-
-CompileType BinaryInt32x4OpInstr::ComputeType() const {
-  return CompileType::FromCid(kInt32x4Cid);
-}
-
-CompileType BinaryFloat64x2OpInstr::ComputeType() const {
-  return CompileType::FromCid(kFloat64x2Cid);
 }
 
 CompileType MathUnaryInstr::ComputeType() const {

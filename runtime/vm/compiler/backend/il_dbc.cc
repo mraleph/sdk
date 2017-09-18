@@ -60,7 +60,6 @@ DECLARE_FLAG(int, optimization_counter_threshold);
   M(BinaryInt64Op)                                                             \
   M(ShiftInt64Op)                                                              \
   M(UnaryInt64Op)                                                              \
-  M(BinaryFloat32x4Op)                                                         \
   M(Simd32x4Shuffle)                                                           \
   M(Simd32x4ShuffleMix)                                                        \
   M(Simd32x4GetSignMask)                                                       \
@@ -81,8 +80,6 @@ DECLARE_FLAG(int, optimization_counter_threshold);
   M(Int32x4Select)                                                             \
   M(Int32x4SetFlag)                                                            \
   M(Int32x4ToFloat32x4)                                                        \
-  M(BinaryInt32x4Op)                                                           \
-  M(BinaryFloat64x2Op)                                                         \
   M(Float64x2Zero)                                                             \
   M(Float64x2Constructor)                                                      \
   M(Float64x2Splat)                                                            \

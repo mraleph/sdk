@@ -4162,6 +4162,84 @@ void NativeCallInstr::SetupNative() {
   set_native_c_function(native_function);
 }
 
+// SIMD
+BinarySimdOpInstr::Kind BinarySimdOpInstr::KindForOperator(intptr_t cid,
+                                                           Token::Kind op) {
+  switch (cid) {
+    case kFloat32x4Cid:
+      switch (op) {
+        case Token::kADD:
+          return kFloat32x4Add;
+        case Token::kSUB:
+          return kFloat32x4Sub;
+        case Token::kMUL:
+          return kFloat32x4Mul;
+        case Token::kDIV:
+          return kFloat32x4Div;
+        default:
+          break;
+      }
+      break;
+
+    case kFloat64x2Cid:
+      switch (op) {
+        case Token::kADD:
+          return kFloat64x2Add;
+        case Token::kSUB:
+          return kFloat64x2Sub;
+        case Token::kMUL:
+          return kFloat64x2Mul;
+        case Token::kDIV:
+          return kFloat64x2Div;
+        default:
+          break;
+      }
+      break;
+
+    case kInt32x4Cid:
+      switch (op) {
+        case Token::kADD:
+          return kInt32x4Add;
+        case Token::kSUB:
+          return kInt32x4Sub;
+        case Token::kBIT_AND:
+          return kInt32x4BitAnd;
+        case Token::kBIT_OR:
+          return kInt32x4BitOr;
+        case Token::kBIT_XOR:
+          return kInt32x4BitXor;
+        default:
+          break;
+      }
+      break;
+  }
+
+  UNREACHABLE();
+  return kFloat32x4Add;
+}
+
+static const Representation simd_op_result_representations[] = {
+#define CASE(Name, Arg0, Arg1, Result) kUnboxed##Result,
+    SIMD_OP_LIST(CASE)
+#undef CASE
+};
+
+Representation BinarySimdOpInstr::representation() const {
+  return simd_op_result_representations[kind()];
+}
+
+static const Representation simd_op_input_representations[] = {
+#define CASE(Name, Arg0, Arg1, Result) kUnboxed##Arg0, kUnboxed##Arg1,
+    SIMD_OP_LIST(CASE)
+#undef CASE
+};
+
+Representation BinarySimdOpInstr::RequiredInputRepresentation(
+    intptr_t idx) const {
+  ASSERT(idx == 0 || idx == 1);
+  return simd_op_input_representations[kind() * 2 + idx];
+}
+
 #undef __
 
 }  // namespace dart

@@ -127,9 +127,10 @@ class CallSpecializer : public FlowGraphVisitor {
                          Definition* instr,
                          int argument_number);
 
-  bool InlineFloat32x4BinaryOp(InstanceCallInstr* call, Token::Kind op_kind);
-  bool InlineInt32x4BinaryOp(InstanceCallInstr* call, Token::Kind op_kind);
-  bool InlineFloat64x2BinaryOp(InstanceCallInstr* call, Token::Kind op_kind);
+  bool InlineSimdBinaryOp(InstanceCallInstr* call,
+                          intptr_t cid,
+                          Token::Kind op_kind);
+
   bool TryInlineImplicitInstanceGetter(InstanceCallInstr* call);
 
   RawBool* InstanceOfAsBool(const ICData& ic_data,

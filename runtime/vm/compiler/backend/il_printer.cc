@@ -768,15 +768,9 @@ void DoubleTestOpInstr::PrintOperandsTo(BufferFormatter* f) const {
   value()->PrintTo(f);
 }
 
-void BinaryFloat32x4OpInstr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("%s, ", Token::Str(op_kind()));
-  left()->PrintTo(f);
-  f->Print(", ");
-  right()->PrintTo(f);
-}
-
-void BinaryFloat64x2OpInstr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("%s, ", Token::Str(op_kind()));
+void BinarySimdOpInstr::PrintOperandsTo(BufferFormatter* f) const {
+  // TODO(vegorov)
+  f->Print("%d, ", kind());
   left()->PrintTo(f);
   f->Print(", ");
   right()->PrintTo(f);
@@ -961,13 +955,6 @@ void Int32x4SelectInstr::PrintOperandsTo(BufferFormatter* f) const {
 void Int32x4ToFloat32x4Instr::PrintOperandsTo(BufferFormatter* f) const {
   f->Print("Int32x4.toFloat32x4 ");
   left()->PrintTo(f);
-}
-
-void BinaryInt32x4OpInstr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("%s, ", Token::Str(op_kind()));
-  left()->PrintTo(f);
-  f->Print(", ");
-  right()->PrintTo(f);
 }
 
 void UnaryDoubleOpInstr::PrintOperandsTo(BufferFormatter* f) const {

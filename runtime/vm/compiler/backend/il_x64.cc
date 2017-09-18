@@ -3778,8 +3778,8 @@ Condition DoubleTestOpInstr::EmitComparisonCode(FlowGraphCompiler* compiler,
   }
 }
 
-LocationSummary* BinaryFloat32x4OpInstr::MakeLocationSummary(Zone* zone,
-                                                             bool opt) const {
+LocationSummary* BinarySimdOpInstr::MakeLocationSummary(Zone* zone,
+                                                        bool opt) const {
   const intptr_t kNumInputs = 2;
   const intptr_t kNumTemps = 0;
   LocationSummary* summary = new (zone)
@@ -3790,63 +3790,34 @@ LocationSummary* BinaryFloat32x4OpInstr::MakeLocationSummary(Zone* zone,
   return summary;
 }
 
-void BinaryFloat32x4OpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
+#define SIMD_BINARY_FLOAT_OP_BACKEND(V, Type, suffix)                          \
+  V(Type##Add, add##suffix)                                                    \
+  V(Type##Sub, sub##suffix)                                                    \
+  V(Type##Mul, mul##suffix)                                                    \
+  V(Type##Div, div##suffix)
+
+#define SIMD_OP_BACKEND(V)                                                     \
+  SIMD_BINARY_FLOAT_OP_BACKEND(V, Float32x4, ps)                               \
+  SIMD_BINARY_FLOAT_OP_BACKEND(V, Float64x2, pd)                               \
+  V(Int32x4Add, addpl)                                                         \
+  V(Int32x4Sub, subpl)                                                         \
+  V(Int32x4BitAnd, andps)                                                      \
+  V(Int32x4BitOr, orps)                                                        \
+  V(Int32x4BitXor, xorps)
+
+void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   XmmRegister left = locs()->in(0).fpu_reg();
   XmmRegister right = locs()->in(1).fpu_reg();
 
   ASSERT(locs()->out(0).fpu_reg() == left);
 
-  switch (op_kind()) {
-    case Token::kADD:
-      __ addps(left, right);
-      break;
-    case Token::kSUB:
-      __ subps(left, right);
-      break;
-    case Token::kMUL:
-      __ mulps(left, right);
-      break;
-    case Token::kDIV:
-      __ divps(left, right);
-      break;
-    default:
-      UNREACHABLE();
-  }
-}
-
-LocationSummary* BinaryFloat64x2OpInstr::MakeLocationSummary(Zone* zone,
-                                                             bool opt) const {
-  const intptr_t kNumInputs = 2;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_in(1, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void BinaryFloat64x2OpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister left = locs()->in(0).fpu_reg();
-  XmmRegister right = locs()->in(1).fpu_reg();
-
-  ASSERT(locs()->out(0).fpu_reg() == left);
-
-  switch (op_kind()) {
-    case Token::kADD:
-      __ addpd(left, right);
-      break;
-    case Token::kSUB:
-      __ subpd(left, right);
-      break;
-    case Token::kMUL:
-      __ mulpd(left, right);
-      break;
-    case Token::kDIV:
-      __ divpd(left, right);
-      break;
-    default:
-      UNREACHABLE();
+  switch (kind()) {
+#define CASE(Name, op)                                                         \
+  case k##Name:                                                                \
+    __ op(left, right);                                                        \
+    break;
+    SIMD_OP_BACKEND(CASE)
+#undef CASE
   }
 }
 
@@ -4740,46 +4711,6 @@ LocationSummary* Int32x4ToFloat32x4Instr::MakeLocationSummary(Zone* zone,
 
 void Int32x4ToFloat32x4Instr::EmitNativeCode(FlowGraphCompiler* compiler) {
   // NOP.
-}
-
-LocationSummary* BinaryInt32x4OpInstr::MakeLocationSummary(Zone* zone,
-                                                           bool opt) const {
-  const intptr_t kNumInputs = 2;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_in(1, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void BinaryInt32x4OpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister left = locs()->in(0).fpu_reg();
-  XmmRegister right = locs()->in(1).fpu_reg();
-  ASSERT(left == locs()->out(0).fpu_reg());
-  switch (op_kind()) {
-    case Token::kBIT_AND: {
-      __ andps(left, right);
-      break;
-    }
-    case Token::kBIT_OR: {
-      __ orps(left, right);
-      break;
-    }
-    case Token::kBIT_XOR: {
-      __ xorps(left, right);
-      break;
-    }
-    case Token::kADD:
-      __ addpl(left, right);
-      break;
-    case Token::kSUB:
-      __ subpl(left, right);
-      break;
-    default:
-      UNREACHABLE();
-  }
 }
 
 LocationSummary* MathUnaryInstr::MakeLocationSummary(Zone* zone,

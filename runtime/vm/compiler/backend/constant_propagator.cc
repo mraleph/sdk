@@ -1112,15 +1112,8 @@ void ConstantPropagator::VisitDoubleTestOp(DoubleTestOpInstr* instr) {
   }
 }
 
-void ConstantPropagator::VisitBinaryFloat32x4Op(BinaryFloat32x4OpInstr* instr) {
-  const Object& left = instr->left()->definition()->constant_value();
-  const Object& right = instr->right()->definition()->constant_value();
-  if (IsNonConstant(left) || IsNonConstant(right)) {
-    SetValue(instr, non_constant_);
-  } else if (IsConstant(left) && IsConstant(right)) {
-    // TODO(kmillikin): Handle binary operation.
-    SetValue(instr, non_constant_);
-  }
+void ConstantPropagator::VisitBinarySimdOp(BinarySimdOpInstr* instr) {
+  SetValue(instr, non_constant_);
 }
 
 void ConstantPropagator::VisitFloat32x4Constructor(
@@ -1211,15 +1204,7 @@ void ConstantPropagator::VisitInt32x4ToFloat32x4(
   SetValue(instr, non_constant_);
 }
 
-void ConstantPropagator::VisitBinaryInt32x4Op(BinaryInt32x4OpInstr* instr) {
-  SetValue(instr, non_constant_);
-}
-
 void ConstantPropagator::VisitSimd64x2Shuffle(Simd64x2ShuffleInstr* instr) {
-  SetValue(instr, non_constant_);
-}
-
-void ConstantPropagator::VisitBinaryFloat64x2Op(BinaryFloat64x2OpInstr* instr) {
   SetValue(instr, non_constant_);
 }
 
