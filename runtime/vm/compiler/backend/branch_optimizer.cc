@@ -53,8 +53,7 @@ bool BranchSimplifier::Match(JoinEntryInstr* block) {
   Value* left = comparison->InputUseAt(0);
   PhiInstr* phi = left->definition()->AsPhi();
   Definition* right = comparison->right();
-  ConstantInstr* constant =
-      (right == NULL) ? NULL : right->AsConstant();
+  ConstantInstr* constant = (right == NULL) ? NULL : right->AsConstant();
   return (phi != NULL) && (constant != NULL) && (phi->GetBlock() == block) &&
          PhiHasSingleUse(phi, left) && (block->next() == branch) &&
          (block->phis()->length() == 1);
@@ -278,8 +277,7 @@ void IfConverter::Simplify(FlowGraph* flow_graph) {
       Definition* v1 = phi->InputAt(0);
       Definition* v2 = phi->InputAt(1);
 
-      if (IsTrivialBlock(pred1, v1) &&
-          IsTrivialBlock(pred2, v2) &&
+      if (IsTrivialBlock(pred1, v1) && IsTrivialBlock(pred2, v2) &&
           (pred1->PredecessorAt(0) == pred2->PredecessorAt(0))) {
         BlockEntryInstr* pred = pred1->PredecessorAt(0);
         BranchInstr* branch = pred->last_instruction()->AsBranch();
@@ -294,8 +292,8 @@ void IfConverter::Simplify(FlowGraph* flow_graph) {
 
           ComparisonInstr* new_comparison = comparison->CopyWithNewOperands(
               comparison->left(), comparison->right());
-          IfThenElseInstr* if_then_else = new (zone)
-              IfThenElseInstr(new_comparison, if_true, if_false, Thread::kNoDeoptId);
+          IfThenElseInstr* if_then_else = new (zone) IfThenElseInstr(
+              new_comparison, if_true, if_false, Thread::kNoDeoptId);
           flow_graph->InsertBefore(branch, if_then_else, NULL,
                                    FlowGraph::kValue);
 

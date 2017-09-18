@@ -784,8 +784,7 @@ void ConstantPropagator::VisitLoadField(LoadFieldInstr* instr) {
 }
 
 void ConstantPropagator::VisitInstantiateType(InstantiateTypeInstr* instr) {
-  const Object& object =
-      instr->instantiator_type_arguments()->constant_value();
+  const Object& object = instr->instantiator_type_arguments()->constant_value();
   if (IsNonConstant(object)) {
     SetValue(instr, non_constant_);
     return;

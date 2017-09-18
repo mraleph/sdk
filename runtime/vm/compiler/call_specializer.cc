@@ -1545,10 +1545,10 @@ void CallSpecializer::VisitStaticCall(StaticCallInstr* call) {
               recognized_kind, new (Z) Value(call->ArgumentAt(0)),
               new (Z) Value(call->ArgumentAt(1)), call->deopt_id(), result_cid);
           const Cids* cids = Cids::Create(Z, ic_data, /* argument_number =*/0);
-          AddCheckClass(min_max->left(), *cids, call->deopt_id(),
-                        call->env(), call);
-          AddCheckClass(min_max->right(), *cids, call->deopt_id(),
-                        call->env(), call);
+          AddCheckClass(min_max->left(), *cids, call->deopt_id(), call->env(),
+                        call);
+          AddCheckClass(min_max->right(), *cids, call->deopt_id(), call->env(),
+                        call);
           ReplaceCall(call, min_max);
         }
       }

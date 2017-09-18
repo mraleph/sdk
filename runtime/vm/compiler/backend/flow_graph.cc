@@ -452,11 +452,9 @@ Instruction* FlowGraph::CreateCheckClass(Definition* to_check,
                                          intptr_t deopt_id,
                                          TokenPosition token_pos) {
   if (cids.IsMonomorphic() && cids.MonomorphicReceiverCid() == kSmiCid) {
-    return new (zone())
-        CheckSmiInstr(to_check, deopt_id, token_pos);
+    return new (zone()) CheckSmiInstr(to_check, deopt_id, token_pos);
   }
-  return new (zone())
-      CheckClassInstr(to_check, deopt_id, cids, token_pos);
+  return new (zone()) CheckClassInstr(to_check, deopt_id, cids, token_pos);
 }
 
 bool FlowGraph::VerifyUseLists() {
@@ -1463,8 +1461,8 @@ void FlowGraph::InsertConversion(Representation from,
                                   ? deopt_target->DeoptimizationTarget()
                                   : Thread::kNoDeoptId;
     // FIXME CopyWithType
-    converted = new (Z)
-        UnboxedIntConverterInstr(from, to, use->definition(), deopt_id);
+    converted =
+        new (Z) UnboxedIntConverterInstr(from, to, use->definition(), deopt_id);
   } else if ((from == kUnboxedInt32) && (to == kUnboxedDouble)) {
     // FIXME CopyWithType
     converted = new Int32ToDoubleInstr(use->definition());
@@ -1968,8 +1966,7 @@ void FlowGraph::TryOptimizePatterns() {
       } else if (it.Current()->IsBinaryInt64Op()) {
         BinaryInt64OpInstr* mintop = it.Current()->AsBinaryInt64Op();
         if (mintop->op_kind() == Token::kBIT_AND) {
-          OptimizeLeftShiftBitAndSmiOp(&it, mintop,
-                                       mintop->left(),
+          OptimizeLeftShiftBitAndSmiOp(&it, mintop, mintop->left(),
                                        mintop->right());
         }
       } else if (it.Current()->IsInvokeMathCFunction()) {
@@ -2074,7 +2071,8 @@ void FlowGraph::OptimizeLeftShiftBitAndSmiOp(
   if (bit_and_instr->InputUseAt(0)->IsSingleUse()) {
     smi_shift_left = AsSmiShiftLeftInstruction(left_instr);
   }
-  if ((smi_shift_left == NULL) && (bit_and_instr->InputUseAt(1)->IsSingleUse())) {
+  if ((smi_shift_left == NULL) &&
+      (bit_and_instr->InputUseAt(1)->IsSingleUse())) {
     smi_shift_left = AsSmiShiftLeftInstruction(right_instr);
   }
   if (smi_shift_left == NULL) return;
@@ -2084,9 +2082,9 @@ void FlowGraph::OptimizeLeftShiftBitAndSmiOp(
   ASSERT(bit_and_instr->IsBinarySmiOp() || bit_and_instr->IsBinaryInt64Op());
   if (bit_and_instr->IsBinaryInt64Op()) {
     // Replace Mint op with Smi op.
-    BinarySmiOpInstr* smi_op = new (Z) BinarySmiOpInstr(
-        Token::kBIT_AND, left_instr, right_instr,
-        Thread::kNoDeoptId);  // BIT_AND cannot deoptimize.
+    BinarySmiOpInstr* smi_op = new (Z)
+        BinarySmiOpInstr(Token::kBIT_AND, left_instr, right_instr,
+                         Thread::kNoDeoptId);  // BIT_AND cannot deoptimize.
     bit_and_instr->ReplaceWith(smi_op, current_iterator);
   }
 }
@@ -2148,8 +2146,7 @@ void FlowGraph::TryMergeTruncDivMod(
         // Replace with TruncDivMod.
         // FIXME CopyWithType
         TruncDivModInstr* div_mod = new (Z) TruncDivModInstr(
-            curr_instr->left(),
-            curr_instr->right(), curr_instr->deopt_id());
+            curr_instr->left(), curr_instr->right(), curr_instr->deopt_id());
         curr_instr->ReplaceWith(div_mod, NULL);
         other_binop->ReplaceUsesWith(div_mod);
         other_binop->RemoveFromGraph();

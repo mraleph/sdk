@@ -1078,17 +1078,14 @@ void DeoptInfoBuilder::AddCopy(Definition* value,
   if (source_loc.IsConstant()) {
     intptr_t object_table_index = FindOrAddObjectInTable(source_loc.constant());
     deopt_instr = new (zone()) DeoptConstantInstr(object_table_index);
-  } else if (source_loc.IsInvalid() &&
-             value->IsMaterializeObject()) {
-    const intptr_t index =
-        FindMaterialization(value->AsMaterializeObject());
+  } else if (source_loc.IsInvalid() && value->IsMaterializeObject()) {
+    const intptr_t index = FindMaterialization(value->AsMaterializeObject());
     ASSERT(index >= 0);
     deopt_instr = new (zone()) DeoptMaterializedObjectRefInstr(index);
   } else {
     ASSERT(!source_loc.IsInvalid());
 #if defined(TARGET_ARCH_DBC)
-    Representation rep =
-        (value == NULL) ? kTagged : value->representation();
+    Representation rep = (value == NULL) ? kTagged : value->representation();
 #else
     Representation rep = value->representation();
 #endif
@@ -1185,8 +1182,7 @@ void DeoptInfoBuilder::AddMaterialization(MaterializeObjectInstr* mat) {
   instructions_.Add(new (zone()) DeoptMaterializeObjectInstr(non_null_fields));
 
   for (intptr_t i = 0; i < mat->InputCount(); i++) {
-    MaterializeObjectInstr* nested_mat =
-        mat->InputAt(i)->AsMaterializeObject();
+    MaterializeObjectInstr* nested_mat = mat->InputAt(i)->AsMaterializeObject();
     if (nested_mat != NULL) {
       AddMaterialization(nested_mat);
     }

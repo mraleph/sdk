@@ -210,8 +210,8 @@ class Place : public ValueObject {
         LoadIndexedInstr* load_indexed = instr->AsLoadIndexed();
         set_representation(load_indexed->representation());
         instance_ = load_indexed->array()->OriginalDefinition();
-        SetIndex(load_indexed->index(),
-                 load_indexed->index_scale(), load_indexed->class_id());
+        SetIndex(load_indexed->index(), load_indexed->index_scale(),
+                 load_indexed->class_id());
         *is_load = true;
         break;
       }
@@ -221,8 +221,8 @@ class Place : public ValueObject {
         set_representation(store_indexed->RequiredInputRepresentation(
             StoreIndexedInstr::kValuePos));
         instance_ = store_indexed->array()->OriginalDefinition();
-        SetIndex(store_indexed->index(),
-                 store_indexed->index_scale(), store_indexed->class_id());
+        SetIndex(store_indexed->index(), store_indexed->index_scale(),
+                 store_indexed->class_id());
         *is_store = true;
         break;
       }
@@ -989,8 +989,7 @@ class AliasedSet : public ZoneAllocated {
         // If we store this value into an object that is not aliased itself
         // and we never load again then the store does not create an alias.
         StoreInstanceFieldInstr* store = instr->AsStoreInstanceField();
-        Definition* instance =
-            store->instance()->OriginalDefinition();
+        Definition* instance = store->instance()->OriginalDefinition();
         if (Place::IsAllocation(instance) &&
             !instance->Identity().IsAliased()) {
           bool is_load, is_store;

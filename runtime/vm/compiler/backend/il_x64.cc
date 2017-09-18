@@ -954,15 +954,13 @@ LocationSummary* LoadIndexedInstr::MakeLocationSummary(Zone* zone,
   // The smi index is either untagged (element size == 1), or it is left smi
   // tagged (for all element sizes > 1).
   if (index_scale() == 1) {
-    locs->set_in(1,
-                 CanBeImmediateIndex(index(), class_id())
-                     ? Location::Constant(index()->AsConstant())
-                     : Location::WritableRegister());
+    locs->set_in(1, CanBeImmediateIndex(index(), class_id())
+                        ? Location::Constant(index()->AsConstant())
+                        : Location::WritableRegister());
   } else {
-    locs->set_in(1,
-                 CanBeImmediateIndex(index(), class_id())
-                     ? Location::Constant(index()->AsConstant())
-                     : Location::RequiresRegister());
+    locs->set_in(1, CanBeImmediateIndex(index(), class_id())
+                        ? Location::Constant(index()->AsConstant())
+                        : Location::RequiresRegister());
   }
   if ((representation() == kUnboxedDouble) ||
       (representation() == kUnboxedFloat32x4) ||
@@ -1191,15 +1189,13 @@ LocationSummary* StoreIndexedInstr::MakeLocationSummary(Zone* zone,
   // The smi index is either untagged (element size == 1), or it is left smi
   // tagged (for all element sizes > 1).
   if (index_scale() == 1) {
-    locs->set_in(1,
-                 CanBeImmediateIndex(index(), class_id())
-                     ? Location::Constant(index()->AsConstant())
-                     : Location::WritableRegister());
+    locs->set_in(1, CanBeImmediateIndex(index(), class_id())
+                        ? Location::Constant(index()->AsConstant())
+                        : Location::WritableRegister());
   } else {
-    locs->set_in(1,
-                 CanBeImmediateIndex(index(), class_id())
-                     ? Location::Constant(index()->AsConstant())
-                     : Location::RequiresRegister());
+    locs->set_in(1, CanBeImmediateIndex(index(), class_id())
+                        ? Location::Constant(index()->AsConstant())
+                        : Location::RequiresRegister());
   }
   switch (class_id()) {
     case kArrayCid:
@@ -1886,18 +1882,19 @@ LocationSummary* StoreStaticFieldInstr::MakeLocationSummary(Zone* zone,
                                                             bool opt) const {
   LocationSummary* locs =
       new (zone) LocationSummary(zone, 1, 1, LocationSummary::kNoCall);
-  locs->set_in(0, value_use()->NeedsStoreBuffer() ? Location::WritableRegister()
-                                              : Location::RequiresRegister());
+  locs->set_in(0, value_use()->NeedsStoreBuffer()
+                      ? Location::WritableRegister()
+                      : Location::RequiresRegister());
   locs->set_temp(0, Location::RequiresRegister());
   return locs;
 }
 
 void StoreStaticFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  Register value = locs()->in(0).reg(aaa, aaa);
+  Register value = locs()->in(0).reg();
   Register temp = locs()->temp(0).reg();
 
   __ LoadObject(temp, Field::ZoneHandle(Z, field().Original()));
-  if (this->value()->NeedsStoreBuffer()) {
+  if (this->value_use()->NeedsStoreBuffer()) {
     __ StoreIntoObject(temp, FieldAddress(temp, Field::static_value_offset()),
                        value, CanValueBeSmi());
   } else {

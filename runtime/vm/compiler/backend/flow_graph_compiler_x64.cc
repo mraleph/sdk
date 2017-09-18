@@ -103,7 +103,8 @@ RawTypedData* CompilerDeoptInfo::CreateDeoptInfo(FlowGraphCompiler* compiler,
   for (intptr_t i = current->Length() - 1;
        i >= current->fixed_parameter_count(); i--) {
     Value* val = current->ValueAt(i);
-    builder->AddCopy(val == NULL ? NULL : val->definition(), current->LocationAt(i), slot_ix++);
+    builder->AddCopy(val == NULL ? NULL : val->definition(),
+                     current->LocationAt(i), slot_ix++);
   }
 
   Environment* previous = current;
@@ -123,15 +124,16 @@ RawTypedData* CompilerDeoptInfo::CreateDeoptInfo(FlowGraphCompiler* compiler,
     // we must read them from the previous environment.
     for (intptr_t i = previous->fixed_parameter_count() - 1; i >= 0; i--) {
       Value* v = previous->ValueAt(i);
-      builder->AddCopy(v == NULL ? NULL : v->definition(), previous->LocationAt(i),
-                       slot_ix++);
+      builder->AddCopy(v == NULL ? NULL : v->definition(),
+                       previous->LocationAt(i), slot_ix++);
     }
 
     // Set the locals, note that outgoing arguments are not in the environment.
     for (intptr_t i = current->Length() - 1;
          i >= current->fixed_parameter_count(); i--) {
       Value* v = current->ValueAt(i);
-      builder->AddCopy(v != NULL ? v->definition() : NULL, current->LocationAt(i), slot_ix++);
+      builder->AddCopy(v != NULL ? v->definition() : NULL,
+                       current->LocationAt(i), slot_ix++);
     }
 
     // Iterate on the outer environment.
@@ -150,7 +152,8 @@ RawTypedData* CompilerDeoptInfo::CreateDeoptInfo(FlowGraphCompiler* compiler,
   // For the outermost environment, set the incoming arguments.
   for (intptr_t i = previous->fixed_parameter_count() - 1; i >= 0; i--) {
     Value* v = previous->ValueAt(i);
-    builder->AddCopy(v != NULL ? v->definition() : NULL, previous->LocationAt(i), slot_ix++);
+    builder->AddCopy(v != NULL ? v->definition() : NULL,
+                     previous->LocationAt(i), slot_ix++);
   }
 
   return builder->CreateDeoptInfo(deopt_table);

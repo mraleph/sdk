@@ -40,14 +40,12 @@ class UnboxIntegerInstr;
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/*
-
 #define APPLY0(...) __VA_ARGS__
 #define APPLY1(...) APPLY0(APPLY0(APPLY0(APPLY0(__VA_ARGS__))))
-#define APPLY(...) APPLY1(APPLY1(APPLY1(APPLY1(__VA_ARGS__))))
-//#define APPLY3(...) APPLY2(APPLY2(APPLY2(__VA_ARGS__)))
-//#define APPLY4(...) APPLY3(APPLY3(APPLY3(__VA_ARGS__)))
-//#define APPLY(...)  APPLY4(APPLY4(APPLY4(__VA_ARGS__)))
+#define APPLY2(...) APPLY1(APPLY1(APPLY1(APPLY1(__VA_ARGS__))))
+#define APPLY3(...) APPLY2(APPLY2(APPLY2(__VA_ARGS__)))
+#define APPLY4(...) APPLY3(APPLY3(APPLY3(__VA_ARGS__)))
+#define APPLY(...) APPLY4(APPLY4(APPLY4(__VA_ARGS__)))
 
 #define MAP_END(...)
 #define MAP_NOTHING
@@ -57,70 +55,54 @@ class UnboxIntegerInstr;
 #define MAP_IS_END_1(...) MAP_IS_END_2
 #define MAP_IS_END(...) MAP_IS_END_1
 #define MAP_COMPUTE_NEXT_STEP_0(item, cont, ...) cont MAP_NOTHING
-#define MAP_COMPUTE_NEXT_STEP_1(item, cont) MAP_COMPUTE_NEXT_STEP_0(item, cont, 0)
-#define MAP_COMPUTE_NEXT_STEP(item, cont)  MAP_COMPUTE_NEXT_STEP_1(MAP_IS_END item, cont)
+#define MAP_COMPUTE_NEXT_STEP_1(item, cont)                                    \
+  MAP_COMPUTE_NEXT_STEP_0(item, cont, 0)
+#define MAP_COMPUTE_NEXT_STEP(item, cont)                                      \
+  MAP_COMPUTE_NEXT_STEP_1(MAP_IS_END item, cont)
 
-#define MAP0(f, item0, item1, ...) f(item0) MAP_COMPUTE_NEXT_STEP(item1, MAP1) (f, item1, __VA_ARGS__)
-#define MAP1(f, item0, item1, ...) f(item0) MAP_COMPUTE_NEXT_STEP(item1, MAP0) (f, item1, __VA_ARGS__)
+#define MAP0(f, item0, item1, ...)                                             \
+  f(item0) MAP_COMPUTE_NEXT_STEP(item1, MAP1)(f, item1, __VA_ARGS__)
+#define MAP1(f, item0, item1, ...)                                             \
+  f(item0) MAP_COMPUTE_NEXT_STEP(item1, MAP0)(f, item1, __VA_ARGS__)
 #define MAP(f, ...) APPLY(MAP1(f, __VA_ARGS__, ()()(), ()()(), ()()(), 0))
 
-#define MAP_COMMA_STEP_1(item, cont) MAP_COMPUTE_NEXT_STEP_0(item, MAP__COMMA cont, 0)
-#define MAP_COMMA_STEP(item, cont)  MAP_COMMA_STEP_1(MAP_IS_END item, cont)
-#define MAP_COMMA0(f, item0, item1, ...) f(item0) MAP_COMMA_STEP(item1, MAP_COMMA1)(f, item1, __VA_ARGS__)
-#define MAP_COMMA1(f, item0, item1, ...) f(item0) MAP_COMMA_STEP(item1, MAP_COMMA0)(f, item1, __VA_ARGS__)
+#define MAP_COMMA_STEP_1(item, cont)                                           \
+  MAP_COMPUTE_NEXT_STEP_0(item, MAP__COMMA cont, 0)
+#define MAP_COMMA_STEP(item, cont) MAP_COMMA_STEP_1(MAP_IS_END item, cont)
+#define MAP_COMMA0(f, item0, item1, ...)                                       \
+  f(item0) MAP_COMMA_STEP(item1, MAP_COMMA1)(f, item1, __VA_ARGS__)
+#define MAP_COMMA1(f, item0, item1, ...)                                       \
+  f(item0) MAP_COMMA_STEP(item1, MAP_COMMA0)(f, item1, __VA_ARGS__)
 
-#define MAP_COMMA(f, ...) APPLY(MAP_COMMA1(f, __VA_ARGS__, ()()(), ()()(), ()()(), 0))
+#define MAP_COMMA(f, ...)                                                      \
+  APPLY(MAP_COMMA1(f, __VA_ARGS__, ()()(), ()()(), ()()(), 0))
 
 #define CONCAT1(a, b) a##b
 #define CONCAT(a, b) CONCAT1(a, b)
+#define CONCAT2(a, b, c) CONCAT(CONCAT(a, b), c)
 
 #define LOWER_CASE_NAME(a, ...) a
 #define CAPITALIZED_NAME(a, ...) __VA_ARGS__
 
-#define DEFINE_INPUT(names) Definition* LOWER_CASE_NAME names () const { return InputAt(CONCAT(k, CAPITALIZED_NAME names)); }
-#define DEFINE_INPUT_USE(names) Value* CONCAT(LOWER_CASE_NAME names, _use) () const { return InputUseAt(CONCAT(k, CAPITALIZED_NAME names)); }
-#define DEFINE_INPUT_SET(names) void CONCAT(set_, LOWER_CASE_NAME names) (Definition* defn) { SetInputAt(CONCAT(k, CAPITALIZED_NAME names), value); }
-#define DEFINE_ENUM(names) CONCAT(k, CAPITALIZED_NAME names)
+#define DEFINE_INPUT(names)                                                    \
+  Definition* LOWER_CASE_NAME names() const {                                  \
+    return InputAt(CONCAT2(k, CAPITALIZED_NAME names, Pos));                   \
+  }
+#define DEFINE_INPUT_USE(names)                                                \
+  Value* CONCAT(LOWER_CASE_NAME names, _use)() const {                         \
+    return InputUseAt(CONCAT2(k, CAPITALIZED_NAME names, Pos));                \
+  }
+#define DEFINE_INPUT_SET(names)                                                \
+  void CONCAT(set_, LOWER_CASE_NAME names)(Definition * defn) {                \
+    SetInputAt(CONCAT2(k, CAPITALIZED_NAME names, Pos), defn);                 \
+  }
+#define DEFINE_ENUM(names) CONCAT2(k, CAPITALIZED_NAME names, Pos)
 
-#define DEFINE_INPUTS(...)           \
-  enum { MAP_COMMA(DEFINE_ENUM, __VA_ARGS__) }; \
-  MAP(DEFINE_INPUT, __VA_ARGS__)     \
-  MAP(DEFINE_INPUT_USE, __VA_ARGS__) \
-  MAP(DEFINE_INPUT_SET, __VA_ARGS__) \
-
-DEFINE_INPUTS((input0, Input0), (input1, Input1))
-
-DEFINE_INPUTS((input0, Input0), (input1, Input1), (input2, Input2), (input3, Input3), (input4, Input4), (input5, Input5), (input6, Input6), (input7, Input7))
-
-*/
-
-#define EVAL0(...) __VA_ARGS__
-#define EVAL1(...) EVAL0(EVAL0(EVAL0(__VA_ARGS__)))
-#define EVAL2(...) EVAL1(EVAL1(EVAL1(__VA_ARGS__)))
-#define EVAL3(...) EVAL2(EVAL2(EVAL2(__VA_ARGS__)))
-#define EVAL4(...) EVAL3(EVAL3(EVAL3(__VA_ARGS__)))
-#define EVAL(...)  EVAL4(EVAL4(EVAL4(__VA_ARGS__)))
-
-#define MAP_END(...)
-#define MAP_OUT
-#define MAP_COMMA ,
-
-#define MAP_GET_END2() 0, MAP_END
-#define MAP_GET_END1(...) MAP_GET_END2
-#define MAP_GET_END(...) MAP_GET_END1
-#define MAP_NEXT0(item, m, ...) m MAP_OUT
-#define MAP_NEXT1(item, m) MAP_NEXT0(item, m, 0)
-#define MAP_NEXT(item, m)  MAP_NEXT1(MAP_GET_END item, m)
-
-#define MAP0(f, index, item0, item1, ...) f(index, item0) MAP_NEXT(item1, MAP1)(f, index + 1, item1, __VA_ARGS__)
-#define MAP1(f, index, item0, item1, ...) f(index, item0) MAP_NEXT(item1, MAP0)(f, index + 1, item1, __VA_ARGS__)
-#define MAP(f, ...) EVAL(MAP1(f, 0, __VA_ARGS__, ()()(), ()()(), ()()(), 0))
-
-#define DEFINE_INPUT(index, name) Definition* name() const { return InputAt(index); }
-#define DEFINE_INPUT_USE(index, name) Value* name##_use() const { return InputUseAt(index); }
-#define DEFINE_INPUT_SET(index, name) void set_##name() { SetInputAt(index, value); }
-
-#define DEFINE_INPUTS(...) MAP(DEFINE_INPUT, __VA_ARGS__) MAP(DEFINE_INPUT_USE, __VA_ARGS__)
+#define DEFINE_INPUTS(...)                                                     \
+  enum { MAP_COMMA(DEFINE_ENUM, __VA_ARGS__) };                                \
+  MAP(DEFINE_INPUT, __VA_ARGS__)                                               \
+  MAP(DEFINE_INPUT_USE, __VA_ARGS__)                                           \
+  MAP(DEFINE_INPUT_SET, __VA_ARGS__)
 
 // CompileType describes type of the value produced by the definition.
 //
@@ -346,7 +328,7 @@ class Value : public ZoneAllocated {
   inline void BindToEnvironment(Definition* definition);
 
   // FIXME
-  Value& operator = (const Value& other) {
+  Value& operator=(const Value& other) {
     ASSERT(other.definition_ == NULL);
     ASSERT(definition_ == NULL);
     return *this;
@@ -1118,7 +1100,9 @@ class TemplateInstruction
  protected:
   EmbeddedArray<Value, N> inputs_;
 
-  Definition* UnwrappedInputAt(intptr_t i) const { return inputs_[i].definition(); }
+  Definition* UnwrappedInputAt(intptr_t i) const {
+    return inputs_[i].definition();
+  }
 
  private:
   virtual void RawSetInputAt(intptr_t i, Definition* defn) {
@@ -2003,7 +1987,9 @@ class TemplateDefinition : public CSETrait<Definition, PureDefinition>::Base {
  protected:
   EmbeddedArray<Value, N> inputs_;
 
-  Definition* UnwrappedInputAt(intptr_t i) const { return inputs_[i].definition(); }
+  Definition* UnwrappedInputAt(intptr_t i) const {
+    return inputs_[i].definition();
+  }
 
  private:
   friend class BranchInstr;
@@ -2420,12 +2406,13 @@ class IndirectGotoInstr : public TemplateInstruction<1, NoThrow> {
 
 class ComparisonInstr : public Definition {
  public:
-  DEFINE_INPUTS(left, right)
+  DEFINE_INPUTS((left, Left), (right, Right))
 
   virtual TokenPosition token_pos() const { return token_pos_; }
   Token::Kind kind() const { return kind_; }
 
-  virtual ComparisonInstr* CopyWithNewOperands(Definition* left, Definition* right) = 0;
+  virtual ComparisonInstr* CopyWithNewOperands(Definition* left,
+                                               Definition* right) = 0;
 
   // Emits instructions to do the comparison and branch to the true or false
   // label depending on the result.  This implementation will call
@@ -2516,7 +2503,9 @@ class TemplateComparison
         inputs_() {}
 
   virtual intptr_t InputCount() const { return N; }
-  virtual Definition* InputAt(intptr_t i) const { return inputs_[i].definition(); }
+  virtual Definition* InputAt(intptr_t i) const {
+    return inputs_[i].definition();
+  }
 
   virtual bool MayThrow() const { return ThrowsTrait::kCanThrow; }
 
@@ -2535,7 +2524,7 @@ class BranchInstr : public Instruction {
   explicit BranchInstr(ComparisonInstr* comparison, intptr_t deopt_id)
       : Instruction(deopt_id), comparison_(comparison), constant_target_(NULL) {
     ASSERT(comparison->env() == NULL);
-    // FIXME
+// FIXME
 #if 0
     for (intptr_t i = comparison->InputCount() - 1; i >= 0; --i) {
       comparison->InputAt(i)->set_instruction(this);
@@ -2775,7 +2764,9 @@ class AssertAssignableInstr : public TemplateDefinition<3, Throws, Pure> {
   virtual bool RecomputeType();
 
   Definition* value() const { return UnwrappedInputAt(0); }
-  Definition* instantiator_type_arguments() const { return UnwrappedInputAt(1); }
+  Definition* instantiator_type_arguments() const {
+    return UnwrappedInputAt(1);
+  }
   Definition* function_type_arguments() const { return UnwrappedInputAt(2); }
 
   virtual TokenPosition token_pos() const { return token_pos_; }
@@ -2810,7 +2801,9 @@ class AssertAssignableInstr : public TemplateDefinition<3, Throws, Pure> {
 
 class AssertBooleanInstr : public TemplateDefinition<1, Throws, Pure> {
  public:
-  AssertBooleanInstr(TokenPosition token_pos, Definition* value, intptr_t deopt_id)
+  AssertBooleanInstr(TokenPosition token_pos,
+                     Definition* value,
+                     intptr_t deopt_id)
       : TemplateDefinition(deopt_id), token_pos_(token_pos) {
     SetInputAt(0, value);
   }
@@ -3149,7 +3142,8 @@ class StrictCompareInstr : public TemplateComparison<2, NoThrow, Pure> {
 
   DECLARE_COMPARISON_INSTRUCTION(StrictCompare)
 
-  virtual ComparisonInstr* CopyWithNewOperands(Definition* left, Definition* right);
+  virtual ComparisonInstr* CopyWithNewOperands(Definition* left,
+                                               Definition* right);
 
   virtual CompileType ComputeType() const;
 
@@ -3188,7 +3182,8 @@ class TestSmiInstr : public TemplateComparison<2, NoThrow, Pure> {
 
   DECLARE_COMPARISON_INSTRUCTION(TestSmi);
 
-  virtual ComparisonInstr* CopyWithNewOperands(Definition* left, Definition* right);
+  virtual ComparisonInstr* CopyWithNewOperands(Definition* left,
+                                               Definition* right);
 
   virtual CompileType ComputeType() const;
 
@@ -3223,7 +3218,8 @@ class TestCidsInstr : public TemplateComparison<1, NoThrow, Pure> {
 
   DECLARE_COMPARISON_INSTRUCTION(TestCids);
 
-  virtual ComparisonInstr* CopyWithNewOperands(Definition* left, Definition* right);
+  virtual ComparisonInstr* CopyWithNewOperands(Definition* left,
+                                               Definition* right);
 
   virtual CompileType ComputeType() const;
 
@@ -3266,7 +3262,8 @@ class EqualityCompareInstr : public TemplateComparison<2, NoThrow, Pure> {
 
   DECLARE_COMPARISON_INSTRUCTION(EqualityCompare)
 
-  virtual ComparisonInstr* CopyWithNewOperands(Definition* left, Definition* right);
+  virtual ComparisonInstr* CopyWithNewOperands(Definition* left,
+                                               Definition* right);
 
   virtual CompileType ComputeType() const;
 
@@ -3302,7 +3299,8 @@ class RelationalOpInstr : public TemplateComparison<2, NoThrow, Pure> {
 
   DECLARE_COMPARISON_INSTRUCTION(RelationalOp)
 
-  virtual ComparisonInstr* CopyWithNewOperands(Definition* left, Definition* right);
+  virtual ComparisonInstr* CopyWithNewOperands(Definition* left,
+                                               Definition* right);
 
   virtual CompileType ComputeType() const;
 
@@ -3335,7 +3333,7 @@ class IfThenElseInstr : public Definition {
         if_false_(SmiValue(if_false)) {
     // Adjust uses at the comparison.
     ASSERT(comparison->env() == NULL);
-    // FIXME
+// FIXME
 #if 0
     for (intptr_t i = comparison->InputCount() - 1; i >= 0; --i) {
       comparison->InputAt(i)->set_instruction(this);
@@ -3345,7 +3343,9 @@ class IfThenElseInstr : public Definition {
 
   // Returns true if this combination of comparison and values flowing on
   // the true and false paths is supported on the current platform.
-  static bool Supports(ComparisonInstr* comparison, Definition* v1, Definition* v2);
+  static bool Supports(ComparisonInstr* comparison,
+                       Definition* v1,
+                       Definition* v2);
 
   DECLARE_INSTRUCTION(IfThenElse)
 
@@ -3571,7 +3571,9 @@ class DropTempsInstr : public Definition {
 
   DECLARE_INSTRUCTION(DropTemps)
 
-  virtual intptr_t InputCount() const { return value_.definition() != NULL ? 1 : 0; }
+  virtual intptr_t InputCount() const {
+    return value_.definition() != NULL ? 1 : 0;
+  }
   virtual Definition* InputAt(intptr_t i) const {
     ASSERT((InputCount() == 1) && (i == 0));
     return value_.definition();
@@ -3601,7 +3603,9 @@ class DropTempsInstr : public Definition {
   PRINT_OPERANDS_TO_SUPPORT
 
  private:
-  virtual void RawSetInputAt(intptr_t i, Definition* value) { value_.BindTo(value); }
+  virtual void RawSetInputAt(intptr_t i, Definition* value) {
+    value_.BindTo(value);
+  }
 
   const intptr_t num_temps_;
   Value value_;
@@ -3868,7 +3872,9 @@ class GuardFieldClassInstr : public GuardFieldInstr {
 
 class GuardFieldLengthInstr : public GuardFieldInstr {
  public:
-  GuardFieldLengthInstr(Definition* value, const Field& field, intptr_t deopt_id)
+  GuardFieldLengthInstr(Definition* value,
+                        const Field& field,
+                        intptr_t deopt_id)
       : GuardFieldInstr(value, field, deopt_id) {
     CheckField(field);
   }
@@ -3927,8 +3933,7 @@ class StoreStaticFieldInstr : public TemplateDefinition<1, NoThrow> {
     CheckField(field);
   }
 
-  enum { kValuePos = 0 };
-  DEFINE_INPUTS(value)
+  DEFINE_INPUTS((value, Value))
   DECLARE_INSTRUCTION(StoreStaticField)
 
   const Field& field() const { return field_; }
@@ -3985,9 +3990,7 @@ class LoadIndexedInstr : public TemplateDefinition<2, NoThrow> {
     return kTagged;
   }
 
-  bool IsExternal() const {
-    return array()->representation() == kUntagged;
-  }
+  bool IsExternal() const { return array()->representation() == kUntagged; }
 
   Definition* array() const { return UnwrappedInputAt(0); }
   Definition* index() const { return UnwrappedInputAt(1); }
@@ -4051,9 +4054,7 @@ class LoadCodeUnitsInstr : public TemplateDefinition<2, NoThrow> {
     return kTagged;
   }
 
-  bool IsExternal() const {
-    return array()->representation() == kUntagged;
-  }
+  bool IsExternal() const { return array()->representation() == kUntagged; }
 
   Definition* array() const { return UnwrappedInputAt(0); }
   Definition* index() const { return UnwrappedInputAt(1); }
@@ -4191,9 +4192,7 @@ class StoreIndexedInstr : public TemplateDefinition<3, NoThrow> {
 
   virtual Representation RequiredInputRepresentation(intptr_t idx) const;
 
-  bool IsExternal() const {
-    return array()->representation() == kUntagged;
-  }
+  bool IsExternal() const { return array()->representation() == kUntagged; }
 
   virtual intptr_t DeoptimizationTarget() const {
     // Direct access since this instruction cannot deoptimize, and the deopt-id
@@ -4252,7 +4251,9 @@ class InstanceOfInstr : public TemplateDefinition<3, Throws> {
   virtual CompileType ComputeType() const;
 
   Definition* value() const { return UnwrappedInputAt(0); }
-  Definition* instantiator_type_arguments() const { return UnwrappedInputAt(1); }
+  Definition* instantiator_type_arguments() const {
+    return UnwrappedInputAt(1);
+  }
   Definition* function_type_arguments() const { return UnwrappedInputAt(2); }
 
   const AbstractType& type() const { return type_; }
@@ -4371,7 +4372,7 @@ class MaterializeObjectInstr : public Definition {
         visited_for_liveness_(false),
         registers_remapped_(false) {
     ASSERT(slots_.length() == values_->length());
-    // FIXME
+// FIXME
 #if 0
     for (intptr_t i = 0; i < InputCount(); i++) {
       InputAt(i)->set_instruction(this);
@@ -4391,7 +4392,7 @@ class MaterializeObjectInstr : public Definition {
         locations_(NULL),
         visited_for_liveness_(false),
         registers_remapped_(false) {
-    // FIXME
+// FIXME
 #if 0
     ASSERT(slots_.length() == values_->length());
 
@@ -4418,7 +4419,9 @@ class MaterializeObjectInstr : public Definition {
 
   virtual intptr_t InputCount() const { return values_->length(); }
 
-  virtual Definition* InputAt(intptr_t i) const { return (*values_)[i]->definition(); }
+  virtual Definition* InputAt(intptr_t i) const {
+    return (*values_)[i]->definition();
+  }
 
   // SelectRepresentations pass is run once more while MaterializeObject
   // instructions are still in the graph. To avoid any redundant boxing
@@ -4448,7 +4451,6 @@ class MaterializeObjectInstr : public Definition {
  private:
   virtual void RawSetInputAt(intptr_t i, Definition* value) {
     (*values_)[i]->BindTo(value);
-
   }
 
   Definition* allocation_;
@@ -4679,7 +4681,9 @@ class InstantiateTypeInstr : public TemplateDefinition<2, Throws> {
 
   DECLARE_INSTRUCTION(InstantiateType)
 
-  Definition* instantiator_type_arguments() const { return UnwrappedInputAt(0); }
+  Definition* instantiator_type_arguments() const {
+    return UnwrappedInputAt(0);
+  }
   Definition* function_type_arguments() const { return UnwrappedInputAt(1); }
   const AbstractType& type() const { return type_; }
   virtual TokenPosition token_pos() const { return token_pos_; }
@@ -4716,7 +4720,9 @@ class InstantiateTypeArgumentsInstr : public TemplateDefinition<2, Throws> {
 
   DECLARE_INSTRUCTION(InstantiateTypeArguments)
 
-  Definition* instantiator_type_arguments() const { return UnwrappedInputAt(0); }
+  Definition* instantiator_type_arguments() const {
+    return UnwrappedInputAt(0);
+  }
   Definition* function_type_arguments() const { return UnwrappedInputAt(1); }
   const TypeArguments& type_arguments() const { return type_arguments_; }
   const Class& instantiator_class() const { return instantiator_class_; }
@@ -5006,7 +5012,9 @@ class BoxInt64Instr : public BoxIntegerInstr {
 
 class UnboxInstr : public TemplateDefinition<1, NoThrow, Pure> {
  public:
-  static UnboxInstr* Create(Representation to, Definition* value, intptr_t deopt_id);
+  static UnboxInstr* Create(Representation to,
+                            Definition* value,
+                            intptr_t deopt_id);
 
   Definition* value() const { return UnwrappedInputAt(0); }
 
@@ -5053,7 +5061,9 @@ class UnboxInstr : public TemplateDefinition<1, NoThrow, Pure> {
   virtual TokenPosition token_pos() const { return TokenPosition::kBox; }
 
  protected:
-  UnboxInstr(Representation representation, Definition* value, intptr_t deopt_id)
+  UnboxInstr(Representation representation,
+             Definition* value,
+             intptr_t deopt_id)
       : TemplateDefinition(deopt_id), representation_(representation) {
     SetInputAt(0, value);
   }
@@ -5416,7 +5426,8 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
            ComparisonInstr::AttributesEqual(other);
   }
 
-  virtual ComparisonInstr* CopyWithNewOperands(Definition* left, Definition* right);
+  virtual ComparisonInstr* CopyWithNewOperands(Definition* left,
+                                               Definition* right);
 
  private:
   const MethodRecognizer::Kind op_kind_;
@@ -6183,7 +6194,9 @@ class Float64x2ToFloat32x4Instr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class Float64x2ConstructorInstr : public TemplateDefinition<2, NoThrow, Pure> {
  public:
-  Float64x2ConstructorInstr(Definition* value0, Definition* value1, intptr_t deopt_id)
+  Float64x2ConstructorInstr(Definition* value0,
+                            Definition* value1,
+                            intptr_t deopt_id)
       : TemplateDefinition(deopt_id) {
     SetInputAt(0, value0);
     SetInputAt(1, value1);
@@ -6962,7 +6975,8 @@ class CheckedSmiComparisonInstr : public TemplateComparison<2, Throws> {
   }
 #endif
 
-  virtual ComparisonInstr* CopyWithNewOperands(Definition* left, Definition* right);
+  virtual ComparisonInstr* CopyWithNewOperands(Definition* left,
+                                               Definition* right);
 
  private:
   InstanceCallInstr* call_;
@@ -7626,7 +7640,9 @@ class InvokeMathCFunctionInstr : public PureDefinition {
 
   virtual intptr_t InputCount() const { return inputs_->length(); }
 
-  virtual Definition* InputAt(intptr_t i) const { return (*inputs_)[i]->definition(); }
+  virtual Definition* InputAt(intptr_t i) const {
+    return (*inputs_)[i]->definition();
+  }
 
   virtual bool AttributesEqual(Instruction* other) const {
     InvokeMathCFunctionInstr* other_invoke = other->AsInvokeMathCFunction();
@@ -7912,7 +7928,9 @@ class CheckArrayBoundInstr : public TemplateInstruction<2, NoThrow, Pure> {
 
 class GenericCheckBoundInstr : public TemplateInstruction<2, Throws, NoCSE> {
  public:
-  GenericCheckBoundInstr(Definition* length, Definition* index, intptr_t deopt_id)
+  GenericCheckBoundInstr(Definition* length,
+                         Definition* index,
+                         intptr_t deopt_id)
       : TemplateInstruction(deopt_id) {
     SetInputAt(kLengthPos, length);
     SetInputAt(kIndexPos, index);

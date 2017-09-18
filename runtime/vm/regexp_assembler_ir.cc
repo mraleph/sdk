@@ -244,8 +244,8 @@ void IRRegExpMacroAssembler::GenerateSuccessBlock() {
   Definition* type = Bind(new (Z) ConstantInstr(
       TypeArguments::ZoneHandle(Z, TypeArguments::null())));
   Definition* length = Bind(Uint64Constant(saved_registers_count_));
-  Definition* array = Bind(new (Z) CreateArrayInstr(TokenPosition::kNoSource, type,
-                                               length, GetNextDeoptId()));
+  Definition* array = Bind(new (Z) CreateArrayInstr(
+      TokenPosition::kNoSource, type, length, GetNextDeoptId()));
   StoreLocal(result_, array);
 
   // Store captured offsets in the `matches` parameter.
@@ -530,7 +530,8 @@ LoadLocalInstr* IRRegExpMacroAssembler::LoadLocal(LocalVariable* local) const {
   return new (Z) LoadLocalInstr(*local, TokenPosition::kNoSource);
 }
 
-void IRRegExpMacroAssembler::StoreLocal(LocalVariable* local, Definition* value) {
+void IRRegExpMacroAssembler::StoreLocal(LocalVariable* local,
+                                        Definition* value) {
   Do(new (Z) StoreLocalInstr(*local, value, TokenPosition::kNoSource));
 }
 
@@ -1699,7 +1700,7 @@ Definition* IRRegExpMacroAssembler::CharacterAt(LocalVariable* index) {
 }
 
 Definition* IRRegExpMacroAssembler::LoadCodeUnitsAt(LocalVariable* index,
-                                               intptr_t characters) {
+                                                    intptr_t characters) {
   // Bind the pattern as the load receiver.
   Definition* pattern_val = BindLoadLocal(*string_param_);
   if (RawObject::IsExternalStringClassId(specialization_cid_)) {

@@ -1450,8 +1450,7 @@ Definition* BinaryDoubleOpInstr::Canonicalize(FlowGraph* flow_graph) {
 
   if ((op_kind() == Token::kMUL) && (left() == right())) {
     MathUnaryInstr* math_unary = new MathUnaryInstr(
-        MathUnaryInstr::kDoubleSquare, left(),
-        DeoptimizationTarget());
+        MathUnaryInstr::kDoubleSquare, left(), DeoptimizationTarget());
     flow_graph->InsertBefore(this, math_unary, env(), FlowGraph::kValue);
     return math_unary;
   }
@@ -1683,7 +1682,8 @@ Definition* BinaryIntegerOpInstr::CreateConstantResult(FlowGraph* flow_graph,
                                                        const Integer& result) {
   Definition* result_defn = flow_graph->GetConstant(result);
   if (representation() != kTagged) {
-    result_defn = UnboxInstr::Create(representation(), result_defn, GetDeoptId());
+    result_defn =
+        UnboxInstr::Create(representation(), result_defn, GetDeoptId());
     flow_graph->InsertBefore(this, result_defn, env(), FlowGraph::kValue);
   }
   return result_defn;
@@ -1701,9 +1701,8 @@ Definition* CheckedSmiOpInstr::Canonicalize(FlowGraph* flow_graph) {
       case Token::kBIT_AND:
       case Token::kBIT_OR:
       case Token::kBIT_XOR:
-        replacement = new BinarySmiOpInstr(
-            op_kind(), left(),
-            right(), Thread::kNoDeoptId);
+        replacement = new BinarySmiOpInstr(op_kind(), left(), right(),
+                                           Thread::kNoDeoptId);
       default:
         break;
     }
@@ -1715,8 +1714,9 @@ Definition* CheckedSmiOpInstr::Canonicalize(FlowGraph* flow_graph) {
   return this;
 }
 
-ComparisonInstr* CheckedSmiComparisonInstr::CopyWithNewOperands(Definition* left,
-                                                                Definition* right) {
+ComparisonInstr* CheckedSmiComparisonInstr::CopyWithNewOperands(
+    Definition* left,
+    Definition* right) {
   UNREACHABLE();
   return NULL;
 }
@@ -1727,8 +1727,8 @@ Definition* CheckedSmiComparisonInstr::Canonicalize(FlowGraph* flow_graph) {
       (InputUseAt(1)->Type()->ToCid() == kSmiCid)) {
     Definition* replacement = NULL;
     if (Token::IsRelationalOperator(kind())) {
-      replacement = new RelationalOpInstr(
-          token_pos(), kind(), left(), right(), kSmiCid, Thread::kNoDeoptId);
+      replacement = new RelationalOpInstr(token_pos(), kind(), left(), right(),
+                                          kSmiCid, Thread::kNoDeoptId);
     } else if (Token::IsEqualityOperator(kind())) {
       replacement = new EqualityCompareInstr(
           token_pos(), kind(), left(), right(), kSmiCid, Thread::kNoDeoptId);
@@ -1747,9 +1747,9 @@ Definition* BinaryIntegerOpInstr::Canonicalize(FlowGraph* flow_graph) {
   // have already been run.
   if (left()->IsConstant() && left()->AsConstant()->value().IsInteger() &&
       right()->IsConstant() && right()->AsConstant()->value().IsInteger()) {
-    const Integer& result =
-        Integer::Handle(Evaluate(Integer::Cast(left()->AsConstant()->value()),
-                                 Integer::Cast(right()->AsConstant()->value())));
+    const Integer& result = Integer::Handle(
+        Evaluate(Integer::Cast(left()->AsConstant()->value()),
+                 Integer::Cast(right()->AsConstant()->value())));
     if (!result.IsNull()) {
       return CreateConstantResult(flow_graph, result);
     }
@@ -1795,9 +1795,8 @@ Definition* BinaryIntegerOpInstr::Canonicalize(FlowGraph* flow_graph) {
             flow_graph->GetConstant(Smi::Handle(Smi::New(1)));
         // FIXME CopyWithType left
         BinaryIntegerOpInstr* shift = BinaryIntegerOpInstr::Make(
-            representation(), Token::kSHL, left(),
-            constant_1, GetDeoptId(), can_overflow(),
-            is_truncating(), range());
+            representation(), Token::kSHL, left(), constant_1, GetDeoptId(),
+            can_overflow(), is_truncating(), range());
         if (shift != NULL) {
           flow_graph->InsertBefore(this, shift, env(), FlowGraph::kValue);
           return shift;
@@ -1830,8 +1829,7 @@ Definition* BinaryIntegerOpInstr::Canonicalize(FlowGraph* flow_graph) {
       } else if (rhs == range_mask) {
         // FIXME CopyWithType left()
         UnaryIntegerOpInstr* bit_not = UnaryIntegerOpInstr::Make(
-            representation(), Token::kBIT_NOT, left(),
-            GetDeoptId(), range());
+            representation(), Token::kBIT_NOT, left(), GetDeoptId(), range());
         if (bit_not != NULL) {
           flow_graph->InsertBefore(this, bit_not, env(), FlowGraph::kValue);
           return bit_not;
@@ -1851,8 +1849,7 @@ Definition* BinaryIntegerOpInstr::Canonicalize(FlowGraph* flow_graph) {
       } else if (rhs == -1) {
         // FIXME copy with type
         UnaryIntegerOpInstr* negation = UnaryIntegerOpInstr::Make(
-            representation(), Token::kNEGATE, left(),
-            GetDeoptId(), range());
+            representation(), Token::kNEGATE, left(), GetDeoptId(), range());
         if (negation != NULL) {
           flow_graph->InsertBefore(this, negation, env(), FlowGraph::kValue);
           return negation;
@@ -1906,8 +1903,7 @@ Definition* RedefinitionInstr::Canonicalize(FlowGraph* flow_graph) {
   if (!HasUses()) {
     return NULL;
   }
-  if ((constrained_type() != NULL) &&
-      Type()->IsEqualTo(value()->Type())) {
+  if ((constrained_type() != NULL) && Type()->IsEqualTo(value()->Type())) {
     return value();
   }
   return this;
@@ -2013,8 +2009,7 @@ Definition* LoadFieldInstr::Canonicalize(FlowGraph* flow_graph) {
     // For fixed length arrays if the array is the result of a known constructor
     // call we can replace the length load with the length argument passed to
     // the constructor.
-    StaticCallInstr* call =
-        instance()->OriginalDefinition()->AsStaticCall();
+    StaticCallInstr* call = instance()->OriginalDefinition()->AsStaticCall();
     if (call != NULL) {
       if (call->is_known_list_constructor() &&
           IsFixedLengthArrayCid(call->Type()->ToCid())) {
@@ -2180,8 +2175,7 @@ Definition* BoxInt64Instr::Canonicalize(FlowGraph* flow_graph) {
     return replacement;
   }
 
-  UnboxedIntConverterInstr* conv =
-      value()->AsUnboxedIntConverter();
+  UnboxedIntConverterInstr* conv = value()->AsUnboxedIntConverter();
   if (conv != NULL) {
     Definition* replacement = this;
 
@@ -2247,15 +2241,13 @@ Definition* UnboxIntegerInstr::Canonicalize(FlowGraph* flow_graph) {
   // Fold away UnboxInteger<rep_to>(BoxInteger<rep_from>(v)).
   BoxIntegerInstr* box_defn = value()->AsBoxInteger();
   if (box_defn != NULL) {
-    Representation from_representation =
-        box_defn->value()->representation();
+    Representation from_representation = box_defn->value()->representation();
     if (from_representation == representation()) {
       return box_defn->value();
     } else {
       // FIXME CopyWithType
       UnboxedIntConverterInstr* converter = new UnboxedIntConverterInstr(
-          from_representation, representation(),
-          box_defn->value(),
+          from_representation, representation(), box_defn->value(),
           (representation() == kUnboxedInt32) ? GetDeoptId()
                                               : Thread::kNoDeoptId);
       // TODO(vegorov): marking resulting converter as truncating when
@@ -2306,8 +2298,7 @@ Definition* UnboxInt32Instr::Canonicalize(FlowGraph* flow_graph) {
 Definition* UnboxedIntConverterInstr::Canonicalize(FlowGraph* flow_graph) {
   if (!HasUses()) return NULL;
 
-  UnboxedIntConverterInstr* box_defn =
-      value()->AsUnboxedIntConverter();
+  UnboxedIntConverterInstr* box_defn = value()->AsUnboxedIntConverter();
   if ((box_defn != NULL) && (box_defn->representation() == from())) {
     if (box_defn->from() == to()) {
       // Do not erase truncating conversions from 64-bit value to 32-bit values
@@ -2335,10 +2326,10 @@ Definition* UnboxedIntConverterInstr::Canonicalize(FlowGraph* flow_graph) {
     // TODO(vegorov): there is a duplication of code between UnboxedIntCoverter
     // and code path that unboxes Mint into Int32. We should just schedule
     // these instructions close to each other instead of fusing them.
-    Definition* replacement =
-        new UnboxInt32Instr(is_truncating() ? UnboxInt32Instr::kTruncate
-                                            : UnboxInt32Instr::kNoTruncation,
-                            unbox_defn->value()/* ->CopyWithType() */, GetDeoptId());
+    Definition* replacement = new UnboxInt32Instr(
+        is_truncating() ? UnboxInt32Instr::kTruncate
+                        : UnboxInt32Instr::kNoTruncation,
+        unbox_defn->value() /* ->CopyWithType() */, GetDeoptId());
     flow_graph->InsertBefore(this, replacement, env(), FlowGraph::kValue);
     return replacement;
   }
@@ -2431,14 +2422,14 @@ static Definition* CanonicalizeStrictCompare(StrictCompareInstr* compare,
   return compare;
 }
 
-static bool BindsToGivenConstant(Value* v, intptr_t expected) {
-  return v->BindsToConstant() && v->BoundConstant().IsSmi() &&
+static bool BindsToGivenConstant(Definition* v, intptr_t expected) {
+  return v->IsConstant() && v->BoundConstant().IsSmi() &&
          (Smi::Cast(v->BoundConstant()).Value() == expected);
 }
 
 // Recognize patterns (a & b) == 0 and (a & 2^n) != 2^n.
-static bool RecognizeTestPattern(Value* left, Value* right, bool* negate) {
-  if (!right->BindsToConstant() || !right->BoundConstant().IsSmi()) {
+static bool RecognizeTestPattern(Definition* left, Definition* right, bool* negate) {
+  if (!right->IsConstant() || !right->BoundConstant().IsSmi()) {
     return false;
   }
 

@@ -147,8 +147,7 @@ static InductionVariableInfo* DetectSimpleInductionVariable(PhiInstr* phi) {
   Definition* initial_value = phi->InputAt(1 - backedge_idx);
 
   BinarySmiOpInstr* increment =
-      UnwrapConstraint(phi->InputAt(backedge_idx))
-          ->AsBinarySmiOp();
+      UnwrapConstraint(phi->InputAt(backedge_idx))->AsBinarySmiOp();
 
   if ((increment != NULL) && (increment->op_kind() == Token::kADD) &&
       (UnwrapConstraint(increment->left()) == phi) &&
