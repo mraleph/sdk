@@ -769,18 +769,11 @@ void DoubleTestOpInstr::PrintOperandsTo(BufferFormatter* f) const {
 }
 
 void BinarySimdOpInstr::PrintOperandsTo(BufferFormatter* f) const {
-  // TODO(vegorov)
+  // FIXME
   f->Print("%d, ", kind());
   left()->PrintTo(f);
   f->Print(", ");
   right()->PrintTo(f);
-}
-
-void Simd32x4ShuffleMixInstr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("%s, ", MethodRecognizer::KindToCString(op_kind()));
-  xy()->PrintTo(f);
-  f->Print(", ");
-  zw()->PrintTo(f);
 }
 
 void Simd32x4GetSignMaskInstr::PrintOperandsTo(BufferFormatter* f) const {

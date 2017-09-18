@@ -2930,8 +2930,8 @@ static bool InlineFloat32x4Method(FlowGraph* flow_graph,
     case MethodRecognizer::kFloat32x4ShuffleZ:
     case MethodRecognizer::kFloat32x4ShuffleW: {
       *last = BinarySimdOpInstr::Create(kind, new (Z) Value(receiver),
-                                           0,  // mask ignored.
-                                           call->deopt_id());
+                                        0,  // mask ignored.
+                                        call->deopt_id());
       break;
     }
     case MethodRecognizer::kFloat32x4GetSignMask: {
@@ -3047,7 +3047,7 @@ static bool InlineSimdShuffleMethod(FlowGraph* flow_graph,
     return false;
   }
   *last = BinarySimdOpInstr::Create(kind, new (Z) Value(call->ArgumentAt(0)),
-                                       mask, call->deopt_id());
+                                    mask, call->deopt_id());
   flow_graph->AppendTo(
       cursor, *last,
       call->deopt_id() != Thread::kNoDeoptId ? call->env() : NULL,
@@ -3074,9 +3074,9 @@ static bool InlineSimdShuffleMixMethod(FlowGraph* flow_graph,
   if (!CheckMask(mask_definition, &mask)) {
     return false;
   }
-  *last = new (Z) Simd32x4ShuffleMixInstr(kind, new (Z) Value(receiver),
-                                          new (Z) Value(call->ArgumentAt(1)),
-                                          mask, call->deopt_id());
+  *last = BinarySimdOpInstr::Create(kind, new (Z) Value(receiver),
+                                    new (Z) Value(call->ArgumentAt(1)), mask,
+                                    call->deopt_id());
   flow_graph->AppendTo(
       cursor, *last,
       call->deopt_id() != Thread::kNoDeoptId ? call->env() : NULL,

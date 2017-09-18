@@ -458,7 +458,6 @@ class EmbeddedArray<T, 0> {
   M(GuardFieldLength)                                                          \
   M(IfThenElse)                                                                \
   M(BinarySimdOp)                                                              \
-  M(Simd32x4ShuffleMix)                                                        \
   M(Simd32x4GetSignMask)                                                       \
   M(Float32x4Constructor)                                                      \
   M(Float32x4Zero)                                                             \
@@ -5276,35 +5275,37 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
 };
 
 #define SIMD_BINARY_FLOAT_OP_LIST(V, T)                                        \
-  V(T##Add, T, T, T)                                                           \
-  V(T##Sub, T, T, T)                                                           \
-  V(T##Mul, T, T, T)                                                           \
-  V(T##Div, T, T, T)
+  V(_, T##Add, T, T, T)                                                           \
+  V(_, T##Sub, T, T, T)                                                           \
+  V(_, T##Mul, T, T, T)                                                           \
+  V(_, T##Div, T, T, T)
 
 #define SIMD_BINARY_INTEGER_OP_LIST(V, T)                                      \
-  V(T##Add, T, T, T)                                                           \
-  V(T##Sub, T, T, T)                                                           \
-  V(T##BitAnd, T, T, T)                                                        \
-  V(T##BitOr, T, T, T)                                                         \
-  V(T##BitXor, T, T, T)
+  V(_, T##Add, T, T, T)                                                           \
+  V(_, T##Sub, T, T, T)                                                           \
+  V(_, T##BitAnd, T, T, T)                                                        \
+  V(_, T##BitOr, T, T, T)                                                         \
+  V(_, T##BitXor, T, T, T)
 
-#define SIMD_OP_LIST(B, U)                                                     \
-  SIMD_BINARY_FLOAT_OP_LIST(B, Float32x4)                                      \
-  SIMD_BINARY_FLOAT_OP_LIST(B, Float64x2)                                      \
-  SIMD_BINARY_INTEGER_OP_LIST(B, Int32x4)                                      \
-  U(Float32x4ShuffleX, Float32x4, Double)                                      \
-  U(Float32x4ShuffleY, Float32x4, Double)                                      \
-  U(Float32x4ShuffleZ, Float32x4, Double)                                      \
-  U(Float32x4ShuffleW, Float32x4, Double)                                      \
-  U(Float32x4Shuffle, Float32x4, Float32x4)                                    \
-  U(Int32x4Shuffle, Int32x4, Int32x4)
+#define SIMD_OP_LIST(UNARY, BINARY, BINARY_OP)                                 \
+  SIMD_BINARY_FLOAT_OP_LIST(BINARY_OP, Float32x4)                              \
+  SIMD_BINARY_FLOAT_OP_LIST(BINARY_OP, Float64x2)                              \
+  SIMD_BINARY_INTEGER_OP_LIST(BINARY_OP, Int32x4)                              \
+  UNARY(_, Float32x4ShuffleX, Float32x4, Double)                               \
+  UNARY(_, Float32x4ShuffleY, Float32x4, Double)                               \
+  UNARY(_, Float32x4ShuffleZ, Float32x4, Double)                               \
+  UNARY(_, Float32x4ShuffleW, Float32x4, Double)                               \
+  UNARY(MASK, Float32x4Shuffle, Float32x4, Float32x4)                          \
+  UNARY(MASK, Int32x4Shuffle, Int32x4, Int32x4)                                \
+  BINARY(MASK, Float32x4ShuffleMix, Float32x4, Float32x4, Float32x4)           \
+  BINARY(MASK, Int32x4ShuffleMix, Int32x4, Int32x4, Int32x4)
 
 class BinarySimdOpInstr : public Definition {
  public:
   enum Kind {
-#define DECLARE_ENUM_UNARY(Name, Arg0, Result) k##Name,
-#define DECLARE_ENUM_BINARY(Name, Arg0, Arg1, Result) k##Name,
-    SIMD_OP_LIST(DECLARE_ENUM_BINARY, DECLARE_ENUM_UNARY)
+#define DECLARE_ENUM_UNARY(Mask, Name, Arg0, Result) k##Name,
+#define DECLARE_ENUM_BINARY(Mask, Name, Arg0, Arg1, Result) k##Name,
+    SIMD_OP_LIST(DECLARE_ENUM_UNARY, DECLARE_ENUM_BINARY, DECLARE_ENUM_BINARY)
 #undef DECLARE_ENUM_UNARY
 #undef DECLARE_ENUM_BINARY
   };
@@ -5330,6 +5331,14 @@ class BinarySimdOpInstr : public Definition {
     return new BinarySimdOpInstr(KindForMethod(kind), left, mask, deopt_id);
   }
 
+  static BinarySimdOpInstr* Create(MethodRecognizer::Kind kind,
+                                   Value* left,
+                                   Value* right,
+                                   intptr_t mask,
+                                   intptr_t deopt_id) {
+    return new BinarySimdOpInstr(KindForMethod(kind), left, right, mask,
+                                 deopt_id);
+  }
 
   static Kind KindForMethod(MethodRecognizer::Kind method_kind);
   static Kind KindForOperator(intptr_t cid, Token::Kind op);
@@ -5359,11 +5368,11 @@ class BinarySimdOpInstr : public Definition {
     BinarySimdOpInstr* other_op = other->AsBinarySimdOp();
     // FIXME
     return kind() == other_op->kind() &&
-      (InputCount() == 2 || mask() == other_op->mask());
+           (!HasMask() || mask() == other_op->mask());
   }
 
   virtual intptr_t InputCount() const;
-  virtual Value* InputAt(intptr_t i) const { return inputs_[i].value; }
+  virtual Value* InputAt(intptr_t i) const { return inputs_[i]; }
 
   PRINT_OPERANDS_TO_SUPPORT
 
@@ -5375,90 +5384,33 @@ class BinarySimdOpInstr : public Definition {
   }
 
   BinarySimdOpInstr(Kind kind, Value* left, intptr_t mask, intptr_t deopt_id)
-      : Definition(deopt_id), kind_(kind) {
+      : Definition(deopt_id), kind_(kind), mask_(mask) {
     SetInputAt(0, left);
-    inputs_[1].mask = mask;
   }
 
-  Value* left() const { return inputs_[0].value; }
-  Value* right() const { return inputs_[1].value; }
-  intptr_t mask() const { return inputs_[1].mask; }
-
- private:
-  virtual void RawSetInputAt(intptr_t i, Value* value) {
-    inputs_[i].value = value;
+  BinarySimdOpInstr(Kind kind,
+                    Value* left,
+                    Value* right,
+                    intptr_t mask,
+                    intptr_t deopt_id)
+      : Definition(deopt_id), kind_(kind), mask_(mask) {
+    SetInputAt(0, left);
+    SetInputAt(1, right);
   }
 
-  union ValueOrMask {
-    Value* value;
-    intptr_t mask;
-  };
-
-  const Kind kind_;
-  ValueOrMask inputs_[2];
-
-  DISALLOW_COPY_AND_ASSIGN(BinarySimdOpInstr);
-};
-
-class Simd32x4ShuffleMixInstr : public TemplateDefinition<2, NoThrow, Pure> {
- public:
-  Simd32x4ShuffleMixInstr(MethodRecognizer::Kind op_kind,
-                          Value* xy,
-                          Value* zw,
-                          intptr_t mask,
-                          intptr_t deopt_id)
-      : TemplateDefinition(deopt_id), op_kind_(op_kind), mask_(mask) {
-    SetInputAt(0, xy);
-    SetInputAt(1, zw);
-  }
-
-  Value* xy() const { return inputs_[0]; }
-  Value* zw() const { return inputs_[1]; }
-
-  MethodRecognizer::Kind op_kind() const { return op_kind_; }
-
+  Value* left() const { return inputs_[0]; }
+  Value* right() const { return inputs_[1]; }
   intptr_t mask() const { return mask_; }
 
-  virtual bool ComputeCanDeoptimize() const { return false; }
+  bool HasMask() const;
 
-  virtual Representation representation() const {
-    if (op_kind() == MethodRecognizer::kInt32x4ShuffleMix) {
-      return kUnboxedInt32x4;
-    }
-    ASSERT(op_kind() == MethodRecognizer::kFloat32x4ShuffleMix);
-    return kUnboxedFloat32x4;
-  }
+  virtual void RawSetInputAt(intptr_t i, Value* value) { inputs_[i] = value; }
 
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
-    ASSERT((idx == 0) || (idx == 1));
-    if (op_kind() == MethodRecognizer::kInt32x4ShuffleMix) {
-      return kUnboxedInt32x4;
-    }
-    ASSERT(op_kind() == MethodRecognizer::kFloat32x4ShuffleMix);
-    return kUnboxedFloat32x4;
-  }
+  const Kind kind_;
+  Value* inputs_[2];
+  intptr_t mask_;
 
-  virtual intptr_t DeoptimizationTarget() const {
-    // Direct access since this instruction cannot deoptimize, and the deopt-id
-    // was inherited from another instruction that could deoptimize.
-    return GetDeoptId();
-  }
-
-  PRINT_OPERANDS_TO_SUPPORT
-
-  DECLARE_INSTRUCTION(Simd32x4ShuffleMix)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AttributesEqual(Instruction* other) const {
-    return (op_kind() == other->AsSimd32x4ShuffleMix()->op_kind()) &&
-           (mask() == other->AsSimd32x4ShuffleMix()->mask());
-  }
-
- private:
-  const MethodRecognizer::Kind op_kind_;
-  const intptr_t mask_;
-
-  DISALLOW_COPY_AND_ASSIGN(Simd32x4ShuffleMixInstr);
+  DISALLOW_COPY_AND_ASSIGN(BinarySimdOpInstr);
 };
 
 class Float32x4ConstructorInstr : public TemplateDefinition<4, NoThrow, Pure> {

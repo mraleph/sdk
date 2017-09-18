@@ -3808,7 +3808,8 @@ LocationSummary* BinarySimdOpInstr::MakeLocationSummary(Zone* zone,
 
 void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   XmmRegister left = locs()->in(0).fpu_reg();
-  XmmRegister right = InputCount() == 2 ? locs()->in(1).fpu_reg() : kNoFpuRegister;
+  XmmRegister right =
+      InputCount() == 2 ? locs()->in(1).fpu_reg() : kNoFpuRegister;
 
   ASSERT(locs()->out(0).fpu_reg() == left);
 
@@ -3839,33 +3840,10 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     case kInt32x4Shuffle:
       __ shufps(left, left, Immediate(mask()));
       break;
-  }
-}
-
-LocationSummary* Simd32x4ShuffleMixInstr::MakeLocationSummary(Zone* zone,
-                                                              bool opt) const {
-  const intptr_t kNumInputs = 2;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_in(1, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Simd32x4ShuffleMixInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister left = locs()->in(0).fpu_reg();
-  XmmRegister right = locs()->in(1).fpu_reg();
-
-  ASSERT(locs()->out(0).fpu_reg() == left);
-  switch (op_kind()) {
-    case MethodRecognizer::kFloat32x4ShuffleMix:
-    case MethodRecognizer::kInt32x4ShuffleMix:
-      __ shufps(left, right, Immediate(mask_));
+    case kFloat32x4ShuffleMix:
+    case kInt32x4ShuffleMix:
+      __ shufps(left, right, Immediate(mask()));
       break;
-    default:
-      UNREACHABLE();
   }
 }
 
