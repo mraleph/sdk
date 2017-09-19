@@ -458,7 +458,6 @@ class EmbeddedArray<T, 0> {
   M(GuardFieldLength)                                                          \
   M(IfThenElse)                                                                \
   M(BinarySimdOp)                                                              \
-  M(Simd32x4GetSignMask)                                                       \
   M(Float32x4Constructor)                                                      \
   M(Float32x4Zero)                                                             \
   M(Float32x4Scale)                                                            \
@@ -5305,6 +5304,8 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
   BINARY(_, Float32x4NotEqual, Float32x4, Float32x4, Int32x4) \
   BINARY(_, Float32x4Min, Float32x4, Float32x4, Float32x4) \
   BINARY(_, Float32x4Max, Float32x4, Float32x4, Float32x4) \
+  UNARY(_, Float32x4GetSignMask, Float32x4, Word) \
+  UNARY(_, Int32x4GetSignMask, Int32x4, Word) \
 
 class BinarySimdOpInstr : public Definition {
  public:
@@ -6218,53 +6219,6 @@ class Int32x4GetFlagInstr : public TemplateDefinition<1, NoThrow, Pure> {
   const MethodRecognizer::Kind op_kind_;
 
   DISALLOW_COPY_AND_ASSIGN(Int32x4GetFlagInstr);
-};
-
-class Simd32x4GetSignMaskInstr : public TemplateDefinition<1, NoThrow, Pure> {
- public:
-  Simd32x4GetSignMaskInstr(MethodRecognizer::Kind op_kind,
-                           Value* value,
-                           intptr_t deopt_id)
-      : TemplateDefinition(deopt_id), op_kind_(op_kind) {
-    SetInputAt(0, value);
-  }
-
-  Value* value() const { return inputs_[0]; }
-
-  MethodRecognizer::Kind op_kind() const { return op_kind_; }
-
-  virtual bool ComputeCanDeoptimize() const { return false; }
-
-  virtual Representation representation() const { return kTagged; }
-
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
-    ASSERT(idx == 0);
-    if (op_kind_ == MethodRecognizer::kFloat32x4GetSignMask) {
-      return kUnboxedFloat32x4;
-    }
-    ASSERT(op_kind_ == MethodRecognizer::kInt32x4GetSignMask);
-    return kUnboxedInt32x4;
-  }
-
-  virtual intptr_t DeoptimizationTarget() const {
-    // Direct access since this instruction cannot deoptimize, and the deopt-id
-    // was inherited from another instruction that could deoptimize.
-    return GetDeoptId();
-  }
-
-  DECLARE_INSTRUCTION(Simd32x4GetSignMask)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AttributesEqual(Instruction* other) const {
-    return other->AsSimd32x4GetSignMask()->op_kind() == op_kind();
-  }
-
-  PRINT_OPERANDS_TO_SUPPORT
-
- private:
-  const MethodRecognizer::Kind op_kind_;
-
-  DISALLOW_COPY_AND_ASSIGN(Simd32x4GetSignMaskInstr);
 };
 
 class Int32x4SelectInstr : public TemplateDefinition<3, NoThrow, Pure> {

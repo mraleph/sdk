@@ -1121,11 +1121,6 @@ void ConstantPropagator::VisitFloat32x4Constructor(
   SetValue(instr, non_constant_);
 }
 
-void ConstantPropagator::VisitSimd32x4GetSignMask(
-    Simd32x4GetSignMaskInstr* instr) {
-  SetValue(instr, non_constant_);
-}
-
 void ConstantPropagator::VisitFloat32x4Zero(Float32x4ZeroInstr* instr) {
   SetValue(instr, non_constant_);
 }

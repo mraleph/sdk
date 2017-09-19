@@ -776,16 +776,6 @@ void BinarySimdOpInstr::PrintOperandsTo(BufferFormatter* f) const {
   right()->PrintTo(f);
 }
 
-void Simd32x4GetSignMaskInstr::PrintOperandsTo(BufferFormatter* f) const {
-  if (op_kind() == MethodRecognizer::kFloat32x4GetSignMask) {
-    f->Print("Float32x4.getSignMask ");
-  } else {
-    ASSERT(op_kind() == MethodRecognizer::kInt32x4GetSignMask);
-    f->Print("Int32x4.getSignMask ");
-  }
-  value()->PrintTo(f);
-}
-
 void Float32x4ConstructorInstr::PrintOperandsTo(BufferFormatter* f) const {
   f->Print("Float32x4(");
   value0()->PrintTo(f);

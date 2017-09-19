@@ -3787,7 +3787,8 @@ LocationSummary* BinarySimdOpInstr::MakeLocationSummary(Zone* zone,
   for (intptr_t i = 0; i < InputCount(); i++) {
     summary->set_in(i, Location::RequiresFpuRegister());
   }
-  summary->set_out(0, Location::SameAsFirstInput());
+  summary->set_out(0, (representation() == kUnboxedInt64) ?
+      Location::RequiresRegister() : Location::SameAsFirstInput());
   return summary;
 }
 
@@ -3819,7 +3820,8 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   XmmRegister right =
       InputCount() == 2 ? locs()->in(1).fpu_reg() : kNoFpuRegister;
 
-  ASSERT(locs()->out(0).fpu_reg() == left);
+  ASSERT((representation() == kUnboxedInt64) ||
+         locs()->out(0).fpu_reg() == left);
 
   switch (kind()) {
 #define CASE(Name, op)                                                         \
@@ -3857,26 +3859,11 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       // Splat across all lanes.
       __ shufps(left, left, Immediate(0x00));
       break;
+    case kFloat32x4GetSignMask:
+    case kInt32x4GetSignMask:
+      __ movmskps(locs()->out(0).reg(), left);
+      break;
   }
-}
-
-LocationSummary* Simd32x4GetSignMaskInstr::MakeLocationSummary(Zone* zone,
-                                                               bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::RequiresRegister());
-  return summary;
-}
-
-void Simd32x4GetSignMaskInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister value = locs()->in(0).fpu_reg();
-  Register out = locs()->out(0).reg();
-
-  __ movmskps(out, value);
-  __ SmiTag(out);
 }
 
 LocationSummary* Float32x4ConstructorInstr::MakeLocationSummary(

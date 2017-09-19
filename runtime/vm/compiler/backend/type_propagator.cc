@@ -1300,19 +1300,21 @@ CompileType DoubleTestOpInstr::ComputeType() const {
 }
 
 static const intptr_t simd_op_result_cids[] = {
+#define kWordCid -1
 #define CASE_BINARY(Mask, Name, Arg0, Arg1, Result) k##Result##Cid,
 #define CASE_UNARY(Mask, Name, Arg0, Result) k##Result##Cid,
     SIMD_OP_LIST(CASE_UNARY, CASE_BINARY, CASE_BINARY)
 #undef CASE_BINARY
 #undef CASE_UNARY
+#undef kWordCid
 };
 
 CompileType BinarySimdOpInstr::ComputeType() const {
-  return CompileType::FromCid(simd_op_result_cids[kind()]);
-}
-
-CompileType Simd32x4GetSignMaskInstr::ComputeType() const {
-  return CompileType::Int();
+  const intptr_t cid = simd_op_result_cids[kind()];
+  if (cid == -1) {
+    return CompileType::Int();
+  }
+  return CompileType::FromCid(cid);
 }
 
 CompileType Float32x4ConstructorInstr::ComputeType() const {

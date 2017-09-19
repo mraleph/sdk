@@ -2928,13 +2928,9 @@ static bool InlineFloat32x4Method(FlowGraph* flow_graph,
     case MethodRecognizer::kFloat32x4ShuffleX:
     case MethodRecognizer::kFloat32x4ShuffleY:
     case MethodRecognizer::kFloat32x4ShuffleZ:
-    case MethodRecognizer::kFloat32x4ShuffleW: {
-      *last = BinarySimdOpInstr::Create(kind, new (Z) Value(receiver), call->deopt_id());
-      break;
-    }
+    case MethodRecognizer::kFloat32x4ShuffleW:
     case MethodRecognizer::kFloat32x4GetSignMask: {
-      *last = new (Z) Simd32x4GetSignMaskInstr(kind, new (Z) Value(receiver),
-                                               call->deopt_id());
+      *last = BinarySimdOpInstr::Create(kind, new (Z) Value(receiver), call->deopt_id());
       break;
     }
     case MethodRecognizer::kFloat32x4Equal:
@@ -3100,7 +3096,7 @@ static bool InlineInt32x4Method(FlowGraph* flow_graph,
       break;
     }
     case MethodRecognizer::kInt32x4GetSignMask: {
-      *last = new (Z) Simd32x4GetSignMaskInstr(kind, new (Z) Value(receiver),
+      *last = BinarySimdOpInstr::Create(kind, new (Z) Value(receiver),
                                                call->deopt_id());
       break;
     }
