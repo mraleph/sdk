@@ -3918,74 +3918,23 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       __ maxps(left, lower);
       break;
     }
-  }
-}
 
-LocationSummary* Float32x4WithInstr::MakeLocationSummary(Zone* zone,
-                                                         bool opt) const {
-  const intptr_t kNumInputs = 2;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_in(1, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Float32x4WithInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister replacement = locs()->in(0).fpu_reg();
-  XmmRegister value = locs()->in(1).fpu_reg();
-
-  ASSERT(locs()->out(0).fpu_reg() == replacement);
-
-  switch (op_kind()) {
-    case MethodRecognizer::kFloat32x4WithX:
-      __ cvtsd2ss(replacement, replacement);
+    // FIXME INSERTPS on SSE4.1
+    case kFloat32x4WithX:
+    case kFloat32x4WithY:
+    case kFloat32x4WithZ:
+    case kFloat32x4WithW: {
+      COMPILE_ASSERT(kFloat32x4WithY == (kFloat32x4WithX + 1) &&
+                     kFloat32x4WithZ == (kFloat32x4WithX + 2) &&
+                     kFloat32x4WithW == (kFloat32x4WithX + 3));
+      __ cvtsd2ss(left, left);
       __ AddImmediate(RSP, Immediate(-16));
-      // Move value to stack.
-      __ movups(Address(RSP, 0), value);
-      // Write over X value.
-      __ movss(Address(RSP, 0), replacement);
-      // Move updated value into output register.
-      __ movups(replacement, Address(RSP, 0));
+      __ movups(Address(RSP, 0), right);
+      __ movss(Address(RSP, 4 * (kind() - kFloat32x4WithX)), left);
+      __ movups(left, Address(RSP, 0));
       __ AddImmediate(RSP, Immediate(16));
       break;
-    case MethodRecognizer::kFloat32x4WithY:
-      __ cvtsd2ss(replacement, replacement);
-      __ AddImmediate(RSP, Immediate(-16));
-      // Move value to stack.
-      __ movups(Address(RSP, 0), value);
-      // Write over Y value.
-      __ movss(Address(RSP, 4), replacement);
-      // Move updated value into output register.
-      __ movups(replacement, Address(RSP, 0));
-      __ AddImmediate(RSP, Immediate(16));
-      break;
-    case MethodRecognizer::kFloat32x4WithZ:
-      __ cvtsd2ss(replacement, replacement);
-      __ AddImmediate(RSP, Immediate(-16));
-      // Move value to stack.
-      __ movups(Address(RSP, 0), value);
-      // Write over Z value.
-      __ movss(Address(RSP, 8), replacement);
-      // Move updated value into output register.
-      __ movups(replacement, Address(RSP, 0));
-      __ AddImmediate(RSP, Immediate(16));
-      break;
-    case MethodRecognizer::kFloat32x4WithW:
-      __ cvtsd2ss(replacement, replacement);
-      __ AddImmediate(RSP, Immediate(-16));
-      // Move value to stack.
-      __ movups(Address(RSP, 0), value);
-      // Write over W value.
-      __ movss(Address(RSP, 12), replacement);
-      // Move updated value into output register.
-      __ movups(replacement, Address(RSP, 0));
-      __ AddImmediate(RSP, Immediate(16));
-      break;
-    default:
-      UNREACHABLE();
+    }
   }
 }
 

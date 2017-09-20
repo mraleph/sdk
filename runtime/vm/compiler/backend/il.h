@@ -458,7 +458,6 @@ class EmbeddedArray<T, 0> {
   M(GuardFieldLength)                                                          \
   M(IfThenElse)                                                                \
   M(BinarySimdOp)                                                              \
-  M(Float32x4With)                                                             \
   M(Float32x4ToInt32x4)                                                        \
   M(MaterializeObject)                                                         \
   M(Int32x4Constructor)                                                        \
@@ -5309,6 +5308,10 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
   M(1, _, Float32x4Negate, (Float32x4), Float32x4) \
   M(1, _, Float32x4Absolute, (Float32x4), Float32x4) \
   M(3, _, Float32x4Clamp, (Float32x4, Float32x4, Float32x4), Float32x4) \
+  M(2, _, Float32x4WithX, (Double, Float32x4), Float32x4) \
+  M(2, _, Float32x4WithY, (Double, Float32x4), Float32x4) \
+  M(2, _, Float32x4WithZ, (Double, Float32x4), Float32x4) \
+  M(2, _, Float32x4WithW, (Double, Float32x4), Float32x4) \
 
 class BinarySimdOpInstr : public Definition {
  public:
@@ -5478,55 +5481,6 @@ class BinarySimdOpInstr : public Definition {
   intptr_t mask_;
 
   DISALLOW_COPY_AND_ASSIGN(BinarySimdOpInstr);
-};
-
-class Float32x4WithInstr : public TemplateDefinition<2, NoThrow, Pure> {
- public:
-  Float32x4WithInstr(MethodRecognizer::Kind op_kind,
-                     Value* left,
-                     Value* replacement,
-                     intptr_t deopt_id)
-      : TemplateDefinition(deopt_id), op_kind_(op_kind) {
-    SetInputAt(0, replacement);
-    SetInputAt(1, left);
-  }
-
-  Value* left() const { return inputs_[1]; }
-  Value* replacement() const { return inputs_[0]; }
-
-  MethodRecognizer::Kind op_kind() const { return op_kind_; }
-
-  virtual bool ComputeCanDeoptimize() const { return false; }
-
-  virtual Representation representation() const { return kUnboxedFloat32x4; }
-
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
-    ASSERT((idx == 0) || (idx == 1));
-    if (idx == 0) {
-      return kUnboxedDouble;
-    }
-    return kUnboxedFloat32x4;
-  }
-
-  virtual intptr_t DeoptimizationTarget() const {
-    // Direct access since this instruction cannot deoptimize, and the deopt-id
-    // was inherited from another instruction that could deoptimize.
-    return GetDeoptId();
-  }
-
-  DECLARE_INSTRUCTION(Float32x4With)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AttributesEqual(Instruction* other) const {
-    return op_kind() == other->AsFloat32x4With()->op_kind();
-  }
-
-  PRINT_OPERANDS_TO_SUPPORT
-
- private:
-  const MethodRecognizer::Kind op_kind_;
-
-  DISALLOW_COPY_AND_ASSIGN(Float32x4WithInstr);
 };
 
 class Simd64x2ShuffleInstr : public TemplateDefinition<1, NoThrow, Pure> {

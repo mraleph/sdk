@@ -1315,10 +1315,6 @@ CompileType BinarySimdOpInstr::ComputeType() const {
   return CompileType::FromCid(cid);
 }
 
-CompileType Float32x4WithInstr::ComputeType() const {
-  return CompileType::FromCid(kFloat32x4Cid);
-}
-
 CompileType Float32x4ToInt32x4Instr::ComputeType() const {
   return CompileType::FromCid(kInt32x4Cid);
 }

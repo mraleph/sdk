@@ -2952,6 +2952,10 @@ static bool InlineFloat32x4Method(FlowGraph* flow_graph,
           kind, new (Z) Value(left), new (Z) Value(right), call->deopt_id());
       break;
     }
+    case MethodRecognizer::kFloat32x4WithX:
+    case MethodRecognizer::kFloat32x4WithY:
+    case MethodRecognizer::kFloat32x4WithZ:
+    case MethodRecognizer::kFloat32x4WithW:
     case MethodRecognizer::kFloat32x4Scale: {
       Definition* left = receiver;
       Definition* right = call->ArgumentAt(1);
@@ -2960,16 +2964,6 @@ static bool InlineFloat32x4Method(FlowGraph* flow_graph,
       // register and can be destroyed.
       *last = BinarySimdOpInstr::Create(
           kind, new (Z) Value(right), new (Z) Value(left), call->deopt_id());
-      break;
-    }
-    case MethodRecognizer::kFloat32x4WithX:
-    case MethodRecognizer::kFloat32x4WithY:
-    case MethodRecognizer::kFloat32x4WithZ:
-    case MethodRecognizer::kFloat32x4WithW: {
-      Definition* left = receiver;
-      Definition* right = call->ArgumentAt(1);
-      *last = new (Z) Float32x4WithInstr(
-          kind, new (Z) Value(left), new (Z) Value(right), call->deopt_id());
       break;
     }
     case MethodRecognizer::kFloat32x4Clamp: {
