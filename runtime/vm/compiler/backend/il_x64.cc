@@ -3910,29 +3910,15 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       __ xorps(value, value);
       break;
     }
+
+    case kFloat32x4Clamp: {
+      XmmRegister lower = locs()->in(1).fpu_reg();
+      XmmRegister upper = locs()->in(2).fpu_reg();
+      __ minps(left, upper);
+      __ maxps(left, lower);
+      break;
+    }
   }
-}
-
-LocationSummary* Float32x4ClampInstr::MakeLocationSummary(Zone* zone,
-                                                          bool opt) const {
-  const intptr_t kNumInputs = 3;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_in(1, Location::RequiresFpuRegister());
-  summary->set_in(2, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Float32x4ClampInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister left = locs()->in(0).fpu_reg();
-  XmmRegister lower = locs()->in(1).fpu_reg();
-  XmmRegister upper = locs()->in(2).fpu_reg();
-  ASSERT(locs()->out(0).fpu_reg() == left);
-  __ minps(left, upper);
-  __ maxps(left, lower);
 }
 
 LocationSummary* Float32x4WithInstr::MakeLocationSummary(Zone* zone,

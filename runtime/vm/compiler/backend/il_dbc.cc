@@ -71,7 +71,6 @@ DECLARE_FLAG(int, optimization_counter_threshold);
   M(Float32x4Scale)                                                            \
   M(Float32x4Sqrt)                                                             \
   M(Float32x4ZeroArg)                                                          \
-  M(Float32x4Clamp)                                                            \
   M(Float32x4With)                                                             \
   M(Float32x4ToInt32x4)                                                        \
   M(Int32x4Constructor)                                                        \

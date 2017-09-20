@@ -458,7 +458,6 @@ class EmbeddedArray<T, 0> {
   M(GuardFieldLength)                                                          \
   M(IfThenElse)                                                                \
   M(BinarySimdOp)                                                              \
-  M(Float32x4Clamp)                                                            \
   M(Float32x4With)                                                             \
   M(Float32x4ToInt32x4)                                                        \
   M(MaterializeObject)                                                         \
@@ -5309,6 +5308,7 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
   M(0, _, Float32x4Zero, (), Float32x4) \
   M(1, _, Float32x4Negate, (Float32x4), Float32x4) \
   M(1, _, Float32x4Absolute, (Float32x4), Float32x4) \
+  M(3, _, Float32x4Clamp, (Float32x4, Float32x4, Float32x4), Float32x4) \
 
 class BinarySimdOpInstr : public Definition {
  public:
@@ -5328,6 +5328,14 @@ class BinarySimdOpInstr : public Definition {
   static BinarySimdOpInstr* Create(MethodRecognizer::Kind kind,
                                    intptr_t deopt_id) {
     return new BinarySimdOpInstr(KindForMethod(kind), deopt_id);
+  }
+
+  static BinarySimdOpInstr* Create(MethodRecognizer::Kind kind,
+                                   Value* arg0,
+                                   Value* arg1,
+                                   Value* arg2,
+                                   intptr_t deopt_id) {
+    return new BinarySimdOpInstr(KindForMethod(kind), arg0, arg1, arg2, deopt_id);
   }
 
   static BinarySimdOpInstr* Create(MethodRecognizer::Kind kind,
@@ -5422,6 +5430,13 @@ class BinarySimdOpInstr : public Definition {
     SetInputAt(1, right);
   }
 
+  BinarySimdOpInstr(Kind kind, Value* arg0, Value* arg1, Value* arg2, intptr_t deopt_id)
+      : Definition(deopt_id), kind_(kind) {
+    SetInputAt(0, arg0);
+    SetInputAt(1, arg1);
+    SetInputAt(2, arg2);
+  }
+
   BinarySimdOpInstr(Kind kind, Value* arg0, Value* arg1, Value* arg2, Value* arg3, intptr_t deopt_id)
       : Definition(deopt_id), kind_(kind) {
     SetInputAt(0, arg0);
@@ -5463,48 +5478,6 @@ class BinarySimdOpInstr : public Definition {
   intptr_t mask_;
 
   DISALLOW_COPY_AND_ASSIGN(BinarySimdOpInstr);
-};
-
-class Float32x4ClampInstr : public TemplateDefinition<3, NoThrow, Pure> {
- public:
-  Float32x4ClampInstr(Value* left,
-                      Value* lower,
-                      Value* upper,
-                      intptr_t deopt_id)
-      : TemplateDefinition(deopt_id) {
-    SetInputAt(0, left);
-    SetInputAt(1, lower);
-    SetInputAt(2, upper);
-  }
-
-  Value* left() const { return inputs_[0]; }
-  Value* lower() const { return inputs_[1]; }
-  Value* upper() const { return inputs_[2]; }
-
-  virtual bool ComputeCanDeoptimize() const { return false; }
-
-  virtual Representation representation() const { return kUnboxedFloat32x4; }
-
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
-    ASSERT((idx == 0) || (idx == 1) || (idx == 2));
-    return kUnboxedFloat32x4;
-  }
-
-  virtual intptr_t DeoptimizationTarget() const {
-    // Direct access since this instruction cannot deoptimize, and the deopt-id
-    // was inherited from another instruction that could deoptimize.
-    return GetDeoptId();
-  }
-
-  DECLARE_INSTRUCTION(Float32x4Clamp)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AttributesEqual(Instruction* other) const { return true; }
-
-  PRINT_OPERANDS_TO_SUPPORT
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(Float32x4ClampInstr);
 };
 
 class Float32x4WithInstr : public TemplateDefinition<2, NoThrow, Pure> {

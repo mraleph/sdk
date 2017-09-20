@@ -776,11 +776,6 @@ void BinarySimdOpInstr::PrintOperandsTo(BufferFormatter* f) const {
   right()->PrintTo(f);
 }
 
-void Float32x4ClampInstr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("Float32x4.clamp, ");
-  left()->PrintTo(f);
-}
-
 void Float32x4WithInstr::PrintOperandsTo(BufferFormatter* f) const {
   f->Print("%s, ", MethodRecognizer::KindToCString(op_kind()));
   left()->PrintTo(f);

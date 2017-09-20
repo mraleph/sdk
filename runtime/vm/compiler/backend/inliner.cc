@@ -2977,7 +2977,7 @@ static bool InlineFloat32x4Method(FlowGraph* flow_graph,
       Definition* lower = call->ArgumentAt(1);
       Definition* upper = call->ArgumentAt(2);
       *last =
-          new (Z) Float32x4ClampInstr(new (Z) Value(left), new (Z) Value(lower),
+          BinarySimdOpInstr::Create(kind, new (Z) Value(left), new (Z) Value(lower),
                                       new (Z) Value(upper), call->deopt_id());
       break;
     }
