@@ -458,8 +458,6 @@ class EmbeddedArray<T, 0> {
   M(GuardFieldLength)                                                          \
   M(IfThenElse)                                                                \
   M(BinarySimdOp)                                                              \
-  M(Float32x4Zero)                                                             \
-  M(Float32x4ZeroArg)                                                          \
   M(Float32x4Clamp)                                                            \
   M(Float32x4With)                                                             \
   M(Float32x4ToInt32x4)                                                        \
@@ -5308,6 +5306,9 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
   M(1, _, Float32x4Reciprocal, (Float32x4), Float32x4) \
   M(1, _, Float32x4ReciprocalSqrt, (Float32x4), Float32x4) \
   M(4, _, Float32x4Constructor, (Double, Double, Double, Double), Float32x4) \
+  M(0, _, Float32x4Zero, (), Float32x4) \
+  M(1, _, Float32x4Negate, (Float32x4), Float32x4) \
+  M(1, _, Float32x4Absolute, (Float32x4), Float32x4) \
 
 class BinarySimdOpInstr : public Definition {
  public:
@@ -5322,6 +5323,11 @@ class BinarySimdOpInstr : public Definition {
                                    Value* right,
                                    intptr_t deopt_id) {
     return new BinarySimdOpInstr(kind, left, right, deopt_id);
+  }
+
+  static BinarySimdOpInstr* Create(MethodRecognizer::Kind kind,
+                                   intptr_t deopt_id) {
+    return new BinarySimdOpInstr(KindForMethod(kind), deopt_id);
   }
 
   static BinarySimdOpInstr* Create(MethodRecognizer::Kind kind,
@@ -5396,7 +5402,6 @@ class BinarySimdOpInstr : public Definition {
 
   virtual bool AttributesEqual(Instruction* other) const {
     BinarySimdOpInstr* other_op = other->AsBinarySimdOp();
-    // FIXME
     return kind() == other_op->kind() &&
            (!HasMask() || mask() == other_op->mask());
   }
@@ -5407,6 +5412,10 @@ class BinarySimdOpInstr : public Definition {
   PRINT_OPERANDS_TO_SUPPORT
 
  private:
+  BinarySimdOpInstr(Kind kind, intptr_t deopt_id)
+      : Definition(deopt_id), kind_(kind) {
+  }
+
   BinarySimdOpInstr(Kind kind, Value* left, Value* right, intptr_t deopt_id)
       : Definition(deopt_id), kind_(kind) {
     SetInputAt(0, left);
@@ -5454,68 +5463,6 @@ class BinarySimdOpInstr : public Definition {
   intptr_t mask_;
 
   DISALLOW_COPY_AND_ASSIGN(BinarySimdOpInstr);
-};
-
-// TODO(vegorov) replace with UnboxedConstantInstr.
-class Float32x4ZeroInstr : public TemplateDefinition<0, NoThrow, Pure> {
- public:
-  Float32x4ZeroInstr() {}
-
-  virtual bool ComputeCanDeoptimize() const { return false; }
-
-  virtual Representation representation() const { return kUnboxedFloat32x4; }
-
-  DECLARE_INSTRUCTION(Float32x4Zero)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AttributesEqual(Instruction* other) const { return true; }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(Float32x4ZeroInstr);
-};
-
-// TODO(vegorov) rename to Unary to match naming convention for arithmetic.
-class Float32x4ZeroArgInstr : public TemplateDefinition<1, NoThrow, Pure> {
- public:
-  Float32x4ZeroArgInstr(MethodRecognizer::Kind op_kind,
-                        Value* left,
-                        intptr_t deopt_id)
-      : TemplateDefinition(deopt_id), op_kind_(op_kind) {
-    SetInputAt(0, left);
-  }
-
-  Value* left() const { return inputs_[0]; }
-
-  MethodRecognizer::Kind op_kind() const { return op_kind_; }
-
-  virtual bool ComputeCanDeoptimize() const { return false; }
-
-  virtual Representation representation() const { return kUnboxedFloat32x4; }
-
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
-    ASSERT(idx == 0);
-    return kUnboxedFloat32x4;
-  }
-
-  virtual intptr_t DeoptimizationTarget() const {
-    // Direct access since this instruction cannot deoptimize, and the deopt-id
-    // was inherited from another instruction that could deoptimize.
-    return GetDeoptId();
-  }
-
-  DECLARE_INSTRUCTION(Float32x4ZeroArg)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AttributesEqual(Instruction* other) const {
-    return op_kind() == other->AsFloat32x4ZeroArg()->op_kind();
-  }
-
-  PRINT_OPERANDS_TO_SUPPORT
-
- private:
-  const MethodRecognizer::Kind op_kind_;
-
-  DISALLOW_COPY_AND_ASSIGN(Float32x4ZeroArgInstr);
 };
 
 class Float32x4ClampInstr : public TemplateDefinition<3, NoThrow, Pure> {

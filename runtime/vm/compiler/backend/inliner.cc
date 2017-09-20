@@ -2932,7 +2932,9 @@ static bool InlineFloat32x4Method(FlowGraph* flow_graph,
     case MethodRecognizer::kFloat32x4GetSignMask:
     case MethodRecognizer::kFloat32x4Sqrt:
     case MethodRecognizer::kFloat32x4ReciprocalSqrt:
-    case MethodRecognizer::kFloat32x4Reciprocal: {
+    case MethodRecognizer::kFloat32x4Reciprocal:
+    case MethodRecognizer::kFloat32x4Absolute:
+    case MethodRecognizer::kFloat32x4Negate: {
       *last = BinarySimdOpInstr::Create(kind, new (Z) Value(receiver), call->deopt_id());
       break;
     }
@@ -2968,13 +2970,6 @@ static bool InlineFloat32x4Method(FlowGraph* flow_graph,
       Definition* right = call->ArgumentAt(1);
       *last = new (Z) Float32x4WithInstr(
           kind, new (Z) Value(left), new (Z) Value(right), call->deopt_id());
-      break;
-    }
-    case MethodRecognizer::kFloat32x4Absolute:
-    case MethodRecognizer::kFloat32x4Negate: {
-      Definition* left = receiver;
-      *last = new (Z)
-          Float32x4ZeroArgInstr(kind, new (Z) Value(left), call->deopt_id());
       break;
     }
     case MethodRecognizer::kFloat32x4Clamp: {
@@ -3190,7 +3185,7 @@ static bool InlineSimdConstructor(FlowGraph* flow_graph,
   Instruction* cursor = *entry;
   switch (kind) {
     case MethodRecognizer::kFloat32x4Zero:
-      *last = new (Z) Float32x4ZeroInstr();
+      *last = BinarySimdOpInstr::Create(kind, call->deopt_id());
       break;
     case MethodRecognizer::kFloat32x4Splat:
       *last = BinarySimdOpInstr::Create(kind, new (Z) Value(call->ArgumentAt(1)),

@@ -118,6 +118,7 @@ intptr_t Instruction::Hashcode() const {
 
 bool Instruction::Equals(Instruction* other) const {
   if (tag() != other->tag()) return false;
+  if (InputCount() != other->InputCount()) return false;
   for (intptr_t i = 0; i < InputCount(); ++i) {
     if (!InputAt(i)->Equals(other->InputAt(i))) return false;
   }

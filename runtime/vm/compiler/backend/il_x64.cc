@@ -3787,8 +3787,13 @@ LocationSummary* BinarySimdOpInstr::MakeLocationSummary(Zone* zone,
   for (intptr_t i = 0; i < InputCount(); i++) {
     summary->set_in(i, Location::RequiresFpuRegister());
   }
-  summary->set_out(0, (representation() == kUnboxedInt64) ?
-      Location::RequiresRegister() : Location::SameAsFirstInput());
+  if (representation() == kUnboxedInt64) {
+    summary->set_out(0, Location::RequiresRegister());
+  } else if (InputCount() == 0) {
+    summary->set_out(0, Location::RequiresFpuRegister());
+  } else {
+    summary->set_out(0, Location::SameAsFirstInput());
+  }
   return summary;
 }
 
@@ -3817,13 +3822,15 @@ LocationSummary* BinarySimdOpInstr::MakeLocationSummary(Zone* zone,
   Unary(Float32x4Sqrt, sqrtps) \
   Unary(Float32x4Reciprocal, reciprocalps) \
   Unary(Float32x4ReciprocalSqrt, rsqrtps) \
+  Unary(Float32x4Negate, negateps) \
+  Unary(Float32x4Absolute, absps) \
 
 void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister left = locs()->in(0).fpu_reg();
-  XmmRegister right =
-      InputCount() == 2 ? locs()->in(1).fpu_reg() : kNoFpuRegister;
+  XmmRegister left = InputCount() > 0 ? locs()->in(0).fpu_reg() : kNoFpuRegister;
+  XmmRegister right = InputCount() > 1 ? locs()->in(1).fpu_reg() : kNoFpuRegister;
 
   ASSERT((representation() == kUnboxedInt64) ||
+         (left == kNoFpuRegister) ||
          locs()->out(0).fpu_reg() == left);
 
   switch (kind()) {
@@ -3898,48 +3905,11 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       __ AddImmediate(RSP, Immediate(16));
       break;
     }
-  }
-}
-
-LocationSummary* Float32x4ZeroInstr::MakeLocationSummary(Zone* zone,
-                                                         bool opt) const {
-  const intptr_t kNumInputs = 0;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_out(0, Location::RequiresFpuRegister());
-  return summary;
-}
-
-void Float32x4ZeroInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister value = locs()->out(0).fpu_reg();
-  __ xorps(value, value);
-}
-
-LocationSummary* Float32x4ZeroArgInstr::MakeLocationSummary(Zone* zone,
-                                                            bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Float32x4ZeroArgInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister left = locs()->in(0).fpu_reg();
-
-  ASSERT(locs()->out(0).fpu_reg() == left);
-  switch (op_kind()) {
-    case MethodRecognizer::kFloat32x4Negate:
-      __ negateps(left);
+    case kFloat32x4Zero: {
+      XmmRegister value = locs()->out(0).fpu_reg();
+      __ xorps(value, value);
       break;
-    case MethodRecognizer::kFloat32x4Absolute:
-      __ absps(left);
-      break;
-    default:
-      UNREACHABLE();
+    }
   }
 }
 
