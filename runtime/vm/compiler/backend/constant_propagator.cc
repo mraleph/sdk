@@ -1116,11 +1116,6 @@ void ConstantPropagator::VisitBinarySimdOp(BinarySimdOpInstr* instr) {
   SetValue(instr, non_constant_);
 }
 
-void ConstantPropagator::VisitFloat32x4Constructor(
-    Float32x4ConstructorInstr* instr) {
-  SetValue(instr, non_constant_);
-}
-
 void ConstantPropagator::VisitFloat32x4Zero(Float32x4ZeroInstr* instr) {
   SetValue(instr, non_constant_);
 }

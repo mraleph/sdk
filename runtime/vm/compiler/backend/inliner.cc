@@ -3197,11 +3197,12 @@ static bool InlineSimdConstructor(FlowGraph* flow_graph,
                                           call->deopt_id());
       break;
     case MethodRecognizer::kFloat32x4Constructor:
-      *last = new (Z) Float32x4ConstructorInstr(
+      *last = BinarySimdOpInstr::Create(kind,
           new (Z) Value(call->ArgumentAt(1)),
           new (Z) Value(call->ArgumentAt(2)),
           new (Z) Value(call->ArgumentAt(3)),
-          new (Z) Value(call->ArgumentAt(4)), call->deopt_id());
+          new (Z) Value(call->ArgumentAt(4)),
+          call->deopt_id());
       break;
     case MethodRecognizer::kFloat32x4FromInt32x4Bits:
       *last = new (Z) Int32x4ToFloat32x4Instr(

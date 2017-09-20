@@ -3875,44 +3875,30 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       __ shufps(left, left, Immediate(0x00));
       __ mulps(left, right);
       break;
+    case kFloat32x4Constructor: {
+      // TODO FIXME
+      XmmRegister v0 = locs()->in(0).fpu_reg();
+      XmmRegister v1 = locs()->in(1).fpu_reg();
+      XmmRegister v2 = locs()->in(2).fpu_reg();
+      XmmRegister v3 = locs()->in(3).fpu_reg();
+      ASSERT(v0 == locs()->out(0).fpu_reg());
+      __ AddImmediate(RSP, Immediate(-16));
+      __ cvtsd2ss(v0, v0);
+      __ movss(Address(RSP, 0), v0);
+      __ movsd(v0, v1);
+      __ cvtsd2ss(v0, v0);
+      __ movss(Address(RSP, 4), v0);
+      __ movsd(v0, v2);
+      __ cvtsd2ss(v0, v0);
+      __ movss(Address(RSP, 8), v0);
+      __ movsd(v0, v3);
+      __ cvtsd2ss(v0, v0);
+      __ movss(Address(RSP, 12), v0);
+      __ movups(v0, Address(RSP, 0));
+      __ AddImmediate(RSP, Immediate(16));
+      break;
+    }
   }
-}
-
-LocationSummary* Float32x4ConstructorInstr::MakeLocationSummary(
-    Zone* zone,
-    bool opt) const {
-  const intptr_t kNumInputs = 4;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_in(1, Location::RequiresFpuRegister());
-  summary->set_in(2, Location::RequiresFpuRegister());
-  summary->set_in(3, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Float32x4ConstructorInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister v0 = locs()->in(0).fpu_reg();
-  XmmRegister v1 = locs()->in(1).fpu_reg();
-  XmmRegister v2 = locs()->in(2).fpu_reg();
-  XmmRegister v3 = locs()->in(3).fpu_reg();
-  ASSERT(v0 == locs()->out(0).fpu_reg());
-  __ AddImmediate(RSP, Immediate(-16));
-  __ cvtsd2ss(v0, v0);
-  __ movss(Address(RSP, 0), v0);
-  __ movsd(v0, v1);
-  __ cvtsd2ss(v0, v0);
-  __ movss(Address(RSP, 4), v0);
-  __ movsd(v0, v2);
-  __ cvtsd2ss(v0, v0);
-  __ movss(Address(RSP, 8), v0);
-  __ movsd(v0, v3);
-  __ cvtsd2ss(v0, v0);
-  __ movss(Address(RSP, 12), v0);
-  __ movups(v0, Address(RSP, 0));
-  __ AddImmediate(RSP, Immediate(16));
 }
 
 LocationSummary* Float32x4ZeroInstr::MakeLocationSummary(Zone* zone,
