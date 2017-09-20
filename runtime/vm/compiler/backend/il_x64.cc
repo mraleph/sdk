@@ -3863,6 +3863,11 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     case kInt32x4GetSignMask:
       __ movmskps(locs()->out(0).reg(), left);
       break;
+    case kFloat32x4Scale:
+      __ cvtsd2ss(left, left);
+      __ shufps(left, left, Immediate(0x00));
+      __ mulps(left, right);
+      break;
   }
 }
 
@@ -3916,35 +3921,6 @@ LocationSummary* Float32x4ZeroInstr::MakeLocationSummary(Zone* zone,
 void Float32x4ZeroInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   XmmRegister value = locs()->out(0).fpu_reg();
   __ xorps(value, value);
-}
-
-LocationSummary* Float32x4ScaleInstr::MakeLocationSummary(Zone* zone,
-                                                          bool opt) const {
-  const intptr_t kNumInputs = 2;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_in(1, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Float32x4ScaleInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister left = locs()->in(0).fpu_reg();
-  XmmRegister right = locs()->in(1).fpu_reg();
-
-  ASSERT(locs()->out(0).fpu_reg() == left);
-
-  switch (op_kind()) {
-    case MethodRecognizer::kFloat32x4Scale:
-      __ cvtsd2ss(left, left);
-      __ shufps(left, left, Immediate(0x00));
-      __ mulps(left, right);
-      break;
-    default:
-      UNREACHABLE();
-  }
 }
 
 LocationSummary* Float32x4SqrtInstr::MakeLocationSummary(Zone* zone,

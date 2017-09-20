@@ -2950,10 +2950,10 @@ static bool InlineFloat32x4Method(FlowGraph* flow_graph,
     case MethodRecognizer::kFloat32x4Scale: {
       Definition* left = receiver;
       Definition* right = call->ArgumentAt(1);
-      // Left and right values are swapped when handed to the instruction,
+      // Note: left and right values are swapped when handed to the instruction,
       // this is done so that the double value is loaded into the output
       // register and can be destroyed.
-      *last = new (Z) Float32x4ScaleInstr(
+      *last = BinarySimdOpInstr::Create(
           kind, new (Z) Value(right), new (Z) Value(left), call->deopt_id());
       break;
     }

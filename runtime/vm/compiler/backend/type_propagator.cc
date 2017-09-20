@@ -1325,10 +1325,6 @@ CompileType Float32x4ZeroInstr::ComputeType() const {
   return CompileType::FromCid(kFloat32x4Cid);
 }
 
-CompileType Float32x4ScaleInstr::ComputeType() const {
-  return CompileType::FromCid(kFloat32x4Cid);
-}
-
 CompileType Float32x4SqrtInstr::ComputeType() const {
   return CompileType::FromCid(kFloat32x4Cid);
 }
