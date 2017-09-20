@@ -1315,9 +1315,6 @@ CompileType BinarySimdOpInstr::ComputeType() const {
   return CompileType::FromCid(cid);
 }
 
-CompileType Float32x4ToInt32x4Instr::ComputeType() const {
-  return CompileType::FromCid(kInt32x4Cid);
-}
 
 CompileType Simd64x2ShuffleInstr::ComputeType() const {
   if ((op_kind() == MethodRecognizer::kFloat64x2GetX) ||
@@ -1338,14 +1335,6 @@ CompileType Float64x2SplatInstr::ComputeType() const {
 
 CompileType Float64x2ConstructorInstr::ComputeType() const {
   return CompileType::FromCid(kFloat64x2Cid);
-}
-
-CompileType Float32x4ToFloat64x2Instr::ComputeType() const {
-  return CompileType::FromCid(kFloat64x2Cid);
-}
-
-CompileType Float64x2ToFloat32x4Instr::ComputeType() const {
-  return CompileType::FromCid(kFloat32x4Cid);
 }
 
 CompileType Float64x2ZeroArgInstr::ComputeType() const {
@@ -1377,10 +1366,6 @@ CompileType Int32x4SelectInstr::ComputeType() const {
 
 CompileType Int32x4SetFlagInstr::ComputeType() const {
   return CompileType::FromCid(kInt32x4Cid);
-}
-
-CompileType Int32x4ToFloat32x4Instr::ComputeType() const {
-  return CompileType::FromCid(kFloat32x4Cid);
 }
 
 CompileType MathUnaryInstr::ComputeType() const {

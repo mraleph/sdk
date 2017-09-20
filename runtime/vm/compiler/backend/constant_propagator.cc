@@ -1116,11 +1116,6 @@ void ConstantPropagator::VisitBinarySimdOp(BinarySimdOpInstr* instr) {
   SetValue(instr, non_constant_);
 }
 
-void ConstantPropagator::VisitFloat32x4ToInt32x4(
-    Float32x4ToInt32x4Instr* instr) {
-  SetValue(instr, non_constant_);
-}
-
 void ConstantPropagator::VisitInt32x4Constructor(
     Int32x4ConstructorInstr* instr) {
   SetValue(instr, non_constant_);
@@ -1143,22 +1138,7 @@ void ConstantPropagator::VisitInt32x4Select(Int32x4SelectInstr* instr) {
   SetValue(instr, non_constant_);
 }
 
-void ConstantPropagator::VisitInt32x4ToFloat32x4(
-    Int32x4ToFloat32x4Instr* instr) {
-  SetValue(instr, non_constant_);
-}
-
 void ConstantPropagator::VisitSimd64x2Shuffle(Simd64x2ShuffleInstr* instr) {
-  SetValue(instr, non_constant_);
-}
-
-void ConstantPropagator::VisitFloat32x4ToFloat64x2(
-    Float32x4ToFloat64x2Instr* instr) {
-  SetValue(instr, non_constant_);
-}
-
-void ConstantPropagator::VisitFloat64x2ToFloat32x4(
-    Float64x2ToFloat32x4Instr* instr) {
   SetValue(instr, non_constant_);
 }
 

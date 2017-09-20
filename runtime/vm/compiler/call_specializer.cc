@@ -1466,11 +1466,11 @@ void CallSpecializer::VisitStaticCall(StaticCallInstr* call) {
     case MethodRecognizer::kFloat32x4Zero:
     case MethodRecognizer::kFloat32x4Splat:
     case MethodRecognizer::kFloat32x4Constructor:
-    case MethodRecognizer::kFloat32x4FromFloat64x2:
+    case MethodRecognizer::kFloat64x2ToFloat32x4:
+    case MethodRecognizer::kFloat32x4ToFloat64x2:
     case MethodRecognizer::kFloat64x2Constructor:
     case MethodRecognizer::kFloat64x2Zero:
     case MethodRecognizer::kFloat64x2Splat:
-    case MethodRecognizer::kFloat64x2FromFloat32x4:
     case MethodRecognizer::kInt32x4BoolConstructor:
     case MethodRecognizer::kInt32x4Constructor:
     case MethodRecognizer::kMathSqrt:

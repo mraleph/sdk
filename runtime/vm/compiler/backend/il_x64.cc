@@ -3935,22 +3935,16 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       __ AddImmediate(RSP, Immediate(16));
       break;
     }
+
+    case kInt32x4ToFloat32x4:
+    case kFloat32x4ToInt32x4: {
+      // NOP
+      break;
+    }
+
+    case kFloat32x4ToFloat64x2: __ cvtps2pd(left, left); break;
+    case kFloat64x2ToFloat32x4: __ cvtpd2ps(left, left); break;
   }
-}
-
-LocationSummary* Float32x4ToInt32x4Instr::MakeLocationSummary(Zone* zone,
-                                                              bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Float32x4ToInt32x4Instr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  // NOP.
 }
 
 LocationSummary* Simd64x2ShuffleInstr::MakeLocationSummary(Zone* zone,
@@ -4032,40 +4026,6 @@ void Float64x2ConstructorInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   // Lower 64-bits of v0 = Lower 64-bits of v0.
   // Upper 64-bits of v0 = Lower 64-bits of v1.
   __ shufpd(v0, v1, Immediate(0x0));
-}
-
-LocationSummary* Float64x2ToFloat32x4Instr::MakeLocationSummary(
-    Zone* zone,
-    bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Float64x2ToFloat32x4Instr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister value = locs()->out(0).fpu_reg();
-  __ cvtpd2ps(value, value);
-}
-
-LocationSummary* Float32x4ToFloat64x2Instr::MakeLocationSummary(
-    Zone* zone,
-    bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Float32x4ToFloat64x2Instr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister value = locs()->out(0).fpu_reg();
-  __ cvtps2pd(value, value);
 }
 
 LocationSummary* Float64x2ZeroArgInstr::MakeLocationSummary(Zone* zone,
@@ -4403,21 +4363,6 @@ void Int32x4SetFlagInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   // Copy mask back to register.
   __ movups(mask, Address(RSP, 0));
   __ AddImmediate(RSP, Immediate(16));
-}
-
-LocationSummary* Int32x4ToFloat32x4Instr::MakeLocationSummary(Zone* zone,
-                                                              bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Int32x4ToFloat32x4Instr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  // NOP.
 }
 
 LocationSummary* MathUnaryInstr::MakeLocationSummary(Zone* zone,

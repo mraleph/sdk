@@ -3181,6 +3181,10 @@ static bool InlineSimdConstructor(FlowGraph* flow_graph,
     case MethodRecognizer::kFloat32x4Zero:
       *last = BinarySimdOpInstr::Create(kind, call->deopt_id());
       break;
+    case MethodRecognizer::kFloat32x4ToInt32x4:
+    case MethodRecognizer::kInt32x4ToFloat32x4:
+    case MethodRecognizer::kFloat32x4ToFloat64x2:
+    case MethodRecognizer::kFloat64x2ToFloat32x4:
     case MethodRecognizer::kFloat32x4Splat:
       *last = BinarySimdOpInstr::Create(kind, new (Z) Value(call->ArgumentAt(1)),
                                           call->deopt_id());
@@ -3193,14 +3197,6 @@ static bool InlineSimdConstructor(FlowGraph* flow_graph,
           new (Z) Value(call->ArgumentAt(4)),
           call->deopt_id());
       break;
-    case MethodRecognizer::kFloat32x4FromInt32x4Bits:
-      *last = new (Z) Int32x4ToFloat32x4Instr(
-          new (Z) Value(call->ArgumentAt(1)), call->deopt_id());
-      break;
-    case MethodRecognizer::kFloat32x4FromFloat64x2:
-      *last = new (Z) Float64x2ToFloat32x4Instr(
-          new (Z) Value(call->ArgumentAt(1)), call->deopt_id());
-      break;
     case MethodRecognizer::kFloat64x2Zero:
       *last = new (Z) Float64x2ZeroInstr();
       break;
@@ -3212,10 +3208,6 @@ static bool InlineSimdConstructor(FlowGraph* flow_graph,
       *last = new (Z) Float64x2ConstructorInstr(
           new (Z) Value(call->ArgumentAt(1)),
           new (Z) Value(call->ArgumentAt(2)), call->deopt_id());
-      break;
-    case MethodRecognizer::kFloat64x2FromFloat32x4:
-      *last = new (Z) Float32x4ToFloat64x2Instr(
-          new (Z) Value(call->ArgumentAt(1)), call->deopt_id());
       break;
     case MethodRecognizer::kInt32x4BoolConstructor:
       *last = new (Z) Int32x4BoolConstructorInstr(
@@ -3230,10 +3222,6 @@ static bool InlineSimdConstructor(FlowGraph* flow_graph,
           new (Z) Value(call->ArgumentAt(2)),
           new (Z) Value(call->ArgumentAt(3)),
           new (Z) Value(call->ArgumentAt(4)), call->deopt_id());
-      break;
-    case MethodRecognizer::kInt32x4FromFloat32x4Bits:
-      *last = new (Z) Float32x4ToInt32x4Instr(
-          new (Z) Value(call->ArgumentAt(1)), call->deopt_id());
       break;
     default:
       UNREACHABLE();
@@ -3594,14 +3582,15 @@ bool FlowGraphInliner::TryInlineRecognizedMethod(FlowGraph* flow_graph,
     case MethodRecognizer::kFloat32x4Zero:
     case MethodRecognizer::kFloat32x4Splat:
     case MethodRecognizer::kFloat32x4Constructor:
-    case MethodRecognizer::kFloat32x4FromFloat64x2:
+    case MethodRecognizer::kFloat32x4ToFloat64x2:
+    case MethodRecognizer::kFloat64x2ToFloat32x4:
+    case MethodRecognizer::kFloat32x4ToInt32x4:
+    case MethodRecognizer::kInt32x4ToFloat32x4:
     case MethodRecognizer::kFloat64x2Constructor:
     case MethodRecognizer::kFloat64x2Zero:
     case MethodRecognizer::kFloat64x2Splat:
-    case MethodRecognizer::kFloat64x2FromFloat32x4:
     case MethodRecognizer::kInt32x4BoolConstructor:
     case MethodRecognizer::kInt32x4Constructor:
-    case MethodRecognizer::kInt32x4FromFloat32x4Bits:
       return InlineSimdConstructor(flow_graph, call, kind, entry, last);
 
     case MethodRecognizer::kMathSqrt:

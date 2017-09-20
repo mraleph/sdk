@@ -776,11 +776,6 @@ void BinarySimdOpInstr::PrintOperandsTo(BufferFormatter* f) const {
   right()->PrintTo(f);
 }
 
-void Float32x4ToInt32x4Instr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("Float32x4.toInt32x4 ");
-  left()->PrintTo(f);
-}
-
 void Simd64x2ShuffleInstr::PrintOperandsTo(BufferFormatter* f) const {
   // TODO(johnmccutchan): Add proper string enumeration of shuffle.
   f->Print("%s, ", MethodRecognizer::KindToCString(op_kind()));
@@ -798,16 +793,6 @@ void Float64x2ConstructorInstr::PrintOperandsTo(BufferFormatter* f) const {
   f->Print(", ");
   value1()->PrintTo(f);
   f->Print(")");
-}
-
-void Float32x4ToFloat64x2Instr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("Float64x2.fromFloat32x4 ");
-  left()->PrintTo(f);
-}
-
-void Float64x2ToFloat32x4Instr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("Float32x4.fromFloat64x2 ");
-  left()->PrintTo(f);
 }
 
 void Float64x2ZeroArgInstr::PrintOperandsTo(BufferFormatter* f) const {
@@ -866,11 +851,6 @@ void Int32x4SelectInstr::PrintOperandsTo(BufferFormatter* f) const {
   trueValue()->PrintTo(f);
   f->Print(", ");
   falseValue()->PrintTo(f);
-}
-
-void Int32x4ToFloat32x4Instr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("Int32x4.toFloat32x4 ");
-  left()->PrintTo(f);
 }
 
 void UnaryDoubleOpInstr::PrintOperandsTo(BufferFormatter* f) const {
