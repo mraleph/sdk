@@ -787,14 +787,6 @@ void Float64x2SplatInstr::PrintOperandsTo(BufferFormatter* f) const {
   value()->PrintTo(f);
 }
 
-void Float64x2ConstructorInstr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("Float64x2(");
-  value0()->PrintTo(f);
-  f->Print(", ");
-  value1()->PrintTo(f);
-  f->Print(")");
-}
-
 void Float64x2ZeroArgInstr::PrintOperandsTo(BufferFormatter* f) const {
   f->Print("%s, ", MethodRecognizer::KindToCString(op_kind()));
   left()->PrintTo(f);
@@ -805,18 +797,6 @@ void Float64x2OneArgInstr::PrintOperandsTo(BufferFormatter* f) const {
   left()->PrintTo(f);
   f->Print(", ");
   right()->PrintTo(f);
-  f->Print(")");
-}
-
-void Int32x4ConstructorInstr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("Int32x4(");
-  value0()->PrintTo(f);
-  f->Print(", ");
-  value1()->PrintTo(f);
-  f->Print(", ");
-  value2()->PrintTo(f);
-  f->Print(", ");
-  value3()->PrintTo(f);
   f->Print(")");
 }
 
