@@ -788,11 +788,6 @@ void Float32x4ConstructorInstr::PrintOperandsTo(BufferFormatter* f) const {
   f->Print(")");
 }
 
-void Float32x4SqrtInstr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("%s, ", MethodRecognizer::KindToCString(op_kind()));
-  left()->PrintTo(f);
-}
-
 void Float32x4ZeroArgInstr::PrintOperandsTo(BufferFormatter* f) const {
   f->Print("%s, ", MethodRecognizer::KindToCString(op_kind()));
   left()->PrintTo(f);

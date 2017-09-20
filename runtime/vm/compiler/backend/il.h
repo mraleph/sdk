@@ -460,7 +460,6 @@ class EmbeddedArray<T, 0> {
   M(BinarySimdOp)                                                              \
   M(Float32x4Constructor)                                                      \
   M(Float32x4Zero)                                                             \
-  M(Float32x4Sqrt)                                                             \
   M(Float32x4ZeroArg)                                                          \
   M(Float32x4Clamp)                                                            \
   M(Float32x4With)                                                             \
@@ -5270,51 +5269,52 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
 };
 
 #define SIMD_BINARY_FLOAT_OP_LIST(V, T)                                        \
-  V(_, T##Add, T, T, T)                                                           \
-  V(_, T##Sub, T, T, T)                                                           \
-  V(_, T##Mul, T, T, T)                                                           \
-  V(_, T##Div, T, T, T)
+  V(2, _, T##Add, (T, T), T)                                                           \
+  V(2, _, T##Sub, (T, T), T)                                                           \
+  V(2, _, T##Mul, (T, T), T)                                                           \
+  V(2, _, T##Div, (T, T), T)
 
 #define SIMD_BINARY_INTEGER_OP_LIST(V, T)                                      \
-  V(_, T##Add, T, T, T)                                                           \
-  V(_, T##Sub, T, T, T)                                                           \
-  V(_, T##BitAnd, T, T, T)                                                        \
-  V(_, T##BitOr, T, T, T)                                                         \
-  V(_, T##BitXor, T, T, T)
+  V(2, _, T##Add, (T, T), T)                                                           \
+  V(2, _, T##Sub, (T, T), T)                                                           \
+  V(2, _, T##BitAnd, (T, T), T)                                                        \
+  V(2, _, T##BitOr, (T, T), T)                                                         \
+  V(2, _, T##BitXor, (T, T), T)
 
-#define SIMD_OP_LIST(UNARY, BINARY, BINARY_OP)                                 \
+#define SIMD_OP_LIST(M, BINARY_OP)                                        \
   SIMD_BINARY_FLOAT_OP_LIST(BINARY_OP, Float32x4)                              \
   SIMD_BINARY_FLOAT_OP_LIST(BINARY_OP, Float64x2)                              \
   SIMD_BINARY_INTEGER_OP_LIST(BINARY_OP, Int32x4)                              \
-  UNARY(_, Float32x4ShuffleX, Float32x4, Double)                               \
-  UNARY(_, Float32x4ShuffleY, Float32x4, Double)                               \
-  UNARY(_, Float32x4ShuffleZ, Float32x4, Double)                               \
-  UNARY(_, Float32x4ShuffleW, Float32x4, Double)                               \
-  UNARY(MASK, Float32x4Shuffle, Float32x4, Float32x4)                          \
-  UNARY(MASK, Int32x4Shuffle, Int32x4, Int32x4)                                \
-  BINARY(MASK, Float32x4ShuffleMix, Float32x4, Float32x4, Float32x4)           \
-  BINARY(MASK, Int32x4ShuffleMix, Int32x4, Int32x4, Int32x4) \
-  UNARY(_, Float32x4Splat, Double, Float32x4) \
-  BINARY(_, Float32x4Equal, Float32x4, Float32x4, Int32x4) \
-  BINARY(_, Float32x4GreaterThan, Float32x4, Float32x4, Int32x4) \
-  BINARY(_, Float32x4GreaterThanOrEqual, Float32x4, Float32x4, Int32x4) \
-  BINARY(_, Float32x4LessThan, Float32x4, Float32x4, Int32x4) \
-  BINARY(_, Float32x4LessThanOrEqual, Float32x4, Float32x4, Int32x4) \
-  BINARY(_, Float32x4NotEqual, Float32x4, Float32x4, Int32x4) \
-  BINARY(_, Float32x4Min, Float32x4, Float32x4, Float32x4) \
-  BINARY(_, Float32x4Max, Float32x4, Float32x4, Float32x4) \
-  UNARY(_, Float32x4GetSignMask, Float32x4, Word) \
-  UNARY(_, Int32x4GetSignMask, Int32x4, Word) \
-  BINARY(_, Float32x4Scale, Double, Float32x4, Float32x4) \
+  M(1, _, Float32x4ShuffleX, (Float32x4), Double)                               \
+  M(1, _, Float32x4ShuffleY, (Float32x4), Double)                               \
+  M(1, _, Float32x4ShuffleZ, (Float32x4), Double)                               \
+  M(1, _, Float32x4ShuffleW, (Float32x4), Double)                               \
+  M(1, MASK, Float32x4Shuffle, (Float32x4), Float32x4)                          \
+  M(1, MASK, Int32x4Shuffle, (Int32x4), Int32x4)                                \
+  M(2, MASK, Float32x4ShuffleMix, (Float32x4, Float32x4), Float32x4)           \
+  M(2, MASK, Int32x4ShuffleMix, (Int32x4, Int32x4), Int32x4) \
+  M(1, _, Float32x4Splat, (Double), Float32x4) \
+  M(2, _, Float32x4Equal, (Float32x4, Float32x4), Int32x4) \
+  M(2, _, Float32x4GreaterThan, (Float32x4, Float32x4), Int32x4) \
+  M(2, _, Float32x4GreaterThanOrEqual, (Float32x4, Float32x4), Int32x4) \
+  M(2, _, Float32x4LessThan, (Float32x4, Float32x4), Int32x4) \
+  M(2, _, Float32x4LessThanOrEqual, (Float32x4, Float32x4), Int32x4) \
+  M(2, _, Float32x4NotEqual, (Float32x4, Float32x4), Int32x4) \
+  M(2, _, Float32x4Min, (Float32x4, Float32x4), Float32x4) \
+  M(2, _, Float32x4Max, (Float32x4, Float32x4), Float32x4) \
+  M(1, _, Float32x4GetSignMask, (Float32x4), Word) \
+  M(1, _, Int32x4GetSignMask, (Int32x4), Word) \
+  M(2, _, Float32x4Scale, (Double, Float32x4), Float32x4) \
+  M(1, _, Float32x4Sqrt, (Float32x4), Float32x4) \
+  M(1, _, Float32x4Reciprocal, (Float32x4), Float32x4) \
+  M(1, _, Float32x4ReciprocalSqrt, (Float32x4), Float32x4) \
 
 class BinarySimdOpInstr : public Definition {
  public:
   enum Kind {
-#define DECLARE_ENUM_UNARY(Mask, Name, Arg0, Result) k##Name,
-#define DECLARE_ENUM_BINARY(Mask, Name, Arg0, Arg1, Result) k##Name,
-    SIMD_OP_LIST(DECLARE_ENUM_UNARY, DECLARE_ENUM_BINARY, DECLARE_ENUM_BINARY)
-#undef DECLARE_ENUM_UNARY
-#undef DECLARE_ENUM_BINARY
+#define DECLARE_ENUM(Arity, Mask, Name, ...) k##Name,
+    SIMD_OP_LIST(DECLARE_ENUM, DECLARE_ENUM)
+#undef DECLARE_ENUM
   };
 
   static BinarySimdOpInstr* Create(Kind kind,
@@ -5500,49 +5500,6 @@ class Float32x4ZeroInstr : public TemplateDefinition<0, NoThrow, Pure> {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(Float32x4ZeroInstr);
-};
-
-class Float32x4SqrtInstr : public TemplateDefinition<1, NoThrow, Pure> {
- public:
-  Float32x4SqrtInstr(MethodRecognizer::Kind op_kind,
-                     Value* left,
-                     intptr_t deopt_id)
-      : TemplateDefinition(deopt_id), op_kind_(op_kind) {
-    SetInputAt(0, left);
-  }
-
-  Value* left() const { return inputs_[0]; }
-
-  MethodRecognizer::Kind op_kind() const { return op_kind_; }
-
-  virtual bool ComputeCanDeoptimize() const { return false; }
-
-  virtual Representation representation() const { return kUnboxedFloat32x4; }
-
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
-    ASSERT(idx == 0);
-    return kUnboxedFloat32x4;
-  }
-
-  virtual intptr_t DeoptimizationTarget() const {
-    // Direct access since this instruction cannot deoptimize, and the deopt-id
-    // was inherited from another instruction that could deoptimize.
-    return GetDeoptId();
-  }
-
-  DECLARE_INSTRUCTION(Float32x4Sqrt)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AttributesEqual(Instruction* other) const {
-    return op_kind() == other->AsFloat32x4Sqrt()->op_kind();
-  }
-
-  PRINT_OPERANDS_TO_SUPPORT
-
- private:
-  const MethodRecognizer::Kind op_kind_;
-
-  DISALLOW_COPY_AND_ASSIGN(Float32x4SqrtInstr);
 };
 
 // TODO(vegorov) rename to Unary to match naming convention for arithmetic.

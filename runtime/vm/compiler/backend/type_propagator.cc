@@ -1301,11 +1301,9 @@ CompileType DoubleTestOpInstr::ComputeType() const {
 
 static const intptr_t simd_op_result_cids[] = {
 #define kWordCid -1
-#define CASE_BINARY(Mask, Name, Arg0, Arg1, Result) k##Result##Cid,
-#define CASE_UNARY(Mask, Name, Arg0, Result) k##Result##Cid,
-    SIMD_OP_LIST(CASE_UNARY, CASE_BINARY, CASE_BINARY)
-#undef CASE_BINARY
-#undef CASE_UNARY
+#define CASE(Arity, Mask, Name, Args, Result) k##Result##Cid,
+    SIMD_OP_LIST(CASE, CASE)
+#undef CASE
 #undef kWordCid
 };
 
@@ -1322,10 +1320,6 @@ CompileType Float32x4ConstructorInstr::ComputeType() const {
 }
 
 CompileType Float32x4ZeroInstr::ComputeType() const {
-  return CompileType::FromCid(kFloat32x4Cid);
-}
-
-CompileType Float32x4SqrtInstr::ComputeType() const {
   return CompileType::FromCid(kFloat32x4Cid);
 }
 

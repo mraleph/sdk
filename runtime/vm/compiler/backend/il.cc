@@ -4221,14 +4221,13 @@ BinarySimdOpInstr::Kind BinarySimdOpInstr::KindForOperator(intptr_t cid,
 BinarySimdOpInstr::Kind BinarySimdOpInstr::KindForMethod(
     MethodRecognizer::Kind kind) {
   switch (kind) {
-#define CASE_UNARY(Mask, Name, Arg0, Result)                                   \
+#define CASE_METHOD(Arity, Mask, Name, ...)                                    \
   case MethodRecognizer::k##Name:                                              \
     return k##Name;
-#define CASE_BINARY(Mask, Name, Arg0, Arg1, Result) CASE_UNARY(_, Name, _, _)
-#define CASE_BINARY_OP(Mask, Name, Arg0, Arg1, Result)
-    SIMD_OP_LIST(CASE_UNARY, CASE_BINARY, CASE_BINARY_OP)
-#undef CASE_BINARY
-#undef CASE_UNARY
+#define CASE_BINARY_OP(Arity, Mask, Name, Args, Result)
+    SIMD_OP_LIST(CASE_METHOD, CASE_BINARY_OP)
+#undef CASE_METOD
+#undef CASE_BINARY_OP
     default:
       break;
   }
@@ -4238,11 +4237,9 @@ BinarySimdOpInstr::Kind BinarySimdOpInstr::KindForMethod(
 }
 
 static const intptr_t simd_op_input_count[] = {
-#define CASE_BINARY(Mask, Name, Arg0, Arg1, Result) 2,
-#define CASE_UNARY(Mask, Name, Arg0, Result) 1,
-    SIMD_OP_LIST(CASE_UNARY, CASE_BINARY, CASE_BINARY)
-#undef CASE_UNARY
-#undef CASE_BINARY
+#define CASE(Arity, Mask, ...) Arity,
+    SIMD_OP_LIST(CASE, CASE)
+#undef CASE
 };
 
 intptr_t BinarySimdOpInstr::InputCount() const {
@@ -4250,39 +4247,39 @@ intptr_t BinarySimdOpInstr::InputCount() const {
 }
 
 static const Representation simd_op_result_representations[] = {
-#define CASE_BINARY(Mask, Name, Arg0, Arg1, Result) kUnboxed##Result,
-#define CASE_UNARY(Mask, Name, Arg0, Result) kUnboxed##Result,
-    SIMD_OP_LIST(CASE_UNARY, CASE_BINARY, CASE_BINARY)
-#undef CASE_UNARY
-#undef CASE_BINARY
+#define CASE(Arity, Mask, Name, Args, Result) kUnboxed##Result,
+    SIMD_OP_LIST(CASE, CASE)
+#undef CASE
 };
 
 Representation BinarySimdOpInstr::representation() const {
   return simd_op_result_representations[kind()];
 }
 
-static const Representation simd_op_input_representations[] = {
-#define CASE_BINARY(Mask, Name, Arg0, Arg1, Result) kUnboxed##Arg0, kUnboxed##Arg1,
-#define CASE_UNARY(Mask, Name, Arg0, Result) kUnboxed##Arg0, kNoRepresentation,
-    SIMD_OP_LIST(CASE_UNARY, CASE_BINARY, CASE_BINARY)
-#undef CASE_BINARY
-#undef CASE_UNARY
+static const uint32_t simd_op_input_representations[] = {
+#define REP(T) (kUnboxed##T)
+#define ENCODE_0() kNoRepresentation
+#define ENCODE_1(Arg0) REP(Arg0)
+#define ENCODE_2(Arg0, ...) ((ENCODE_1(__VA_ARGS__) << 4) | REP(Arg0))
+#define ENCODE_3(Arg0, ...) ((ENCODE_2(__VA_ARGS__) << 4) | REP(Arg0))
+#define ENCODE_4(Arg0, ...) ((ENCODE_3(__VA_ARGS__) << 4) | REP(Arg0))
+#define CASE(Arity, Mask, Name, Args, Result) ENCODE_##Arity Args,
+    SIMD_OP_LIST(CASE, CASE)
+#undef CASE
 };
 
 Representation BinarySimdOpInstr::RequiredInputRepresentation(
     intptr_t idx) const {
-  ASSERT(idx == 0 || idx == 1);
-  return simd_op_input_representations[kind() * 2 + idx];
+  ASSERT(0 <= idx && idx < InputCount());
+  return static_cast<Representation>((simd_op_input_representations[kind()] >> (4 * idx)) & 0xF);
 }
 
 static const bool simd_op_has_mask[] = {
 #define HAS__ false
 #define HAS_MASK true
-#define CASE_BINARY(Mask, Name, Arg0, Arg1, Result) HAS_##Mask,
-#define CASE_UNARY(Mask, Name, Arg0, Result) HAS_##Mask,
-    SIMD_OP_LIST(CASE_UNARY, CASE_BINARY, CASE_BINARY)
-#undef CASE_UNARY
-#undef CASE_BINARY
+#define CASE(Arity, Mask, Name, Args, Result) HAS_##Mask,
+    SIMD_OP_LIST(CASE, CASE)
+#undef CASE
 };
 
 bool BinarySimdOpInstr::HasMask() const {

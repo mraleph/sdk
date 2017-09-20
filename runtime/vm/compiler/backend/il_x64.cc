@@ -3798,22 +3798,25 @@ LocationSummary* BinarySimdOpInstr::MakeLocationSummary(Zone* zone,
   V(Type##Mul, mul##suffix)                                                    \
   V(Type##Div, div##suffix)
 
-#define SIMD_OP_BACKEND(V)                                                     \
-  SIMD_BINARY_FLOAT_OP_BACKEND(V, Float32x4, ps)                               \
-  SIMD_BINARY_FLOAT_OP_BACKEND(V, Float64x2, pd)                               \
-  V(Int32x4Add, addpl)                                                         \
-  V(Int32x4Sub, subpl)                                                         \
-  V(Int32x4BitAnd, andps)                                                      \
-  V(Int32x4BitOr, orps)                                                        \
-  V(Int32x4BitXor, xorps) \
-  V(Float32x4Equal, cmppseq) \
-  V(Float32x4NotEqual, cmppsneq) \
-  V(Float32x4GreaterThan, cmppsnle) \
-  V(Float32x4GreaterThanOrEqual, cmppsnlt) \
-  V(Float32x4LessThan, cmppslt) \
-  V(Float32x4LessThanOrEqual, cmppsle) \
-  V(Float32x4Min, minps) \
-  V(Float32x4Max, maxps) \
+#define SIMD_OP_BACKEND(Unary, Binary)                                         \
+  SIMD_BINARY_FLOAT_OP_BACKEND(Binary, Float32x4, ps)                               \
+  SIMD_BINARY_FLOAT_OP_BACKEND(Binary, Float64x2, pd)                               \
+  Binary(Int32x4Add, addpl)                                                         \
+  Binary(Int32x4Sub, subpl)                                                         \
+  Binary(Int32x4BitAnd, andps)                                                      \
+  Binary(Int32x4BitOr, orps)                                                        \
+  Binary(Int32x4BitXor, xorps) \
+  Binary(Float32x4Equal, cmppseq) \
+  Binary(Float32x4NotEqual, cmppsneq) \
+  Binary(Float32x4GreaterThan, cmppsnle) \
+  Binary(Float32x4GreaterThanOrEqual, cmppsnlt) \
+  Binary(Float32x4LessThan, cmppslt) \
+  Binary(Float32x4LessThanOrEqual, cmppsle) \
+  Binary(Float32x4Min, minps) \
+  Binary(Float32x4Max, maxps) \
+  Unary(Float32x4Sqrt, sqrtps) \
+  Unary(Float32x4Reciprocal, reciprocalps) \
+  Unary(Float32x4ReciprocalSqrt, rsqrtps) \
 
 void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   XmmRegister left = locs()->in(0).fpu_reg();
@@ -3824,11 +3827,15 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
          locs()->out(0).fpu_reg() == left);
 
   switch (kind()) {
-#define CASE(Name, op)                                                         \
+#define CASE_UNARY(Name, op)                                                         \
+  case k##Name:                                                                \
+    __ op(left);                                                        \
+    break;
+#define CASE_BINARY(Name, op)                                                         \
   case k##Name:                                                                \
     __ op(left, right);                                                        \
     break;
-    SIMD_OP_BACKEND(CASE)
+    SIMD_OP_BACKEND(CASE_UNARY, CASE_BINARY)
 #undef CASE
     case kFloat32x4ShuffleX:
       // Shuffle not necessary.
@@ -3921,37 +3928,6 @@ LocationSummary* Float32x4ZeroInstr::MakeLocationSummary(Zone* zone,
 void Float32x4ZeroInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   XmmRegister value = locs()->out(0).fpu_reg();
   __ xorps(value, value);
-}
-
-LocationSummary* Float32x4SqrtInstr::MakeLocationSummary(Zone* zone,
-                                                         bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Float32x4SqrtInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister left = locs()->in(0).fpu_reg();
-
-  ASSERT(locs()->out(0).fpu_reg() == left);
-
-  switch (op_kind()) {
-    case MethodRecognizer::kFloat32x4Sqrt:
-      __ sqrtps(left);
-      break;
-    case MethodRecognizer::kFloat32x4Reciprocal:
-      __ reciprocalps(left);
-      break;
-    case MethodRecognizer::kFloat32x4ReciprocalSqrt:
-      __ rsqrtps(left);
-      break;
-    default:
-      UNREACHABLE();
-  }
 }
 
 LocationSummary* Float32x4ZeroArgInstr::MakeLocationSummary(Zone* zone,

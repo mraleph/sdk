@@ -2929,7 +2929,10 @@ static bool InlineFloat32x4Method(FlowGraph* flow_graph,
     case MethodRecognizer::kFloat32x4ShuffleY:
     case MethodRecognizer::kFloat32x4ShuffleZ:
     case MethodRecognizer::kFloat32x4ShuffleW:
-    case MethodRecognizer::kFloat32x4GetSignMask: {
+    case MethodRecognizer::kFloat32x4GetSignMask:
+    case MethodRecognizer::kFloat32x4Sqrt:
+    case MethodRecognizer::kFloat32x4ReciprocalSqrt:
+    case MethodRecognizer::kFloat32x4Reciprocal: {
       *last = BinarySimdOpInstr::Create(kind, new (Z) Value(receiver), call->deopt_id());
       break;
     }
@@ -2955,14 +2958,6 @@ static bool InlineFloat32x4Method(FlowGraph* flow_graph,
       // register and can be destroyed.
       *last = BinarySimdOpInstr::Create(
           kind, new (Z) Value(right), new (Z) Value(left), call->deopt_id());
-      break;
-    }
-    case MethodRecognizer::kFloat32x4Sqrt:
-    case MethodRecognizer::kFloat32x4ReciprocalSqrt:
-    case MethodRecognizer::kFloat32x4Reciprocal: {
-      Definition* left = receiver;
-      *last = new (Z)
-          Float32x4SqrtInstr(kind, new (Z) Value(left), call->deopt_id());
       break;
     }
     case MethodRecognizer::kFloat32x4WithX:
