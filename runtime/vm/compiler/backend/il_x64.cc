@@ -3780,13 +3780,13 @@ Condition DoubleTestOpInstr::EmitComparisonCode(FlowGraphCompiler* compiler,
 
 // FIXME
 static bool IsCpuRegisterRep(Representation r) {
-  return kUnboxedInt32 <= r && r <= kUnboxedInt64;
+  return (kUnboxedInt32 <= r && r <= kUnboxedInt64) || r == kTagged;
 }
 
 LocationSummary* BinarySimdOpInstr::MakeLocationSummary(Zone* zone,
                                                         bool opt) const {
   const intptr_t kNumInputs = InputCount();
-  const intptr_t kNumTemps = 0;
+  const intptr_t kNumTemps = kind() == kInt32x4BoolConstructor ? 1 : 0;
   LocationSummary* summary = new (zone)
       LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
   for (intptr_t i = 0; i < InputCount(); i++) {
@@ -3801,6 +3801,9 @@ LocationSummary* BinarySimdOpInstr::MakeLocationSummary(Zone* zone,
     summary->set_out(0, Location::RequiresFpuRegister());
   } else {
     summary->set_out(0, Location::SameAsFirstInput());
+  }
+  if (kind() == kInt32x4BoolConstructor) {
+    summary->set_temp(0, Location::RegisterLocation(RDX));
   }
   return summary;
 }
@@ -3918,6 +3921,7 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       __ shufpd(left, right, Immediate(0x0));
       break;
     }
+
     case kInt32x4Constructor: {
       Register v0 = locs()->in(0).reg();
       Register v1 = locs()->in(1).reg();
@@ -3931,6 +3935,27 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       __ movl(Address(RSP, 3 * kInt32Size), v3);
       __ movups(result, Address(RSP, 0));
       __ AddImmediate(RSP, Immediate(4 * kInt32Size));
+      break;
+    }
+
+    case kInt32x4BoolConstructor: {
+      ASSERT(locs()->temp(0).reg() == RDX);  // We need a byte register.
+      XmmRegister result = locs()->out(0).fpu_reg();
+
+      // TODO FIXME instead of 4 memory moves you can do 2 memory moves
+      // There are also instruction sequences that don't involve memory
+      // moves at all.
+      __ SubImmediate(RSP, Immediate(16));
+      for (intptr_t i = 0; i < 4; i++) {
+        Label done, load_false;
+        __ xorq(RDX, RDX);
+        __ CompareObject(locs()->in(i).reg(), Bool::True());
+        __ setcc(EQUAL, DL);
+        __ negl(RDX);
+        __ movl(Address(RSP, 4 * i), RDX);
+      }
+      __ movups(result, Address(RSP, 0));
+      __ AddImmediate(RSP, Immediate(16));
       break;
     }
 
@@ -4127,75 +4152,6 @@ void Float64x2OneArgInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     default:
       UNREACHABLE();
   }
-}
-
-LocationSummary* Int32x4BoolConstructorInstr::MakeLocationSummary(
-    Zone* zone,
-    bool opt) const {
-  const intptr_t kNumInputs = 4;
-  const intptr_t kNumTemps = 1;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresRegister());
-  summary->set_in(1, Location::RequiresRegister());
-  summary->set_in(2, Location::RequiresRegister());
-  summary->set_in(3, Location::RequiresRegister());
-  summary->set_temp(0, Location::RequiresRegister());
-  summary->set_out(0, Location::RequiresFpuRegister());
-  return summary;
-}
-
-void Int32x4BoolConstructorInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  Register v0 = locs()->in(0).reg();
-  Register v1 = locs()->in(1).reg();
-  Register v2 = locs()->in(2).reg();
-  Register v3 = locs()->in(3).reg();
-  Register temp = locs()->temp(0).reg();
-  XmmRegister result = locs()->out(0).fpu_reg();
-  Label x_false, x_done;
-  Label y_false, y_done;
-  Label z_false, z_done;
-  Label w_false, w_done;
-  __ AddImmediate(RSP, Immediate(-16));
-
-  __ CompareObject(v0, Bool::True());
-  __ j(NOT_EQUAL, &x_false);
-  __ LoadImmediate(temp, Immediate(0xFFFFFFFF));
-  __ jmp(&x_done);
-  __ Bind(&x_false);
-  __ LoadImmediate(temp, Immediate(0x0));
-  __ Bind(&x_done);
-  __ movl(Address(RSP, 0), temp);
-
-  __ CompareObject(v1, Bool::True());
-  __ j(NOT_EQUAL, &y_false);
-  __ LoadImmediate(temp, Immediate(0xFFFFFFFF));
-  __ jmp(&y_done);
-  __ Bind(&y_false);
-  __ LoadImmediate(temp, Immediate(0x0));
-  __ Bind(&y_done);
-  __ movl(Address(RSP, 4), temp);
-
-  __ CompareObject(v2, Bool::True());
-  __ j(NOT_EQUAL, &z_false);
-  __ LoadImmediate(temp, Immediate(0xFFFFFFFF));
-  __ jmp(&z_done);
-  __ Bind(&z_false);
-  __ LoadImmediate(temp, Immediate(0x0));
-  __ Bind(&z_done);
-  __ movl(Address(RSP, 8), temp);
-
-  __ CompareObject(v3, Bool::True());
-  __ j(NOT_EQUAL, &w_false);
-  __ LoadImmediate(temp, Immediate(0xFFFFFFFF));
-  __ jmp(&w_done);
-  __ Bind(&w_false);
-  __ LoadImmediate(temp, Immediate(0x0));
-  __ Bind(&w_done);
-  __ movl(Address(RSP, 12), temp);
-
-  __ movups(result, Address(RSP, 0));
-  __ AddImmediate(RSP, Immediate(16));
 }
 
 LocationSummary* Int32x4GetFlagInstr::MakeLocationSummary(Zone* zone,

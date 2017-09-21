@@ -459,7 +459,6 @@ class EmbeddedArray<T, 0> {
   M(IfThenElse)                                                                \
   M(BinarySimdOp)                                                              \
   M(MaterializeObject)                                                         \
-  M(Int32x4BoolConstructor)                                                    \
   M(Int32x4GetFlag)                                                            \
   M(Int32x4Select)                                                             \
   M(Int32x4SetFlag)                                                            \
@@ -5302,6 +5301,7 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
   M(1, _, Float32x4ReciprocalSqrt, (Float32x4), Float32x4) \
   M(4, _, Float32x4Constructor, (Double, Double, Double, Double), Float32x4) \
   M(4, _, Int32x4Constructor, (Int32, Int32, Int32, Int32), Int32x4) \
+  M(4, _, Int32x4BoolConstructor, (Tagged, Tagged, Tagged, Tagged), Int32x4) \
   M(2, _, Float64x2Constructor, (Double, Double), Float64x2) \
   M(0, _, Float32x4Zero, (), Float32x4) \
   M(1, _, Float32x4Negate, (Float32x4), Float32x4) \
@@ -5700,52 +5700,6 @@ class Float64x2OneArgInstr : public TemplateDefinition<2, NoThrow, Pure> {
   const MethodRecognizer::Kind op_kind_;
 
   DISALLOW_COPY_AND_ASSIGN(Float64x2OneArgInstr);
-};
-
-class Int32x4BoolConstructorInstr
-    : public TemplateDefinition<4, NoThrow, Pure> {
- public:
-  Int32x4BoolConstructorInstr(Value* value0,
-                              Value* value1,
-                              Value* value2,
-                              Value* value3,
-                              intptr_t deopt_id)
-      : TemplateDefinition(deopt_id) {
-    SetInputAt(0, value0);
-    SetInputAt(1, value1);
-    SetInputAt(2, value2);
-    SetInputAt(3, value3);
-  }
-
-  Value* value0() const { return inputs_[0]; }
-  Value* value1() const { return inputs_[1]; }
-  Value* value2() const { return inputs_[2]; }
-  Value* value3() const { return inputs_[3]; }
-
-  virtual bool ComputeCanDeoptimize() const { return false; }
-
-  virtual Representation representation() const { return kUnboxedInt32x4; }
-
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
-    ASSERT((idx >= 0) && (idx < 4));
-    return kTagged;
-  }
-
-  virtual intptr_t DeoptimizationTarget() const {
-    // Direct access since this instruction cannot deoptimize, and the deopt-id
-    // was inherited from another instruction that could deoptimize.
-    return GetDeoptId();
-  }
-
-  DECLARE_INSTRUCTION(Int32x4BoolConstructor)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AttributesEqual(Instruction* other) const { return true; }
-
-  PRINT_OPERANDS_TO_SUPPORT
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(Int32x4BoolConstructorInstr);
 };
 
 class Int32x4GetFlagInstr : public TemplateDefinition<1, NoThrow, Pure> {

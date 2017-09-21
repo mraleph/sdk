@@ -800,18 +800,6 @@ void Float64x2OneArgInstr::PrintOperandsTo(BufferFormatter* f) const {
   f->Print(")");
 }
 
-void Int32x4BoolConstructorInstr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("Int32x4.bool(");
-  value0()->PrintTo(f);
-  f->Print(", ");
-  value1()->PrintTo(f);
-  f->Print(", ");
-  value2()->PrintTo(f);
-  f->Print(", ");
-  value3()->PrintTo(f);
-  f->Print(")");
-}
-
 void Int32x4GetFlagInstr::PrintOperandsTo(BufferFormatter* f) const {
   f->Print("Int32x4.%s ", MethodRecognizer::KindToCString(op_kind()));
   value()->PrintTo(f);

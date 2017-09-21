@@ -3191,6 +3191,7 @@ static bool InlineSimdConstructor(FlowGraph* flow_graph,
       break;
     case MethodRecognizer::kFloat32x4Constructor:
     case MethodRecognizer::kInt32x4Constructor:
+    case MethodRecognizer::kInt32x4BoolConstructor:
       *last = BinarySimdOpInstr::Create(kind,
           new (Z) Value(call->ArgumentAt(1)),
           new (Z) Value(call->ArgumentAt(2)),
@@ -3209,13 +3210,6 @@ static bool InlineSimdConstructor(FlowGraph* flow_graph,
       *last = BinarySimdOpInstr::Create(kind,
           new (Z) Value(call->ArgumentAt(1)),
           new (Z) Value(call->ArgumentAt(2)), call->deopt_id());
-      break;
-    case MethodRecognizer::kInt32x4BoolConstructor:
-      *last = new (Z) Int32x4BoolConstructorInstr(
-          new (Z) Value(call->ArgumentAt(1)),
-          new (Z) Value(call->ArgumentAt(2)),
-          new (Z) Value(call->ArgumentAt(3)),
-          new (Z) Value(call->ArgumentAt(4)), call->deopt_id());
       break;
     default:
       UNREACHABLE();
