@@ -3137,7 +3137,7 @@ static bool InlineFloat64x2Method(FlowGraph* flow_graph,
     case MethodRecognizer::kFloat64x2Max: {
       Definition* left = receiver;
       Definition* right = call->ArgumentAt(1);
-      *last = new (Z) Float64x2OneArgInstr(
+      *last = BinarySimdOpInstr::Create(
           kind, new (Z) Value(left), new (Z) Value(right), call->deopt_id());
       break;
     }

@@ -463,7 +463,6 @@ class EmbeddedArray<T, 0> {
   M(Int32x4SetFlag)                                                            \
   M(TestSmi)                                                                   \
   M(TestCids)                                                                  \
-  M(Float64x2OneArg)                                                           \
   M(ExtractNthOutput)                                                          \
   M(BinaryUint32Op)                                                            \
   M(ShiftUint32Op)                                                             \
@@ -5322,6 +5321,11 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
   M(1, _, Float64x2Abs, (Float64x2), Float64x2) \
   M(1, _, Float64x2Sqrt, (Float64x2), Float64x2) \
   M(1, _, Float64x2GetSignMask, (Float64x2), Word) \
+  M(2, _, Float64x2Scale, (Float64x2, Double), Float64x2) \
+  M(2, _, Float64x2WithX, (Float64x2, Double), Float64x2) \
+  M(2, _, Float64x2WithY, (Float64x2, Double), Float64x2) \
+  M(2, _, Float64x2Min, (Float64x2, Float64x2), Float64x2) \
+  M(2, _, Float64x2Max, (Float64x2, Float64x2), Float64x2) \
 
 class BinarySimdOpInstr : public Definition {
  public:
@@ -5491,60 +5495,6 @@ class BinarySimdOpInstr : public Definition {
   intptr_t mask_;
 
   DISALLOW_COPY_AND_ASSIGN(BinarySimdOpInstr);
-};
-
-class Float64x2OneArgInstr : public TemplateDefinition<2, NoThrow, Pure> {
- public:
-  Float64x2OneArgInstr(MethodRecognizer::Kind op_kind,
-                       Value* left,
-                       Value* right,
-                       intptr_t deopt_id)
-      : TemplateDefinition(deopt_id), op_kind_(op_kind) {
-    SetInputAt(0, left);
-    SetInputAt(1, right);
-  }
-
-  Value* left() const { return inputs_[0]; }
-  Value* right() const { return inputs_[1]; }
-
-  MethodRecognizer::Kind op_kind() const { return op_kind_; }
-
-  virtual bool ComputeCanDeoptimize() const { return false; }
-
-  virtual Representation representation() const { return kUnboxedFloat64x2; }
-
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
-    if (idx == 0) {
-      return kUnboxedFloat64x2;
-    }
-    ASSERT(idx == 1);
-    if ((op_kind() == MethodRecognizer::kFloat64x2WithX) ||
-        (op_kind() == MethodRecognizer::kFloat64x2WithY) ||
-        (op_kind() == MethodRecognizer::kFloat64x2Scale)) {
-      return kUnboxedDouble;
-    }
-    return kUnboxedFloat64x2;
-  }
-
-  virtual intptr_t DeoptimizationTarget() const {
-    // Direct access since this instruction cannot deoptimize, and the deopt-id
-    // was inherited from another instruction that could deoptimize.
-    return GetDeoptId();
-  }
-
-  PRINT_OPERANDS_TO_SUPPORT
-
-  DECLARE_INSTRUCTION(Float64x2OneArg)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AttributesEqual(Instruction* other) const {
-    return op_kind() == other->AsFloat64x2OneArg()->op_kind();
-  }
-
- private:
-  const MethodRecognizer::Kind op_kind_;
-
-  DISALLOW_COPY_AND_ASSIGN(Float64x2OneArgInstr);
 };
 
 class Int32x4SelectInstr : public TemplateDefinition<3, NoThrow, Pure> {

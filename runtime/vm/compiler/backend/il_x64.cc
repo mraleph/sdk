@@ -3861,6 +3861,8 @@ LocationSummary* BinarySimdOpInstr::MakeLocationSummary(Zone* zone,
   Unary(Float64x2Negate, negatepd) \
   Unary(Float64x2Abs, abspd) \
   Unary(Float64x2Sqrt, sqrtpd) \
+  Binary(Float64x2Min, minpd) \
+  Binary(Float64x2Max, maxpd) \
 
 void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   XmmRegister left = InputCount() > 0 && locs()->in(0).IsFpuRegister() ?
@@ -4067,59 +4069,23 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     case kFloat64x2GetSignMask:
       __ movmskpd(locs()->out(0).reg(), left);
       break;
-  }
-}
 
-LocationSummary* Float64x2OneArgInstr::MakeLocationSummary(Zone* zone,
-                                                           bool opt) const {
-  const intptr_t kNumInputs = 2;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_in(1, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Float64x2OneArgInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister left = locs()->in(0).fpu_reg();
-  XmmRegister right = locs()->in(1).fpu_reg();
-  ASSERT((locs()->out(0).fpu_reg() == left));
-
-  switch (op_kind()) {
-    case MethodRecognizer::kFloat64x2Scale:
+    case kFloat64x2Scale:
       __ shufpd(right, right, Immediate(0x00));
       __ mulpd(left, right);
       break;
-    case MethodRecognizer::kFloat64x2WithX:
+
+    case kFloat64x2WithX:
+    case kFloat64x2WithY: {
+      COMPILE_ASSERT(kFloat64x2WithY == (kFloat64x2WithX + 1));
+      // FIXME there must be non memory form of this
       __ subq(RSP, Immediate(16));
-      // Move value to stack.
       __ movups(Address(RSP, 0), left);
-      // Write over X value.
-      __ movsd(Address(RSP, 0), right);
-      // Move updated value into output register.
+      __ movsd(Address(RSP, (kind() - kFloat64x2WithX) * kDoubleSize), right);
       __ movups(left, Address(RSP, 0));
       __ addq(RSP, Immediate(16));
       break;
-    case MethodRecognizer::kFloat64x2WithY:
-      __ subq(RSP, Immediate(16));
-      // Move value to stack.
-      __ movups(Address(RSP, 0), left);
-      // Write over Y value.
-      __ movsd(Address(RSP, 8), right);
-      // Move updated value into output register.
-      __ movups(left, Address(RSP, 0));
-      __ addq(RSP, Immediate(16));
-      break;
-    case MethodRecognizer::kFloat64x2Min:
-      __ minpd(left, right);
-      break;
-    case MethodRecognizer::kFloat64x2Max:
-      __ maxpd(left, right);
-      break;
-    default:
-      UNREACHABLE();
+    }
   }
 }
 
