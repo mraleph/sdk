@@ -4248,9 +4248,11 @@ intptr_t BinarySimdOpInstr::InputCount() const {
 }
 
 static const Representation simd_op_result_representations[] = {
+#define kUnboxedBool kTagged
 #define CASE(Arity, Mask, Name, Args, Result) kUnboxed##Result,
     SIMD_OP_LIST(CASE, CASE)
 #undef CASE
+#undef kUnboxedBool
 };
 
 Representation BinarySimdOpInstr::representation() const {
@@ -4258,7 +4260,7 @@ Representation BinarySimdOpInstr::representation() const {
 }
 
 static const uint32_t simd_op_input_representations[] = {
-#define kUnboxedTagged kTagged
+#define kUnboxedBool kTagged
 #define REP(T) (kUnboxed##T)
 #define ENCODE_0() kNoRepresentation
 #define ENCODE_1(Arg0) REP(Arg0)
@@ -4267,7 +4269,7 @@ static const uint32_t simd_op_input_representations[] = {
 #define ENCODE_4(Arg0, ...) ((ENCODE_3(__VA_ARGS__) << 4) | REP(Arg0))
 #define CASE(Arity, Mask, Name, Args, Result) ENCODE_##Arity Args,
     SIMD_OP_LIST(CASE, CASE)
-#undef kUnboxedTagged
+#undef kUnboxedBool
 #undef REP
 #undef ENCODE_0
 #undef ENCODE_1

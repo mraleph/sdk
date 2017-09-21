@@ -3074,14 +3074,9 @@ static bool InlineInt32x4Method(FlowGraph* flow_graph,
     case MethodRecognizer::kInt32x4GetFlagX:
     case MethodRecognizer::kInt32x4GetFlagY:
     case MethodRecognizer::kInt32x4GetFlagZ:
-    case MethodRecognizer::kInt32x4GetFlagW: {
-      *last = new (Z)
-          Int32x4GetFlagInstr(kind, new (Z) Value(receiver), call->deopt_id());
-      break;
-    }
+    case MethodRecognizer::kInt32x4GetFlagW:
     case MethodRecognizer::kInt32x4GetSignMask: {
-      *last = BinarySimdOpInstr::Create(kind, new (Z) Value(receiver),
-                                               call->deopt_id());
+      *last = BinarySimdOpInstr::Create(kind, new (Z) Value(receiver), call->deopt_id());
       break;
     }
     case MethodRecognizer::kInt32x4Select: {

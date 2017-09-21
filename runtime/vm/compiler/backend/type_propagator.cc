@@ -1344,10 +1344,6 @@ CompileType Float64x2OneArgInstr::ComputeType() const {
   return CompileType::FromCid(kFloat64x2Cid);
 }
 
-CompileType Int32x4GetFlagInstr::ComputeType() const {
-  return CompileType::FromCid(kBoolCid);
-}
-
 CompileType Int32x4SelectInstr::ComputeType() const {
   return CompileType::FromCid(kFloat32x4Cid);
 }

@@ -459,7 +459,6 @@ class EmbeddedArray<T, 0> {
   M(IfThenElse)                                                                \
   M(BinarySimdOp)                                                              \
   M(MaterializeObject)                                                         \
-  M(Int32x4GetFlag)                                                            \
   M(Int32x4Select)                                                             \
   M(Int32x4SetFlag)                                                            \
   M(TestSmi)                                                                   \
@@ -5301,7 +5300,7 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
   M(1, _, Float32x4ReciprocalSqrt, (Float32x4), Float32x4) \
   M(4, _, Float32x4Constructor, (Double, Double, Double, Double), Float32x4) \
   M(4, _, Int32x4Constructor, (Int32, Int32, Int32, Int32), Int32x4) \
-  M(4, _, Int32x4BoolConstructor, (Tagged, Tagged, Tagged, Tagged), Int32x4) \
+  M(4, _, Int32x4BoolConstructor, (Bool, Bool, Bool, Bool), Int32x4) \
   M(2, _, Float64x2Constructor, (Double, Double), Float64x2) \
   M(0, _, Float32x4Zero, (), Float32x4) \
   M(1, _, Float32x4Negate, (Float32x4), Float32x4) \
@@ -5315,6 +5314,10 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
   SIMD_CONVERSION(M, Int32x4, Float32x4) \
   SIMD_CONVERSION(M, Float32x4, Float64x2) \
   SIMD_CONVERSION(M, Float64x2, Float32x4) \
+  M(1, _, Int32x4GetFlagX, (Int32x4), Bool) \
+  M(1, _, Int32x4GetFlagY, (Int32x4), Bool) \
+  M(1, _, Int32x4GetFlagZ, (Int32x4), Bool) \
+  M(1, _, Int32x4GetFlagW, (Int32x4), Bool) \
 
 class BinarySimdOpInstr : public Definition {
  public:
@@ -5700,49 +5703,6 @@ class Float64x2OneArgInstr : public TemplateDefinition<2, NoThrow, Pure> {
   const MethodRecognizer::Kind op_kind_;
 
   DISALLOW_COPY_AND_ASSIGN(Float64x2OneArgInstr);
-};
-
-class Int32x4GetFlagInstr : public TemplateDefinition<1, NoThrow, Pure> {
- public:
-  Int32x4GetFlagInstr(MethodRecognizer::Kind op_kind,
-                      Value* value,
-                      intptr_t deopt_id)
-      : TemplateDefinition(deopt_id), op_kind_(op_kind) {
-    SetInputAt(0, value);
-  }
-
-  Value* value() const { return inputs_[0]; }
-
-  MethodRecognizer::Kind op_kind() const { return op_kind_; }
-
-  virtual bool ComputeCanDeoptimize() const { return false; }
-
-  virtual Representation representation() const { return kTagged; }
-
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
-    ASSERT(idx == 0);
-    return kUnboxedInt32x4;
-  }
-
-  virtual intptr_t DeoptimizationTarget() const {
-    // Direct access since this instruction cannot deoptimize, and the deopt-id
-    // was inherited from another instruction that could deoptimize.
-    return GetDeoptId();
-  }
-
-  DECLARE_INSTRUCTION(Int32x4GetFlag)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AttributesEqual(Instruction* other) const {
-    return op_kind() == other->AsInt32x4GetFlag()->op_kind();
-  }
-
-  PRINT_OPERANDS_TO_SUPPORT
-
- private:
-  const MethodRecognizer::Kind op_kind_;
-
-  DISALLOW_COPY_AND_ASSIGN(Int32x4GetFlagInstr);
 };
 
 class Int32x4SelectInstr : public TemplateDefinition<3, NoThrow, Pure> {

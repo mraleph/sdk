@@ -3785,26 +3785,49 @@ static bool IsCpuRegisterRep(Representation r) {
 
 LocationSummary* BinarySimdOpInstr::MakeLocationSummary(Zone* zone,
                                                         bool opt) const {
-  const intptr_t kNumInputs = InputCount();
-  const intptr_t kNumTemps = kind() == kInt32x4BoolConstructor ? 1 : 0;
+  Location temp;
+  Location out;
+
+  switch (kind()) {
+    case kInt32x4GetFlagX:
+    case kInt32x4GetFlagY:
+    case kInt32x4GetFlagZ:
+    case kInt32x4GetFlagW:
+      temp = Location::RequiresFpuRegister();
+      out = Location::RegisterLocation(RDX);
+      break;
+
+    case kInt32x4BoolConstructor:
+      temp = Location::RegisterLocation(RDX);
+      break;
+
+    default:
+      break;
+  }
+
   LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
+      LocationSummary(zone, InputCount(), temp.IsInvalid() ? 0 : 1, LocationSummary::kNoCall);
   for (intptr_t i = 0; i < InputCount(); i++) {
     summary->set_in(i, IsCpuRegisterRep(RequiredInputRepresentation(i)) ?
       Location::RequiresRegister() :
       Location::RequiresFpuRegister());
   }
-  if (IsCpuRegisterRep(representation())) {
-    summary->set_out(0, Location::RequiresRegister());
-  } else if (InputCount() == 0 ||
-             (IsCpuRegisterRep(RequiredInputRepresentation(0)) != IsCpuRegisterRep(representation()))) {
-    summary->set_out(0, Location::RequiresFpuRegister());
-  } else {
-    summary->set_out(0, Location::SameAsFirstInput());
+  if (!temp.IsInvalid()) {
+    summary->set_temp(0, temp);
   }
-  if (kind() == kInt32x4BoolConstructor) {
-    summary->set_temp(0, Location::RegisterLocation(RDX));
+
+  if (out.IsInvalid()) {
+    if (IsCpuRegisterRep(representation())) {
+      out = Location::RequiresRegister();
+    } else if (InputCount() == 0 ||
+               (IsCpuRegisterRep(RequiredInputRepresentation(0)) != IsCpuRegisterRep(representation()))) {
+      out = Location::RequiresFpuRegister();
+    } else {
+      out = Location::SameAsFirstInput();
+    }
   }
+  summary->set_out(0, out);
+
   return summary;
 }
 
@@ -3923,16 +3946,12 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     }
 
     case kInt32x4Constructor: {
-      Register v0 = locs()->in(0).reg();
-      Register v1 = locs()->in(1).reg();
-      Register v2 = locs()->in(2).reg();
-      Register v3 = locs()->in(3).reg();
+      // TODO(FIXME)
       XmmRegister result = locs()->out(0).fpu_reg();
       __ AddImmediate(RSP, Immediate(-4 * kInt32Size));
-      __ movl(Address(RSP, 0 * kInt32Size), v0);
-      __ movl(Address(RSP, 1 * kInt32Size), v1);
-      __ movl(Address(RSP, 2 * kInt32Size), v2);
-      __ movl(Address(RSP, 3 * kInt32Size), v3);
+      for (intptr_t i = 0; i < 4; i++) {
+        __ movl(Address(RSP, i * kInt32Size), locs()->in(i).reg());
+      }
       __ movups(result, Address(RSP, 0));
       __ AddImmediate(RSP, Immediate(4 * kInt32Size));
       break;
@@ -3952,7 +3971,7 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
         __ CompareObject(locs()->in(i).reg(), Bool::True());
         __ setcc(EQUAL, DL);
         __ negl(RDX);
-        __ movl(Address(RSP, 4 * i), RDX);
+        __ movl(Address(RSP, i * kInt32Size), RDX);
       }
       __ movups(result, Address(RSP, 0));
       __ AddImmediate(RSP, Immediate(16));
@@ -3970,6 +3989,30 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       XmmRegister upper = locs()->in(2).fpu_reg();
       __ minps(left, upper);
       __ maxps(left, lower);
+      break;
+    }
+
+    case kInt32x4GetFlagX:
+    case kInt32x4GetFlagY:
+    case kInt32x4GetFlagZ:
+    case kInt32x4GetFlagW: {
+      ASSERT_BOOL_FALSE_FOLLOWS_BOOL_TRUE();
+      ASSERT(locs()->out(0).reg() == RDX);
+      FpuRegister value = left;
+      if (kind() == kInt32x4GetFlagZ || kind() == kInt32x4GetFlagW) {
+        value = locs()->temp(0).fpu_reg();
+        __ movhlps(value, left);  // extract upper half
+      }
+      if (kind() == kInt32x4GetFlagY || kind() == kInt32x4GetFlagW) {
+        __ movq(RDX, value);
+        __ shrq(RDX, Immediate(32));  // extract upper 32bits.
+      } else {
+        __ movd(RDX, value);
+      }
+      __ testl(RDX, RDX);
+      __ setcc(ZERO, DL);
+      __ movzxb(RDX, RDX);
+      __ movq(RDX, Address(THR, RDX, TIMES_8, Thread::bool_true_offset()));
       break;
     }
 
@@ -4152,51 +4195,6 @@ void Float64x2OneArgInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     default:
       UNREACHABLE();
   }
-}
-
-LocationSummary* Int32x4GetFlagInstr::MakeLocationSummary(Zone* zone,
-                                                          bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::RequiresRegister());
-  return summary;
-}
-
-void Int32x4GetFlagInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister value = locs()->in(0).fpu_reg();
-  Register result = locs()->out(0).reg();
-  Label done;
-  Label non_zero;
-  __ AddImmediate(RSP, Immediate(-16));
-  // Move value to stack.
-  __ movups(Address(RSP, 0), value);
-  switch (op_kind()) {
-    case MethodRecognizer::kInt32x4GetFlagX:
-      __ movl(result, Address(RSP, 0));
-      break;
-    case MethodRecognizer::kInt32x4GetFlagY:
-      __ movl(result, Address(RSP, 4));
-      break;
-    case MethodRecognizer::kInt32x4GetFlagZ:
-      __ movl(result, Address(RSP, 8));
-      break;
-    case MethodRecognizer::kInt32x4GetFlagW:
-      __ movl(result, Address(RSP, 12));
-      break;
-    default:
-      UNREACHABLE();
-  }
-  __ AddImmediate(RSP, Immediate(16));
-  __ testl(result, result);
-  __ j(NOT_ZERO, &non_zero, Assembler::kNearJump);
-  __ LoadObject(result, Bool::False());
-  __ jmp(&done);
-  __ Bind(&non_zero);
-  __ LoadObject(result, Bool::True());
-  __ Bind(&done);
 }
 
 LocationSummary* Int32x4SelectInstr::MakeLocationSummary(Zone* zone,
