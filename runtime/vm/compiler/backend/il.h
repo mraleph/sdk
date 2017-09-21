@@ -463,7 +463,6 @@ class EmbeddedArray<T, 0> {
   M(Int32x4SetFlag)                                                            \
   M(TestSmi)                                                                   \
   M(TestCids)                                                                  \
-  M(Float64x2ZeroArg)                                                          \
   M(Float64x2OneArg)                                                           \
   M(ExtractNthOutput)                                                          \
   M(BinaryUint32Op)                                                            \
@@ -5319,6 +5318,10 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
   M(1, _, Float64x2GetY, (Float64x2), Double) \
   M(1, _, Float64x2Splat, (Double), Float64x2) \
   M(0, _, Float64x2Zero, (), Float64x2) \
+  M(1, _, Float64x2Negate, (Float64x2), Float64x2) \
+  M(1, _, Float64x2Abs, (Float64x2), Float64x2) \
+  M(1, _, Float64x2Sqrt, (Float64x2), Float64x2) \
+  M(1, _, Float64x2GetSignMask, (Float64x2), Word) \
 
 class BinarySimdOpInstr : public Definition {
  public:
@@ -5488,56 +5491,6 @@ class BinarySimdOpInstr : public Definition {
   intptr_t mask_;
 
   DISALLOW_COPY_AND_ASSIGN(BinarySimdOpInstr);
-};
-
-// TODO(vegorov) rename to Unary to match arithmetic instructions.
-class Float64x2ZeroArgInstr : public TemplateDefinition<1, NoThrow, Pure> {
- public:
-  Float64x2ZeroArgInstr(MethodRecognizer::Kind op_kind,
-                        Value* left,
-                        intptr_t deopt_id)
-      : TemplateDefinition(deopt_id), op_kind_(op_kind) {
-    SetInputAt(0, left);
-  }
-
-  Value* left() const { return inputs_[0]; }
-
-  MethodRecognizer::Kind op_kind() const { return op_kind_; }
-
-  virtual bool ComputeCanDeoptimize() const { return false; }
-
-  virtual Representation representation() const {
-    if (op_kind() == MethodRecognizer::kFloat64x2GetSignMask) {
-      // Smi.
-      return kTagged;
-    }
-    return kUnboxedFloat64x2;
-  }
-
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
-    ASSERT(idx == 0);
-    return kUnboxedFloat64x2;
-  }
-
-  virtual intptr_t DeoptimizationTarget() const {
-    // Direct access since this instruction cannot deoptimize, and the deopt-id
-    // was inherited from another instruction that could deoptimize.
-    return GetDeoptId();
-  }
-
-  PRINT_OPERANDS_TO_SUPPORT
-
-  DECLARE_INSTRUCTION(Float64x2ZeroArg)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AttributesEqual(Instruction* other) const {
-    return op_kind() == other->AsFloat64x2ZeroArg()->op_kind();
-  }
-
- private:
-  const MethodRecognizer::Kind op_kind_;
-
-  DISALLOW_COPY_AND_ASSIGN(Float64x2ZeroArgInstr);
 };
 
 class Float64x2OneArgInstr : public TemplateDefinition<2, NoThrow, Pure> {

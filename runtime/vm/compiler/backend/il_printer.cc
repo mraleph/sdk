@@ -776,11 +776,6 @@ void BinarySimdOpInstr::PrintOperandsTo(BufferFormatter* f) const {
   right()->PrintTo(f);
 }
 
-void Float64x2ZeroArgInstr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("%s, ", MethodRecognizer::KindToCString(op_kind()));
-  left()->PrintTo(f);
-}
-
 void Float64x2OneArgInstr::PrintOperandsTo(BufferFormatter* f) const {
   f->Print("%s(", MethodRecognizer::KindToCString(op_kind()));
   left()->PrintTo(f);

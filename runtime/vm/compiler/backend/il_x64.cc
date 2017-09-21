@@ -3858,6 +3858,9 @@ LocationSummary* BinarySimdOpInstr::MakeLocationSummary(Zone* zone,
   Unary(Float32x4ReciprocalSqrt, rsqrtps) \
   Unary(Float32x4Negate, negateps) \
   Unary(Float32x4Absolute, absps) \
+  Unary(Float64x2Negate, negatepd) \
+  Unary(Float64x2Abs, abspd) \
+  Unary(Float64x2Sqrt, sqrtpd) \
 
 void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   XmmRegister left = InputCount() > 0 && locs()->in(0).IsFpuRegister() ?
@@ -4052,6 +4055,7 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       break;
 
     case kFloat64x2Splat:
+      // FIXME. Register constraints are chosen badly.
       __ shufpd(left, left, Immediate(0x0));
       break;
 
@@ -4060,48 +4064,9 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       __ xorpd(value, value);
       break;
     }
-  }
-}
-
-LocationSummary* Float64x2ZeroArgInstr::MakeLocationSummary(Zone* zone,
-                                                            bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  if (representation() == kTagged) {
-    ASSERT(op_kind() == MethodRecognizer::kFloat64x2GetSignMask);
-    summary->set_out(0, Location::RequiresRegister());
-  } else {
-    ASSERT(representation() == kUnboxedFloat64x2);
-    summary->set_out(0, Location::SameAsFirstInput());
-  }
-  return summary;
-}
-
-void Float64x2ZeroArgInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister left = locs()->in(0).fpu_reg();
-
-  ASSERT((op_kind() == MethodRecognizer::kFloat64x2GetSignMask) ||
-         (locs()->out(0).fpu_reg() == left));
-
-  switch (op_kind()) {
-    case MethodRecognizer::kFloat64x2Negate:
-      __ negatepd(left);
-      break;
-    case MethodRecognizer::kFloat64x2Abs:
-      __ abspd(left);
-      break;
-    case MethodRecognizer::kFloat64x2Sqrt:
-      __ sqrtpd(left);
-      break;
-    case MethodRecognizer::kFloat64x2GetSignMask:
+    case kFloat64x2GetSignMask:
       __ movmskpd(locs()->out(0).reg(), left);
-      __ SmiTag(locs()->out(0).reg());
       break;
-    default:
-      UNREACHABLE();
   }
 }
 

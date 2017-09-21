@@ -3123,18 +3123,13 @@ static bool InlineFloat64x2Method(FlowGraph* flow_graph,
   Instruction* cursor = *entry;
   switch (kind) {
     case MethodRecognizer::kFloat64x2GetX:
-    case MethodRecognizer::kFloat64x2GetY: {
-      *last = BinarySimdOpInstr::Create(kind, new (Z) Value(receiver), call->deopt_id());
-      break;
-    }
+    case MethodRecognizer::kFloat64x2GetY:
     case MethodRecognizer::kFloat64x2Negate:
     case MethodRecognizer::kFloat64x2Abs:
     case MethodRecognizer::kFloat64x2Sqrt:
-    case MethodRecognizer::kFloat64x2GetSignMask: {
-      *last = new (Z) Float64x2ZeroArgInstr(kind, new (Z) Value(receiver),
-                                            call->deopt_id());
+    case MethodRecognizer::kFloat64x2GetSignMask:
+      *last = BinarySimdOpInstr::Create(kind, new (Z) Value(receiver), call->deopt_id());
       break;
-    }
     case MethodRecognizer::kFloat64x2Scale:
     case MethodRecognizer::kFloat64x2WithX:
     case MethodRecognizer::kFloat64x2WithY:
