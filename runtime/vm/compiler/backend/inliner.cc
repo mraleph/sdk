@@ -3124,9 +3124,7 @@ static bool InlineFloat64x2Method(FlowGraph* flow_graph,
   switch (kind) {
     case MethodRecognizer::kFloat64x2GetX:
     case MethodRecognizer::kFloat64x2GetY: {
-      *last = new (Z) Simd64x2ShuffleInstr(kind, new (Z) Value(receiver),
-                                           0,  // mask is ignored.
-                                           call->deopt_id());
+      *last = BinarySimdOpInstr::Create(kind, new (Z) Value(receiver), call->deopt_id());
       break;
     }
     case MethodRecognizer::kFloat64x2Negate:

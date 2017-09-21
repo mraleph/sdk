@@ -1315,16 +1315,6 @@ CompileType BinarySimdOpInstr::ComputeType() const {
   return CompileType::FromCid(cid);
 }
 
-
-CompileType Simd64x2ShuffleInstr::ComputeType() const {
-  if ((op_kind() == MethodRecognizer::kFloat64x2GetX) ||
-      (op_kind() == MethodRecognizer::kFloat64x2GetY)) {
-    return CompileType::FromCid(kDoubleCid);
-  }
-  UNREACHABLE();
-  return CompileType::FromCid(kDoubleCid);
-}
-
 CompileType Float64x2ZeroInstr::ComputeType() const {
   return CompileType::FromCid(kFloat64x2Cid);
 }

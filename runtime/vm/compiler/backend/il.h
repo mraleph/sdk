@@ -465,7 +465,6 @@ class EmbeddedArray<T, 0> {
   M(TestCids)                                                                  \
   M(Float64x2Zero)                                                             \
   M(Float64x2Splat)                                                            \
-  M(Simd64x2Shuffle)                                                           \
   M(Float64x2ZeroArg)                                                          \
   M(Float64x2OneArg)                                                           \
   M(ExtractNthOutput)                                                          \
@@ -5318,6 +5317,8 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
   M(1, _, Int32x4GetFlagY, (Int32x4), Bool) \
   M(1, _, Int32x4GetFlagZ, (Int32x4), Bool) \
   M(1, _, Int32x4GetFlagW, (Int32x4), Bool) \
+  M(1, _, Float64x2GetX, (Float64x2), Double) \
+  M(1, _, Float64x2GetY, (Float64x2), Double) \
 
 class BinarySimdOpInstr : public Definition {
  public:
@@ -5487,66 +5488,6 @@ class BinarySimdOpInstr : public Definition {
   intptr_t mask_;
 
   DISALLOW_COPY_AND_ASSIGN(BinarySimdOpInstr);
-};
-
-class Simd64x2ShuffleInstr : public TemplateDefinition<1, NoThrow, Pure> {
- public:
-  Simd64x2ShuffleInstr(MethodRecognizer::Kind op_kind,
-                       Value* value,
-                       intptr_t mask,
-                       intptr_t deopt_id)
-      : TemplateDefinition(deopt_id), op_kind_(op_kind), mask_(mask) {
-    SetInputAt(0, value);
-  }
-
-  Value* value() const { return inputs_[0]; }
-
-  MethodRecognizer::Kind op_kind() const { return op_kind_; }
-
-  intptr_t mask() const { return mask_; }
-
-  virtual bool ComputeCanDeoptimize() const { return false; }
-
-  virtual Representation representation() const {
-    if ((op_kind_ == MethodRecognizer::kFloat64x2GetX) ||
-        (op_kind_ == MethodRecognizer::kFloat64x2GetY)) {
-      return kUnboxedDouble;
-    }
-    UNIMPLEMENTED();
-    return kUnboxedDouble;
-  }
-
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
-    ASSERT(idx == 0);
-    if ((op_kind_ == MethodRecognizer::kFloat64x2GetX) ||
-        (op_kind_ == MethodRecognizer::kFloat64x2GetY)) {
-      return kUnboxedFloat64x2;
-    }
-    UNIMPLEMENTED();
-    return kUnboxedFloat64x2;
-  }
-
-  virtual intptr_t DeoptimizationTarget() const {
-    // Direct access since this instruction cannot deoptimize, and the deopt-id
-    // was inherited from another instruction that could deoptimize.
-    return GetDeoptId();
-  }
-
-  DECLARE_INSTRUCTION(Simd64x2Shuffle)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AttributesEqual(Instruction* other) const {
-    return (op_kind() == other->AsSimd64x2Shuffle()->op_kind()) &&
-           (mask() == other->AsSimd64x2Shuffle()->mask());
-  }
-
-  PRINT_OPERANDS_TO_SUPPORT
-
- private:
-  const MethodRecognizer::Kind op_kind_;
-  const intptr_t mask_;
-
-  DISALLOW_COPY_AND_ASSIGN(Simd64x2ShuffleInstr);
 };
 
 class Float64x2SplatInstr : public TemplateDefinition<1, NoThrow, Pure> {

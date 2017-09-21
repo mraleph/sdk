@@ -4041,33 +4041,15 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
 
     case kFloat32x4ToFloat64x2: __ cvtps2pd(left, left); break;
     case kFloat64x2ToFloat32x4: __ cvtpd2ps(left, left); break;
-  }
-}
 
-LocationSummary* Simd64x2ShuffleInstr::MakeLocationSummary(Zone* zone,
-                                                           bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Simd64x2ShuffleInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister value = locs()->in(0).fpu_reg();
-
-  ASSERT(locs()->out(0).fpu_reg() == value);
-  switch (op_kind()) {
-    case MethodRecognizer::kFloat64x2GetX:
-      // nop.
+    case kFloat64x2GetX: {
+      // NOP
       break;
-    case MethodRecognizer::kFloat64x2GetY:
-      __ shufpd(value, value, Immediate(0x33));
+    }
+    case kFloat64x2GetY:
+      // FIXME. Register constraints are chosen badly.
+      __ shufpd(left, left, Immediate(0x33));
       break;
-    default:
-      UNREACHABLE();
   }
 }
 

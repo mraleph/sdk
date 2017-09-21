@@ -776,12 +776,6 @@ void BinarySimdOpInstr::PrintOperandsTo(BufferFormatter* f) const {
   right()->PrintTo(f);
 }
 
-void Simd64x2ShuffleInstr::PrintOperandsTo(BufferFormatter* f) const {
-  // TODO(johnmccutchan): Add proper string enumeration of shuffle.
-  f->Print("%s, ", MethodRecognizer::KindToCString(op_kind()));
-  value()->PrintTo(f);
-}
-
 void Float64x2SplatInstr::PrintOperandsTo(BufferFormatter* f) const {
   f->Print("Float64x2.splat ");
   value()->PrintTo(f);
