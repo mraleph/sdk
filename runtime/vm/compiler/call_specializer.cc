@@ -975,8 +975,8 @@ bool CallSpecializer::InlineSimdBinaryOp(InstanceCallInstr* call,
   AddChecksForArgNr(call, left, /* arg_number = */ 0);
   AddChecksForArgNr(call, right, /* arg_number = */ 1);
   // Replace call.
-  BinarySimdOpInstr* op = BinarySimdOpInstr::Create(
-      BinarySimdOpInstr::KindForOperator(cid, op_kind), new (Z) Value(left),
+  SimdOpInstr* op = SimdOpInstr::Create(
+      SimdOpInstr::KindForOperator(cid, op_kind), new (Z) Value(left),
       new (Z) Value(right), call->deopt_id());
   ReplaceCall(call, op);
 

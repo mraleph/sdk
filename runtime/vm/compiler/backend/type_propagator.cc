@@ -1307,7 +1307,7 @@ static const intptr_t simd_op_result_cids[] = {
 #undef kWordCid
 };
 
-CompileType BinarySimdOpInstr::ComputeType() const {
+CompileType SimdOpInstr::ComputeType() const {
   const intptr_t cid = simd_op_result_cids[kind()];
   if (cid == -1) {
     return CompileType::Int();

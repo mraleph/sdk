@@ -4164,8 +4164,7 @@ void NativeCallInstr::SetupNative() {
 }
 
 // SIMD
-BinarySimdOpInstr::Kind BinarySimdOpInstr::KindForOperator(intptr_t cid,
-                                                           Token::Kind op) {
+SimdOpInstr::Kind SimdOpInstr::KindForOperator(intptr_t cid, Token::Kind op) {
   switch (cid) {
     case kFloat32x4Cid:
       switch (op) {
@@ -4219,15 +4218,14 @@ BinarySimdOpInstr::Kind BinarySimdOpInstr::KindForOperator(intptr_t cid,
   return kFloat32x4Add;
 }
 
-BinarySimdOpInstr::Kind BinarySimdOpInstr::KindForMethod(
-    MethodRecognizer::Kind kind) {
+SimdOpInstr::Kind SimdOpInstr::KindForMethod(MethodRecognizer::Kind kind) {
   switch (kind) {
 #define CASE_METHOD(Arity, Mask, Name, ...)                                    \
   case MethodRecognizer::k##Name:                                              \
     return k##Name;
 #define CASE_BINARY_OP(Arity, Mask, Name, Args, Result)
     SIMD_OP_LIST(CASE_METHOD, CASE_BINARY_OP)
-#undef CASE_METOD
+#undef CASE_METHOD
 #undef CASE_BINARY_OP
     default:
       break;
@@ -4243,7 +4241,7 @@ static const intptr_t simd_op_input_count[] = {
 #undef CASE
 };
 
-intptr_t BinarySimdOpInstr::InputCount() const {
+intptr_t SimdOpInstr::InputCount() const {
   return simd_op_input_count[kind()];
 }
 
@@ -4255,7 +4253,7 @@ static const Representation simd_op_result_representations[] = {
 #undef kUnboxedBool
 };
 
-Representation BinarySimdOpInstr::representation() const {
+Representation SimdOpInstr::representation() const {
   return simd_op_result_representations[kind()];
 }
 
@@ -4279,10 +4277,10 @@ static const uint32_t simd_op_input_representations[] = {
 #undef CASE
 };
 
-Representation BinarySimdOpInstr::RequiredInputRepresentation(
-    intptr_t idx) const {
+Representation SimdOpInstr::RequiredInputRepresentation(intptr_t idx) const {
   ASSERT(0 <= idx && idx < InputCount());
-  return static_cast<Representation>((simd_op_input_representations[kind()] >> (4 * idx)) & 0xF);
+  return static_cast<Representation>(
+      (simd_op_input_representations[kind()] >> (4 * idx)) & 0xF);
 }
 
 static const bool simd_op_has_mask[] = {
@@ -4293,7 +4291,7 @@ static const bool simd_op_has_mask[] = {
 #undef CASE
 };
 
-bool BinarySimdOpInstr::HasMask() const {
+bool SimdOpInstr::HasMask() const {
   return simd_op_has_mask[kind()];
 }
 

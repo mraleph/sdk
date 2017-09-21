@@ -1112,7 +1112,7 @@ void ConstantPropagator::VisitDoubleTestOp(DoubleTestOpInstr* instr) {
   }
 }
 
-void ConstantPropagator::VisitBinarySimdOp(BinarySimdOpInstr* instr) {
+void ConstantPropagator::VisitSimdOp(SimdOpInstr* instr) {
   SetValue(instr, non_constant_);
 }
 

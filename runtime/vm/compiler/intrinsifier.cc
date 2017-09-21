@@ -737,9 +737,7 @@ bool Intrinsifier::Build_ExternalTwoByteStringCodeUnitAt(
   return BuildCodeUnitAt(flow_graph, kExternalTwoByteStringCid);
 }
 
-static bool BuildBinarySimdOp(FlowGraph* flow_graph,
-                              intptr_t cid,
-                              Token::Kind kind) {
+static bool BuildSimdOp(FlowGraph* flow_graph, intptr_t cid, Token::Kind kind) {
   if (!FlowGraphCompiler::SupportsUnboxedSimd128()) return false;
 
   const Representation rep = RepresentationForCid(cid);
@@ -762,8 +760,8 @@ static bool BuildBinarySimdOp(FlowGraph* flow_graph,
   Definition* right_simd = builder.AddUnboxInstr(rep, new Value(right),
                                                  /* is_checked = */ true);
 
-  Definition* unboxed_result = builder.AddDefinition(BinarySimdOpInstr::Create(
-      BinarySimdOpInstr::KindForOperator(cid, kind), new Value(left_simd),
+  Definition* unboxed_result = builder.AddDefinition(SimdOpInstr::Create(
+      SimdOpInstr::KindForOperator(cid, kind), new Value(left_simd),
       new Value(right_simd), Thread::kNoDeoptId));
   Definition* result =
       builder.AddDefinition(BoxInstr::Create(rep, new Value(unboxed_result)));
@@ -772,15 +770,15 @@ static bool BuildBinarySimdOp(FlowGraph* flow_graph,
 }
 
 bool Intrinsifier::Build_Float32x4Mul(FlowGraph* flow_graph) {
-  return BuildBinarySimdOp(flow_graph, kFloat32x4Cid, Token::kMUL);
+  return BuildSimdOp(flow_graph, kFloat32x4Cid, Token::kMUL);
 }
 
 bool Intrinsifier::Build_Float32x4Sub(FlowGraph* flow_graph) {
-  return BuildBinarySimdOp(flow_graph, kFloat32x4Cid, Token::kSUB);
+  return BuildSimdOp(flow_graph, kFloat32x4Cid, Token::kSUB);
 }
 
 bool Intrinsifier::Build_Float32x4Add(FlowGraph* flow_graph) {
-  return BuildBinarySimdOp(flow_graph, kFloat32x4Cid, Token::kADD);
+  return BuildSimdOp(flow_graph, kFloat32x4Cid, Token::kADD);
 }
 
 static bool BuildFloat32x4Shuffle(FlowGraph* flow_graph,
@@ -799,7 +797,7 @@ static bool BuildFloat32x4Shuffle(FlowGraph* flow_graph,
       builder.AddUnboxInstr(kUnboxedFloat32x4, new Value(receiver),
                             /* is_checked = */ true);
 
-  Definition* unboxed_result = builder.AddDefinition(BinarySimdOpInstr::Create(
+  Definition* unboxed_result = builder.AddDefinition(SimdOpInstr::Create(
       kind, new Value(unboxed_receiver), Thread::kNoDeoptId));
 
   Definition* result = builder.AddDefinition(

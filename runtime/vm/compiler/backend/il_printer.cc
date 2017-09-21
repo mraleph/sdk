@@ -768,12 +768,21 @@ void DoubleTestOpInstr::PrintOperandsTo(BufferFormatter* f) const {
   value()->PrintTo(f);
 }
 
-void BinarySimdOpInstr::PrintOperandsTo(BufferFormatter* f) const {
-  // FIXME
-  f->Print("%d, ", kind());
-  left()->PrintTo(f);
-  f->Print(", ");
-  right()->PrintTo(f);
+static const char* simd_op_kind_string[] = {
+#define CASE(Arity, Mask, Name, ...) #Name,
+    SIMD_OP_LIST(CASE, CASE)
+#undef CASE
+};
+
+void SimdOpInstr::PrintOperandsTo(BufferFormatter* f) const {
+  f->Print("%s", simd_op_kind_string[kind()]);
+  if (HasMask()) {
+    f->Print(", mask = %" Pd "", mask());
+  }
+  for (intptr_t i = 0; i < InputCount(); i++) {
+    f->Print(", ");
+    InputAt(i)->PrintTo(f);
+  }
 }
 
 void Int32x4SetFlagInstr::PrintOperandsTo(BufferFormatter* f) const {

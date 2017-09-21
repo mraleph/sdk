@@ -109,8 +109,9 @@ class Zone;
 
 // This assertion marks places which assume that boolean false immediate
 // follows bool true in the CACHED_VM_OBJECTS_LIST
-#define ASSERT_BOOL_FALSE_FOLLOWS_BOOL_TRUE() \
-  ASSERT((Thread::bool_true_offset() + kWordSize) == Thread::bool_false_offset());
+#define ASSERT_BOOL_FALSE_FOLLOWS_BOOL_TRUE()                                  \
+  ASSERT((Thread::bool_true_offset() + kWordSize) ==                           \
+         Thread::bool_false_offset());
 
 #if defined(TARGET_ARCH_DBC)
 #define CACHED_VM_STUBS_ADDRESSES_LIST(V)

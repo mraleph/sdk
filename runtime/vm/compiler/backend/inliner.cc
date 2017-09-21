@@ -2935,7 +2935,8 @@ static bool InlineFloat32x4Method(FlowGraph* flow_graph,
     case MethodRecognizer::kFloat32x4Reciprocal:
     case MethodRecognizer::kFloat32x4Absolute:
     case MethodRecognizer::kFloat32x4Negate: {
-      *last = BinarySimdOpInstr::Create(kind, new (Z) Value(receiver), call->deopt_id());
+      *last =
+          SimdOpInstr::Create(kind, new (Z) Value(receiver), call->deopt_id());
       break;
     }
     case MethodRecognizer::kFloat32x4Equal:
@@ -2948,8 +2949,8 @@ static bool InlineFloat32x4Method(FlowGraph* flow_graph,
     case MethodRecognizer::kFloat32x4Max: {
       Definition* left = receiver;
       Definition* right = call->ArgumentAt(1);
-      *last = BinarySimdOpInstr::Create(
-          kind, new (Z) Value(left), new (Z) Value(right), call->deopt_id());
+      *last = SimdOpInstr::Create(kind, new (Z) Value(left),
+                                  new (Z) Value(right), call->deopt_id());
       break;
     }
     case MethodRecognizer::kFloat32x4WithX:
@@ -2962,8 +2963,8 @@ static bool InlineFloat32x4Method(FlowGraph* flow_graph,
       // Note: left and right values are swapped when handed to the instruction,
       // this is done so that the double value is loaded into the output
       // register and can be destroyed.
-      *last = BinarySimdOpInstr::Create(
-          kind, new (Z) Value(right), new (Z) Value(left), call->deopt_id());
+      *last = SimdOpInstr::Create(kind, new (Z) Value(right),
+                                  new (Z) Value(left), call->deopt_id());
       break;
     }
     case MethodRecognizer::kFloat32x4Clamp: {
@@ -2971,8 +2972,8 @@ static bool InlineFloat32x4Method(FlowGraph* flow_graph,
       Definition* lower = call->ArgumentAt(1);
       Definition* upper = call->ArgumentAt(2);
       *last =
-          BinarySimdOpInstr::Create(kind, new (Z) Value(left), new (Z) Value(lower),
-                                      new (Z) Value(upper), call->deopt_id());
+          SimdOpInstr::Create(kind, new (Z) Value(left), new (Z) Value(lower),
+                              new (Z) Value(upper), call->deopt_id());
       break;
     }
     default:
@@ -3018,8 +3019,8 @@ static bool InlineSimdShuffleMethod(FlowGraph* flow_graph,
   if (!CheckMask(mask_definition, &mask)) {
     return false;
   }
-  *last = BinarySimdOpInstr::Create(kind, new (Z) Value(call->ArgumentAt(0)),
-                                    mask, call->deopt_id());
+  *last = SimdOpInstr::Create(kind, new (Z) Value(call->ArgumentAt(0)), mask,
+                              call->deopt_id());
   flow_graph->AppendTo(
       cursor, *last,
       call->deopt_id() != Thread::kNoDeoptId ? call->env() : NULL,
@@ -3046,9 +3047,9 @@ static bool InlineSimdShuffleMixMethod(FlowGraph* flow_graph,
   if (!CheckMask(mask_definition, &mask)) {
     return false;
   }
-  *last = BinarySimdOpInstr::Create(kind, new (Z) Value(receiver),
-                                    new (Z) Value(call->ArgumentAt(1)), mask,
-                                    call->deopt_id());
+  *last = SimdOpInstr::Create(kind, new (Z) Value(receiver),
+                              new (Z) Value(call->ArgumentAt(1)), mask,
+                              call->deopt_id());
   flow_graph->AppendTo(
       cursor, *last,
       call->deopt_id() != Thread::kNoDeoptId ? call->env() : NULL,
@@ -3076,7 +3077,8 @@ static bool InlineInt32x4Method(FlowGraph* flow_graph,
     case MethodRecognizer::kInt32x4GetFlagZ:
     case MethodRecognizer::kInt32x4GetFlagW:
     case MethodRecognizer::kInt32x4GetSignMask: {
-      *last = BinarySimdOpInstr::Create(kind, new (Z) Value(receiver), call->deopt_id());
+      *last =
+          SimdOpInstr::Create(kind, new (Z) Value(receiver), call->deopt_id());
       break;
     }
     case MethodRecognizer::kInt32x4Select: {
@@ -3128,7 +3130,8 @@ static bool InlineFloat64x2Method(FlowGraph* flow_graph,
     case MethodRecognizer::kFloat64x2Abs:
     case MethodRecognizer::kFloat64x2Sqrt:
     case MethodRecognizer::kFloat64x2GetSignMask:
-      *last = BinarySimdOpInstr::Create(kind, new (Z) Value(receiver), call->deopt_id());
+      *last =
+          SimdOpInstr::Create(kind, new (Z) Value(receiver), call->deopt_id());
       break;
     case MethodRecognizer::kFloat64x2Scale:
     case MethodRecognizer::kFloat64x2WithX:
@@ -3137,8 +3140,8 @@ static bool InlineFloat64x2Method(FlowGraph* flow_graph,
     case MethodRecognizer::kFloat64x2Max: {
       Definition* left = receiver;
       Definition* right = call->ArgumentAt(1);
-      *last = BinarySimdOpInstr::Create(
-          kind, new (Z) Value(left), new (Z) Value(right), call->deopt_id());
+      *last = SimdOpInstr::Create(kind, new (Z) Value(left),
+                                  new (Z) Value(right), call->deopt_id());
       break;
     }
     default:
@@ -3168,7 +3171,7 @@ static bool InlineSimdConstructor(FlowGraph* flow_graph,
   switch (kind) {
     case MethodRecognizer::kFloat32x4Zero:
     case MethodRecognizer::kFloat64x2Zero:
-      *last = BinarySimdOpInstr::Create(kind, call->deopt_id());
+      *last = SimdOpInstr::Create(kind, call->deopt_id());
       break;
     case MethodRecognizer::kFloat32x4ToInt32x4:
     case MethodRecognizer::kInt32x4ToFloat32x4:
@@ -3176,23 +3179,22 @@ static bool InlineSimdConstructor(FlowGraph* flow_graph,
     case MethodRecognizer::kFloat64x2ToFloat32x4:
     case MethodRecognizer::kFloat32x4Splat:
     case MethodRecognizer::kFloat64x2Splat:
-      *last = BinarySimdOpInstr::Create(kind, new (Z) Value(call->ArgumentAt(1)),
-                                          call->deopt_id());
+      *last = SimdOpInstr::Create(kind, new (Z) Value(call->ArgumentAt(1)),
+                                  call->deopt_id());
       break;
     case MethodRecognizer::kFloat32x4Constructor:
     case MethodRecognizer::kInt32x4Constructor:
     case MethodRecognizer::kInt32x4BoolConstructor:
-      *last = BinarySimdOpInstr::Create(kind,
-          new (Z) Value(call->ArgumentAt(1)),
-          new (Z) Value(call->ArgumentAt(2)),
-          new (Z) Value(call->ArgumentAt(3)),
-          new (Z) Value(call->ArgumentAt(4)),
-          call->deopt_id());
+      *last = SimdOpInstr::Create(kind, new (Z) Value(call->ArgumentAt(1)),
+                                  new (Z) Value(call->ArgumentAt(2)),
+                                  new (Z) Value(call->ArgumentAt(3)),
+                                  new (Z) Value(call->ArgumentAt(4)),
+                                  call->deopt_id());
       break;
     case MethodRecognizer::kFloat64x2Constructor:
-      *last = BinarySimdOpInstr::Create(kind,
-          new (Z) Value(call->ArgumentAt(1)),
-          new (Z) Value(call->ArgumentAt(2)), call->deopt_id());
+      *last = SimdOpInstr::Create(kind, new (Z) Value(call->ArgumentAt(1)),
+                                  new (Z) Value(call->ArgumentAt(2)),
+                                  call->deopt_id());
       break;
     default:
       UNREACHABLE();
