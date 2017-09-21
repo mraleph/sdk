@@ -464,7 +464,6 @@ class EmbeddedArray<T, 0> {
   M(TestSmi)                                                                   \
   M(TestCids)                                                                  \
   M(Float64x2Zero)                                                             \
-  M(Float64x2Splat)                                                            \
   M(Float64x2ZeroArg)                                                          \
   M(Float64x2OneArg)                                                           \
   M(ExtractNthOutput)                                                          \
@@ -5319,6 +5318,7 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
   M(1, _, Int32x4GetFlagW, (Int32x4), Bool) \
   M(1, _, Float64x2GetX, (Float64x2), Double) \
   M(1, _, Float64x2GetY, (Float64x2), Double) \
+  M(1, _, Float64x2Splat, (Double), Float64x2) \
 
 class BinarySimdOpInstr : public Definition {
  public:
@@ -5488,41 +5488,6 @@ class BinarySimdOpInstr : public Definition {
   intptr_t mask_;
 
   DISALLOW_COPY_AND_ASSIGN(BinarySimdOpInstr);
-};
-
-class Float64x2SplatInstr : public TemplateDefinition<1, NoThrow, Pure> {
- public:
-  Float64x2SplatInstr(Value* value, intptr_t deopt_id)
-      : TemplateDefinition(deopt_id) {
-    SetInputAt(0, value);
-  }
-
-  Value* value() const { return inputs_[0]; }
-
-  virtual bool ComputeCanDeoptimize() const { return false; }
-
-  virtual Representation representation() const { return kUnboxedFloat64x2; }
-
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
-    ASSERT(idx == 0);
-    return kUnboxedDouble;
-  }
-
-  virtual intptr_t DeoptimizationTarget() const {
-    // Direct access since this instruction cannot deoptimize, and the deopt-id
-    // was inherited from another instruction that could deoptimize.
-    return GetDeoptId();
-  }
-
-  DECLARE_INSTRUCTION(Float64x2Splat)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AttributesEqual(Instruction* other) const { return true; }
-
-  PRINT_OPERANDS_TO_SUPPORT
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(Float64x2SplatInstr);
 };
 
 class Float64x2ZeroInstr : public TemplateDefinition<0, NoThrow, Pure> {

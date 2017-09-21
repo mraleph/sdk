@@ -4050,6 +4050,10 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       // FIXME. Register constraints are chosen badly.
       __ shufpd(left, left, Immediate(0x33));
       break;
+
+    case kFloat64x2Splat:
+      __ shufpd(left, left, Immediate(0x0));
+      break;
   }
 }
 
@@ -4066,22 +4070,6 @@ LocationSummary* Float64x2ZeroInstr::MakeLocationSummary(Zone* zone,
 void Float64x2ZeroInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   XmmRegister value = locs()->out(0).fpu_reg();
   __ xorpd(value, value);
-}
-
-LocationSummary* Float64x2SplatInstr::MakeLocationSummary(Zone* zone,
-                                                          bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Float64x2SplatInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister value = locs()->out(0).fpu_reg();
-  __ shufpd(value, value, Immediate(0x0));
 }
 
 LocationSummary* Float64x2ZeroArgInstr::MakeLocationSummary(Zone* zone,
