@@ -1315,10 +1315,6 @@ CompileType SimdOpInstr::ComputeType() const {
   return CompileType::FromCid(cid);
 }
 
-CompileType Int32x4SelectInstr::ComputeType() const {
-  return CompileType::FromCid(kFloat32x4Cid);
-}
-
 CompileType Int32x4SetFlagInstr::ComputeType() const {
   return CompileType::FromCid(kInt32x4Cid);
 }

@@ -3085,9 +3085,9 @@ static bool InlineInt32x4Method(FlowGraph* flow_graph,
       Definition* mask = receiver;
       Definition* trueValue = call->ArgumentAt(1);
       Definition* falseValue = call->ArgumentAt(2);
-      *last = new (Z)
-          Int32x4SelectInstr(new (Z) Value(mask), new (Z) Value(trueValue),
-                             new (Z) Value(falseValue), call->deopt_id());
+      *last = SimdOpInstr::Create(kind, new (Z) Value(mask),
+                                  new (Z) Value(trueValue),
+                                  new (Z) Value(falseValue), call->deopt_id());
       break;
     }
     case MethodRecognizer::kInt32x4WithFlagX:

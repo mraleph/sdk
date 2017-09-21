@@ -3800,6 +3800,10 @@ LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone, bool opt) const {
       temp = Location::RegisterLocation(RDX);
       break;
 
+    case kInt32x4Select:
+      temp = Location::RequiresFpuRegister();
+      break;
+
     default:
       break;
   }
@@ -4087,40 +4091,28 @@ void SimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       __ addq(RSP, Immediate(16));
       break;
     }
+
+    case kInt32x4Select: {
+      XmmRegister mask = locs()->in(0).fpu_reg();
+      XmmRegister trueValue = locs()->in(1).fpu_reg();
+      XmmRegister falseValue = locs()->in(2).fpu_reg();
+      XmmRegister out = locs()->out(0).fpu_reg();
+      XmmRegister temp = locs()->temp(0).fpu_reg();
+      ASSERT(out == mask);
+
+      // Copy mask.
+      __ movaps(temp, mask);
+      // Invert it.
+      __ notps(temp);
+      // mask = mask & trueValue.
+      __ andps(mask, trueValue);
+      // temp = temp & falseValue.
+      __ andps(temp, falseValue);
+      // out = mask | temp.
+      __ orps(mask, temp);
+      break;
+    }
   }
-}
-
-LocationSummary* Int32x4SelectInstr::MakeLocationSummary(Zone* zone,
-                                                         bool opt) const {
-  const intptr_t kNumInputs = 3;
-  const intptr_t kNumTemps = 1;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_in(1, Location::RequiresFpuRegister());
-  summary->set_in(2, Location::RequiresFpuRegister());
-  summary->set_temp(0, Location::RequiresFpuRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Int32x4SelectInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister mask = locs()->in(0).fpu_reg();
-  XmmRegister trueValue = locs()->in(1).fpu_reg();
-  XmmRegister falseValue = locs()->in(2).fpu_reg();
-  XmmRegister out = locs()->out(0).fpu_reg();
-  XmmRegister temp = locs()->temp(0).fpu_reg();
-  ASSERT(out == mask);
-  // Copy mask.
-  __ movaps(temp, mask);
-  // Invert it.
-  __ notps(temp);
-  // mask = mask & trueValue.
-  __ andps(mask, trueValue);
-  // temp = temp & falseValue.
-  __ andps(temp, falseValue);
-  // out = mask | temp.
-  __ orps(mask, temp);
 }
 
 LocationSummary* Int32x4SetFlagInstr::MakeLocationSummary(Zone* zone,

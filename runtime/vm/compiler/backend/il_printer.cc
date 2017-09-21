@@ -792,15 +792,6 @@ void Int32x4SetFlagInstr::PrintOperandsTo(BufferFormatter* f) const {
   flagValue()->PrintTo(f);
 }
 
-void Int32x4SelectInstr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("Int32x4.select ");
-  mask()->PrintTo(f);
-  f->Print(", ");
-  trueValue()->PrintTo(f);
-  f->Print(", ");
-  falseValue()->PrintTo(f);
-}
-
 void UnaryDoubleOpInstr::PrintOperandsTo(BufferFormatter* f) const {
   f->Print("%s, ", Token::Str(op_kind()));
   value()->PrintTo(f);
