@@ -3783,7 +3783,8 @@ static bool IsCpuRegisterRep(Representation r) {
   return (kUnboxedInt32 <= r && r <= kUnboxedInt64) || r == kTagged;
 }
 
-LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone, bool opt) const {
+LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone,
+                                                        bool opt) const {
   Location temp;
   Location out;
 
@@ -3796,6 +3797,10 @@ LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone, bool opt) const {
       out = Location::RegisterLocation(RDX);
       break;
 
+    case kInt32x4WithFlagX:
+    case kInt32x4WithFlagY:
+    case kInt32x4WithFlagZ:
+    case kInt32x4WithFlagW:
     case kInt32x4BoolConstructor:
       temp = Location::RegisterLocation(RDX);
       break;
@@ -3808,12 +3813,12 @@ LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone, bool opt) const {
       break;
   }
 
-  LocationSummary* summary = new (zone) LocationSummary(
-      zone, InputCount(), temp.IsInvalid() ? 0 : 1, LocationSummary::kNoCall);
+  LocationSummary* summary = new (zone)
+      LocationSummary(zone, InputCount(), temp.IsInvalid() ? 0 : 1, LocationSummary::kNoCall);
   for (intptr_t i = 0; i < InputCount(); i++) {
-    summary->set_in(i, IsCpuRegisterRep(RequiredInputRepresentation(i))
-                           ? Location::RequiresRegister()
-                           : Location::RequiresFpuRegister());
+    summary->set_in(i, IsCpuRegisterRep(RequiredInputRepresentation(i)) ?
+      Location::RequiresRegister() :
+      Location::RequiresFpuRegister());
   }
   if (!temp.IsInvalid()) {
     summary->set_temp(0, temp);
@@ -3823,8 +3828,7 @@ LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone, bool opt) const {
     if (IsCpuRegisterRep(representation())) {
       out = Location::RequiresRegister();
     } else if (InputCount() == 0 ||
-               (IsCpuRegisterRep(RequiredInputRepresentation(0)) !=
-                IsCpuRegisterRep(representation()))) {
+               (IsCpuRegisterRep(RequiredInputRepresentation(0)) != IsCpuRegisterRep(representation()))) {
       out = Location::RequiresFpuRegister();
     } else {
       out = Location::SameAsFirstInput();
@@ -3842,41 +3846,44 @@ LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone, bool opt) const {
   V(Type##Div, div##suffix)
 
 #define SIMD_OP_BACKEND(Unary, Binary)                                         \
-  SIMD_BINARY_FLOAT_OP_BACKEND(Binary, Float32x4, ps)                          \
-  SIMD_BINARY_FLOAT_OP_BACKEND(Binary, Float64x2, pd)                          \
-  Binary(Int32x4Add, addpl) Binary(Int32x4Sub, subpl) Binary(                  \
-      Int32x4BitAnd, andps) Binary(Int32x4BitOr, orps)                         \
-      Binary(Int32x4BitXor, xorps) Binary(Float32x4Equal, cmppseq) Binary(     \
-          Float32x4NotEqual, cmppsneq) Binary(Float32x4GreaterThan, cmppsnle)  \
-          Binary(Float32x4GreaterThanOrEqual, cmppsnlt)                        \
-              Binary(Float32x4LessThan, cmppslt)                               \
-                  Binary(Float32x4LessThanOrEqual, cmppsle)                    \
-                      Binary(Float32x4Min, minps) Binary(Float32x4Max, maxps)  \
-                          Unary(Float32x4Sqrt, sqrtps)                         \
-                              Unary(Float32x4Reciprocal, reciprocalps) Unary(  \
-                                  Float32x4ReciprocalSqrt, rsqrtps)            \
-                                  Unary(Float32x4Negate, negateps)             \
-                                      Unary(Float32x4Absolute, absps) Unary(   \
-                                          Float64x2Negate, negatepd)           \
-                                          Unary(Float64x2Abs, abspd) Unary(    \
-                                              Float64x2Sqrt, sqrtpd)           \
-                                              Binary(Float64x2Min, minpd)      \
-                                                  Binary(Float64x2Max, maxpd)
+  SIMD_BINARY_FLOAT_OP_BACKEND(Binary, Float32x4, ps)                               \
+  SIMD_BINARY_FLOAT_OP_BACKEND(Binary, Float64x2, pd)                               \
+  Binary(Int32x4Add, addpl)                                                         \
+  Binary(Int32x4Sub, subpl)                                                         \
+  Binary(Int32x4BitAnd, andps)                                                      \
+  Binary(Int32x4BitOr, orps)                                                        \
+  Binary(Int32x4BitXor, xorps) \
+  Binary(Float32x4Equal, cmppseq) \
+  Binary(Float32x4NotEqual, cmppsneq) \
+  Binary(Float32x4GreaterThan, cmppsnle) \
+  Binary(Float32x4GreaterThanOrEqual, cmppsnlt) \
+  Binary(Float32x4LessThan, cmppslt) \
+  Binary(Float32x4LessThanOrEqual, cmppsle) \
+  Binary(Float32x4Min, minps) \
+  Binary(Float32x4Max, maxps) \
+  Unary(Float32x4Sqrt, sqrtps) \
+  Unary(Float32x4Reciprocal, reciprocalps) \
+  Unary(Float32x4ReciprocalSqrt, rsqrtps) \
+  Unary(Float32x4Negate, negateps) \
+  Unary(Float32x4Absolute, absps) \
+  Unary(Float64x2Negate, negatepd) \
+  Unary(Float64x2Abs, abspd) \
+  Unary(Float64x2Sqrt, sqrtpd) \
+  Binary(Float64x2Min, minpd) \
+  Binary(Float64x2Max, maxpd) \
 
 void SimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister left = InputCount() > 0 && locs()->in(0).IsFpuRegister()
-                         ? locs()->in(0).fpu_reg()
-                         : kNoFpuRegister;
-  XmmRegister right = InputCount() > 1 && locs()->in(1).IsFpuRegister()
-                          ? locs()->in(1).fpu_reg()
-                          : kNoFpuRegister;
+  XmmRegister left = InputCount() > 0 && locs()->in(0).IsFpuRegister() ?
+    locs()->in(0).fpu_reg() : kNoFpuRegister;
+  XmmRegister right = InputCount() > 1 && locs()->in(1).IsFpuRegister() ?
+    locs()->in(1).fpu_reg() : kNoFpuRegister;
 
   switch (kind()) {
-#define CASE_UNARY(Name, op)                                                   \
+#define CASE_UNARY(Name, op)                                                         \
   case k##Name:                                                                \
-    __ op(left);                                                               \
+    __ op(left);                                                        \
     break;
-#define CASE_BINARY(Name, op)                                                  \
+#define CASE_BINARY(Name, op)                                                         \
   case k##Name:                                                                \
     __ op(left, right);                                                        \
     break;
@@ -4039,18 +4046,43 @@ void SimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       break;
     }
 
+    // FIXME No memory version
+    case kInt32x4WithFlagX:
+    case kInt32x4WithFlagY:
+    case kInt32x4WithFlagZ:
+    case kInt32x4WithFlagW: {
+      COMPILE_ASSERT(kInt32x4WithFlagY == (kInt32x4WithFlagX + 1) &&
+                     kInt32x4WithFlagZ == (kInt32x4WithFlagX + 2) &&
+                     kInt32x4WithFlagW == (kInt32x4WithFlagX + 3));
+      XmmRegister mask = locs()->in(0).fpu_reg();
+      Register flag = locs()->in(1).reg();
+      ASSERT(locs()->temp(0).reg() == RDX);
+      ASSERT(mask == locs()->out(0).fpu_reg());
+
+      // Load
+      __ AddImmediate(RSP, Immediate(-16));
+      __ movups(Address(RSP, 0), mask);
+
+      // RDX = flag == true ? -1 : 0
+      __ xorq(RDX, RDX);
+      __ CompareObject(flag, Bool::True());
+      __ setcc(EQUAL, DL);
+      __ negl(RDX);
+
+      __ movl(Address(RSP, (kind() - kInt32x4WithFlagX) * kInt32Size), RDX);
+      __ movups(mask, Address(RSP, 0));
+      __ AddImmediate(RSP, Immediate(16));
+      break;
+    }
+
     case kInt32x4ToFloat32x4:
     case kFloat32x4ToInt32x4: {
       // NOP
       break;
     }
 
-    case kFloat32x4ToFloat64x2:
-      __ cvtps2pd(left, left);
-      break;
-    case kFloat64x2ToFloat32x4:
-      __ cvtpd2ps(left, left);
-      break;
+    case kFloat32x4ToFloat64x2: __ cvtps2pd(left, left); break;
+    case kFloat64x2ToFloat32x4: __ cvtpd2ps(left, left); break;
 
     case kFloat64x2GetX: {
       // NOP
@@ -4066,7 +4098,7 @@ void SimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       __ shufpd(left, left, Immediate(0x0));
       break;
 
-    case kFloat64x2Zero: {
+    case kFloat64x2Zero:{
       XmmRegister value = locs()->out(0).fpu_reg();
       __ xorpd(value, value);
       break;
@@ -4113,72 +4145,6 @@ void SimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       break;
     }
   }
-}
-
-LocationSummary* Int32x4SetFlagInstr::MakeLocationSummary(Zone* zone,
-                                                          bool opt) const {
-  const intptr_t kNumInputs = 2;
-  const intptr_t kNumTemps = 1;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresFpuRegister());
-  summary->set_in(1, Location::RequiresRegister());
-  summary->set_temp(0, Location::RequiresRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void Int32x4SetFlagInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister mask = locs()->in(0).fpu_reg();
-  Register flag = locs()->in(1).reg();
-  Register temp = locs()->temp(0).reg();
-  ASSERT(mask == locs()->out(0).fpu_reg());
-  __ AddImmediate(RSP, Immediate(-16));
-  // Copy mask to stack.
-  __ movups(Address(RSP, 0), mask);
-  Label falsePath, exitPath;
-  __ CompareObject(flag, Bool::True());
-  __ j(NOT_EQUAL, &falsePath);
-  switch (op_kind()) {
-    case MethodRecognizer::kInt32x4WithFlagX:
-      __ LoadImmediate(temp, Immediate(0xFFFFFFFF));
-      __ movl(Address(RSP, 0), temp);
-      __ jmp(&exitPath);
-      __ Bind(&falsePath);
-      __ LoadImmediate(temp, Immediate(0x0));
-      __ movl(Address(RSP, 0), temp);
-      break;
-    case MethodRecognizer::kInt32x4WithFlagY:
-      __ LoadImmediate(temp, Immediate(0xFFFFFFFF));
-      __ movl(Address(RSP, 4), temp);
-      __ jmp(&exitPath);
-      __ Bind(&falsePath);
-      __ LoadImmediate(temp, Immediate(0x0));
-      __ movl(Address(RSP, 4), temp);
-      break;
-    case MethodRecognizer::kInt32x4WithFlagZ:
-      __ LoadImmediate(temp, Immediate(0xFFFFFFFF));
-      __ movl(Address(RSP, 8), temp);
-      __ jmp(&exitPath);
-      __ Bind(&falsePath);
-      __ LoadImmediate(temp, Immediate(0x0));
-      __ movl(Address(RSP, 8), temp);
-      break;
-    case MethodRecognizer::kInt32x4WithFlagW:
-      __ LoadImmediate(temp, Immediate(0xFFFFFFFF));
-      __ movl(Address(RSP, 12), temp);
-      __ jmp(&exitPath);
-      __ Bind(&falsePath);
-      __ LoadImmediate(temp, Immediate(0x0));
-      __ movl(Address(RSP, 12), temp);
-      break;
-    default:
-      UNREACHABLE();
-  }
-  __ Bind(&exitPath);
-  // Copy mask back to register.
-  __ movups(mask, Address(RSP, 0));
-  __ AddImmediate(RSP, Immediate(16));
 }
 
 LocationSummary* MathUnaryInstr::MakeLocationSummary(Zone* zone,

@@ -785,13 +785,6 @@ void SimdOpInstr::PrintOperandsTo(BufferFormatter* f) const {
   }
 }
 
-void Int32x4SetFlagInstr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("Int32x4.%s ", MethodRecognizer::KindToCString(op_kind()));
-  value()->PrintTo(f);
-  f->Print(", ");
-  flagValue()->PrintTo(f);
-}
-
 void UnaryDoubleOpInstr::PrintOperandsTo(BufferFormatter* f) const {
   f->Print("%s, ", Token::Str(op_kind()));
   value()->PrintTo(f);

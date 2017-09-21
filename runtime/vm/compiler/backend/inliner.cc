@@ -3094,9 +3094,9 @@ static bool InlineInt32x4Method(FlowGraph* flow_graph,
     case MethodRecognizer::kInt32x4WithFlagY:
     case MethodRecognizer::kInt32x4WithFlagZ:
     case MethodRecognizer::kInt32x4WithFlagW: {
-      *last = new (Z) Int32x4SetFlagInstr(kind, new (Z) Value(receiver),
-                                          new (Z) Value(call->ArgumentAt(1)),
-                                          call->deopt_id());
+      *last = SimdOpInstr::Create(kind, new (Z) Value(receiver),
+                                        new (Z) Value(call->ArgumentAt(1)),
+                                        call->deopt_id());
       break;
     }
     default:

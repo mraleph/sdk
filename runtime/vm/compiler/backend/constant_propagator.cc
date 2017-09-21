@@ -1116,10 +1116,6 @@ void ConstantPropagator::VisitSimdOp(SimdOpInstr* instr) {
   SetValue(instr, non_constant_);
 }
 
-void ConstantPropagator::VisitInt32x4SetFlag(Int32x4SetFlagInstr* instr) {
-  SetValue(instr, non_constant_);
-}
-
 void ConstantPropagator::VisitMathUnary(MathUnaryInstr* instr) {
   const Object& value = instr->value()->definition()->constant_value();
   if (IsNonConstant(value)) {
