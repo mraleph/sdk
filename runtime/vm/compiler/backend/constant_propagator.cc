@@ -1124,10 +1124,6 @@ void ConstantPropagator::VisitInt32x4Select(Int32x4SelectInstr* instr) {
   SetValue(instr, non_constant_);
 }
 
-void ConstantPropagator::VisitFloat64x2Zero(Float64x2ZeroInstr* instr) {
-  SetValue(instr, non_constant_);
-}
-
 void ConstantPropagator::VisitFloat64x2ZeroArg(Float64x2ZeroArgInstr* instr) {
   // TODO(johnmccutchan): Implement constant propagation.
   SetValue(instr, non_constant_);

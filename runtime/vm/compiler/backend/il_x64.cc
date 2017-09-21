@@ -4054,22 +4054,13 @@ void BinarySimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     case kFloat64x2Splat:
       __ shufpd(left, left, Immediate(0x0));
       break;
+
+    case kFloat64x2Zero:{
+      XmmRegister value = locs()->out(0).fpu_reg();
+      __ xorpd(value, value);
+      break;
+    }
   }
-}
-
-LocationSummary* Float64x2ZeroInstr::MakeLocationSummary(Zone* zone,
-                                                         bool opt) const {
-  const intptr_t kNumInputs = 0;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_out(0, Location::RequiresFpuRegister());
-  return summary;
-}
-
-void Float64x2ZeroInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister value = locs()->out(0).fpu_reg();
-  __ xorpd(value, value);
 }
 
 LocationSummary* Float64x2ZeroArgInstr::MakeLocationSummary(Zone* zone,

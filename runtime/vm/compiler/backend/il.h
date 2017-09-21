@@ -463,7 +463,6 @@ class EmbeddedArray<T, 0> {
   M(Int32x4SetFlag)                                                            \
   M(TestSmi)                                                                   \
   M(TestCids)                                                                  \
-  M(Float64x2Zero)                                                             \
   M(Float64x2ZeroArg)                                                          \
   M(Float64x2OneArg)                                                           \
   M(ExtractNthOutput)                                                          \
@@ -5319,6 +5318,7 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
   M(1, _, Float64x2GetX, (Float64x2), Double) \
   M(1, _, Float64x2GetY, (Float64x2), Double) \
   M(1, _, Float64x2Splat, (Double), Float64x2) \
+  M(0, _, Float64x2Zero, (), Float64x2) \
 
 class BinarySimdOpInstr : public Definition {
  public:
@@ -5488,23 +5488,6 @@ class BinarySimdOpInstr : public Definition {
   intptr_t mask_;
 
   DISALLOW_COPY_AND_ASSIGN(BinarySimdOpInstr);
-};
-
-class Float64x2ZeroInstr : public TemplateDefinition<0, NoThrow, Pure> {
- public:
-  Float64x2ZeroInstr() {}
-
-  virtual bool ComputeCanDeoptimize() const { return false; }
-
-  virtual Representation representation() const { return kUnboxedFloat64x2; }
-
-  DECLARE_INSTRUCTION(Float64x2Zero)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AttributesEqual(Instruction* other) const { return true; }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(Float64x2ZeroInstr);
 };
 
 // TODO(vegorov) rename to Unary to match arithmetic instructions.

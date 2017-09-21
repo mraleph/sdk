@@ -3172,6 +3172,7 @@ static bool InlineSimdConstructor(FlowGraph* flow_graph,
   Instruction* cursor = *entry;
   switch (kind) {
     case MethodRecognizer::kFloat32x4Zero:
+    case MethodRecognizer::kFloat64x2Zero:
       *last = BinarySimdOpInstr::Create(kind, call->deopt_id());
       break;
     case MethodRecognizer::kFloat32x4ToInt32x4:
@@ -3192,9 +3193,6 @@ static bool InlineSimdConstructor(FlowGraph* flow_graph,
           new (Z) Value(call->ArgumentAt(3)),
           new (Z) Value(call->ArgumentAt(4)),
           call->deopt_id());
-      break;
-    case MethodRecognizer::kFloat64x2Zero:
-      *last = new (Z) Float64x2ZeroInstr();
       break;
     case MethodRecognizer::kFloat64x2Constructor:
       *last = BinarySimdOpInstr::Create(kind,

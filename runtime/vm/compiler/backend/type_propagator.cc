@@ -1315,10 +1315,6 @@ CompileType BinarySimdOpInstr::ComputeType() const {
   return CompileType::FromCid(cid);
 }
 
-CompileType Float64x2ZeroInstr::ComputeType() const {
-  return CompileType::FromCid(kFloat64x2Cid);
-}
-
 CompileType Float64x2ZeroArgInstr::ComputeType() const {
   if (op_kind() == MethodRecognizer::kFloat64x2GetSignMask) {
     return CompileType::Int();
