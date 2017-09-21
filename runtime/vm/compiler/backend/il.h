@@ -5328,7 +5328,7 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
   M(2, _, Int32x4WithFlagX, (Int32x4, Bool), Int32x4)                          \
   M(2, _, Int32x4WithFlagY, (Int32x4, Bool), Int32x4)                          \
   M(2, _, Int32x4WithFlagZ, (Int32x4, Bool), Int32x4)                          \
-  M(2, _, Int32x4WithFlagW, (Int32x4, Bool), Int32x4)                          \
+  M(2, _, Int32x4WithFlagW, (Int32x4, Bool), Int32x4)
 
 class SimdOpInstr : public Definition {
  public:
@@ -5338,53 +5338,40 @@ class SimdOpInstr : public Definition {
 #undef DECLARE_ENUM
   };
 
+  static SimdOpInstr* CreateFromCall(Zone* zone,
+                                     MethodRecognizer::Kind kind,
+                                     Definition* receiver,
+                                     Instruction* call,
+                                     intptr_t mask = 0) {
+    SimdOpInstr* op =
+        new (zone) SimdOpInstr(KindForMethod(kind), call->deopt_id());
+    op->SetInputAt(0, new (zone) Value(receiver));
+    for (intptr_t i = 1; i < op->InputCount(); i++) {
+      op->SetInputAt(i, new (zone) Value(call->ArgumentAt(i)));
+    }
+    if (op->HasMask()) op->set_mask(mask);
+    ASSERT(call->ArgumentCount() ==
+           (op->InputCount() + (op->HasMask() ? 1 : 0)));
+    return op;
+  }
+
+  static SimdOpInstr* CreateFromFactoryCall(Zone* zone,
+                                            MethodRecognizer::Kind kind,
+                                            Instruction* call) {
+    SimdOpInstr* op =
+        new (zone) SimdOpInstr(KindForMethod(kind), call->deopt_id());
+    for (intptr_t i = 0; i < op->InputCount(); i++) {
+      op->SetInputAt(i, new (zone) Value(call->ArgumentAt(i + 1)));
+    }
+    ASSERT(call->ArgumentCount() == (op->InputCount() + 1));
+    return op;
+  }
+
   static SimdOpInstr* Create(Kind kind,
                              Value* left,
                              Value* right,
                              intptr_t deopt_id) {
     return new SimdOpInstr(kind, left, right, deopt_id);
-  }
-
-  static SimdOpInstr* Create(MethodRecognizer::Kind kind, intptr_t deopt_id) {
-    return new SimdOpInstr(KindForMethod(kind), deopt_id);
-  }
-
-  static SimdOpInstr* Create(MethodRecognizer::Kind kind,
-                             Value* arg0,
-                             Value* arg1,
-                             Value* arg2,
-                             intptr_t deopt_id) {
-    return new SimdOpInstr(KindForMethod(kind), arg0, arg1, arg2, deopt_id);
-  }
-
-  static SimdOpInstr* Create(MethodRecognizer::Kind kind,
-                             Value* arg0,
-                             Value* arg1,
-                             Value* arg2,
-                             Value* arg3,
-                             intptr_t deopt_id) {
-    return new SimdOpInstr(KindForMethod(kind), arg0, arg1, arg2, arg3,
-                           deopt_id);
-  }
-
-  static SimdOpInstr* Create(Kind kind,
-                             Value* left,
-                             intptr_t mask,
-                             intptr_t deopt_id) {
-    return new SimdOpInstr(kind, left, mask, deopt_id);
-  }
-
-  static SimdOpInstr* Create(MethodRecognizer::Kind kind,
-                             Value* left,
-                             intptr_t deopt_id) {
-    return new SimdOpInstr(KindForMethod(kind), left, deopt_id);
-  }
-
-  static SimdOpInstr* Create(MethodRecognizer::Kind kind,
-                             Value* left,
-                             intptr_t mask,
-                             intptr_t deopt_id) {
-    return new SimdOpInstr(KindForMethod(kind), left, mask, deopt_id);
   }
 
   static SimdOpInstr* Create(MethodRecognizer::Kind kind,
@@ -5396,10 +5383,8 @@ class SimdOpInstr : public Definition {
 
   static SimdOpInstr* Create(MethodRecognizer::Kind kind,
                              Value* left,
-                             Value* right,
-                             intptr_t mask,
                              intptr_t deopt_id) {
-    return new SimdOpInstr(KindForMethod(kind), left, right, mask, deopt_id);
+    return new SimdOpInstr(KindForMethod(kind), left, deopt_id);
   }
 
   static Kind KindForMethod(MethodRecognizer::Kind method_kind);
@@ -5441,61 +5426,20 @@ class SimdOpInstr : public Definition {
   SimdOpInstr(Kind kind, intptr_t deopt_id)
       : Definition(deopt_id), kind_(kind) {}
 
+  SimdOpInstr(Kind kind, Value* left, intptr_t deopt_id)
+      : Definition(deopt_id), kind_(kind) {
+    SetInputAt(0, left);
+  }
+
   SimdOpInstr(Kind kind, Value* left, Value* right, intptr_t deopt_id)
       : Definition(deopt_id), kind_(kind) {
     SetInputAt(0, left);
     SetInputAt(1, right);
   }
 
-  SimdOpInstr(Kind kind,
-              Value* arg0,
-              Value* arg1,
-              Value* arg2,
-              intptr_t deopt_id)
-      : Definition(deopt_id), kind_(kind) {
-    SetInputAt(0, arg0);
-    SetInputAt(1, arg1);
-    SetInputAt(2, arg2);
-  }
-
-  SimdOpInstr(Kind kind,
-              Value* arg0,
-              Value* arg1,
-              Value* arg2,
-              Value* arg3,
-              intptr_t deopt_id)
-      : Definition(deopt_id), kind_(kind) {
-    SetInputAt(0, arg0);
-    SetInputAt(1, arg1);
-    SetInputAt(2, arg2);
-    SetInputAt(3, arg3);
-  }
-
-  SimdOpInstr(Kind kind, Value* left, intptr_t deopt_id)
-      : Definition(deopt_id), kind_(kind) {
-    SetInputAt(0, left);
-  }
-
-  SimdOpInstr(Kind kind, Value* left, intptr_t mask, intptr_t deopt_id)
-      : Definition(deopt_id), kind_(kind), mask_(mask) {
-    SetInputAt(0, left);
-  }
-
-  SimdOpInstr(Kind kind,
-              Value* left,
-              Value* right,
-              intptr_t mask,
-              intptr_t deopt_id)
-      : Definition(deopt_id), kind_(kind), mask_(mask) {
-    SetInputAt(0, left);
-    SetInputAt(1, right);
-  }
-
-  Value* left() const { return inputs_[0]; }
-  Value* right() const { return inputs_[1]; }
-  intptr_t mask() const { return mask_; }
-
   bool HasMask() const;
+  intptr_t mask() const { return mask_; }
+  void set_mask(intptr_t mask) { mask_ = mask; }
 
   virtual void RawSetInputAt(intptr_t i, Value* value) { inputs_[i] = value; }
 

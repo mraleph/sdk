@@ -3783,8 +3783,7 @@ static bool IsCpuRegisterRep(Representation r) {
   return (kUnboxedInt32 <= r && r <= kUnboxedInt64) || r == kTagged;
 }
 
-LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone,
-                                                        bool opt) const {
+LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone, bool opt) const {
   Location temp;
   Location out;
 
@@ -3813,12 +3812,12 @@ LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone,
       break;
   }
 
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, InputCount(), temp.IsInvalid() ? 0 : 1, LocationSummary::kNoCall);
+  LocationSummary* summary = new (zone) LocationSummary(
+      zone, InputCount(), temp.IsInvalid() ? 0 : 1, LocationSummary::kNoCall);
   for (intptr_t i = 0; i < InputCount(); i++) {
-    summary->set_in(i, IsCpuRegisterRep(RequiredInputRepresentation(i)) ?
-      Location::RequiresRegister() :
-      Location::RequiresFpuRegister());
+    summary->set_in(i, IsCpuRegisterRep(RequiredInputRepresentation(i))
+                           ? Location::RequiresRegister()
+                           : Location::RequiresFpuRegister());
   }
   if (!temp.IsInvalid()) {
     summary->set_temp(0, temp);
@@ -3828,7 +3827,8 @@ LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone,
     if (IsCpuRegisterRep(representation())) {
       out = Location::RequiresRegister();
     } else if (InputCount() == 0 ||
-               (IsCpuRegisterRep(RequiredInputRepresentation(0)) != IsCpuRegisterRep(representation()))) {
+               (IsCpuRegisterRep(RequiredInputRepresentation(0)) !=
+                IsCpuRegisterRep(representation()))) {
       out = Location::RequiresFpuRegister();
     } else {
       out = Location::SameAsFirstInput();
@@ -3846,44 +3846,41 @@ LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone,
   V(Type##Div, div##suffix)
 
 #define SIMD_OP_BACKEND(Unary, Binary)                                         \
-  SIMD_BINARY_FLOAT_OP_BACKEND(Binary, Float32x4, ps)                               \
-  SIMD_BINARY_FLOAT_OP_BACKEND(Binary, Float64x2, pd)                               \
-  Binary(Int32x4Add, addpl)                                                         \
-  Binary(Int32x4Sub, subpl)                                                         \
-  Binary(Int32x4BitAnd, andps)                                                      \
-  Binary(Int32x4BitOr, orps)                                                        \
-  Binary(Int32x4BitXor, xorps) \
-  Binary(Float32x4Equal, cmppseq) \
-  Binary(Float32x4NotEqual, cmppsneq) \
-  Binary(Float32x4GreaterThan, cmppsnle) \
-  Binary(Float32x4GreaterThanOrEqual, cmppsnlt) \
-  Binary(Float32x4LessThan, cmppslt) \
-  Binary(Float32x4LessThanOrEqual, cmppsle) \
-  Binary(Float32x4Min, minps) \
-  Binary(Float32x4Max, maxps) \
-  Unary(Float32x4Sqrt, sqrtps) \
-  Unary(Float32x4Reciprocal, reciprocalps) \
-  Unary(Float32x4ReciprocalSqrt, rsqrtps) \
-  Unary(Float32x4Negate, negateps) \
-  Unary(Float32x4Absolute, absps) \
-  Unary(Float64x2Negate, negatepd) \
-  Unary(Float64x2Abs, abspd) \
-  Unary(Float64x2Sqrt, sqrtpd) \
-  Binary(Float64x2Min, minpd) \
-  Binary(Float64x2Max, maxpd) \
+  SIMD_BINARY_FLOAT_OP_BACKEND(Binary, Float32x4, ps)                          \
+  SIMD_BINARY_FLOAT_OP_BACKEND(Binary, Float64x2, pd)                          \
+  Binary(Int32x4Add, addpl) Binary(Int32x4Sub, subpl) Binary(                  \
+      Int32x4BitAnd, andps) Binary(Int32x4BitOr, orps)                         \
+      Binary(Int32x4BitXor, xorps) Binary(Float32x4Equal, cmppseq) Binary(     \
+          Float32x4NotEqual, cmppsneq) Binary(Float32x4GreaterThan, cmppsnle)  \
+          Binary(Float32x4GreaterThanOrEqual, cmppsnlt)                        \
+              Binary(Float32x4LessThan, cmppslt)                               \
+                  Binary(Float32x4LessThanOrEqual, cmppsle)                    \
+                      Binary(Float32x4Min, minps) Binary(Float32x4Max, maxps)  \
+                          Unary(Float32x4Sqrt, sqrtps)                         \
+                              Unary(Float32x4Reciprocal, reciprocalps) Unary(  \
+                                  Float32x4ReciprocalSqrt, rsqrtps)            \
+                                  Unary(Float32x4Negate, negateps)             \
+                                      Unary(Float32x4Absolute, absps) Unary(   \
+                                          Float64x2Negate, negatepd)           \
+                                          Unary(Float64x2Abs, abspd) Unary(    \
+                                              Float64x2Sqrt, sqrtpd)           \
+                                              Binary(Float64x2Min, minpd)      \
+                                                  Binary(Float64x2Max, maxpd)
 
 void SimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister left = InputCount() > 0 && locs()->in(0).IsFpuRegister() ?
-    locs()->in(0).fpu_reg() : kNoFpuRegister;
-  XmmRegister right = InputCount() > 1 && locs()->in(1).IsFpuRegister() ?
-    locs()->in(1).fpu_reg() : kNoFpuRegister;
+  XmmRegister left = InputCount() > 0 && locs()->in(0).IsFpuRegister()
+                         ? locs()->in(0).fpu_reg()
+                         : kNoFpuRegister;
+  XmmRegister right = InputCount() > 1 && locs()->in(1).IsFpuRegister()
+                          ? locs()->in(1).fpu_reg()
+                          : kNoFpuRegister;
 
   switch (kind()) {
-#define CASE_UNARY(Name, op)                                                         \
+#define CASE_UNARY(Name, op)                                                   \
   case k##Name:                                                                \
-    __ op(left);                                                        \
+    __ op(left);                                                               \
     break;
-#define CASE_BINARY(Name, op)                                                         \
+#define CASE_BINARY(Name, op)                                                  \
   case k##Name:                                                                \
     __ op(left, right);                                                        \
     break;
@@ -4081,8 +4078,12 @@ void SimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       break;
     }
 
-    case kFloat32x4ToFloat64x2: __ cvtps2pd(left, left); break;
-    case kFloat64x2ToFloat32x4: __ cvtpd2ps(left, left); break;
+    case kFloat32x4ToFloat64x2:
+      __ cvtps2pd(left, left);
+      break;
+    case kFloat64x2ToFloat32x4:
+      __ cvtpd2ps(left, left);
+      break;
 
     case kFloat64x2GetX: {
       // NOP
@@ -4098,7 +4099,7 @@ void SimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       __ shufpd(left, left, Immediate(0x0));
       break;
 
-    case kFloat64x2Zero:{
+    case kFloat64x2Zero: {
       XmmRegister value = locs()->out(0).fpu_reg();
       __ xorpd(value, value);
       break;
