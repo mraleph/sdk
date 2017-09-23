@@ -5422,6 +5422,8 @@ class SimdOpInstr : public Definition {
 
   PRINT_OPERANDS_TO_SUPPORT
 
+  intptr_t mask() const { ASSERT(HasMask()); return mask_; }
+
  private:
   SimdOpInstr(Kind kind, intptr_t deopt_id)
       : Definition(deopt_id), kind_(kind) {}
@@ -5438,7 +5440,6 @@ class SimdOpInstr : public Definition {
   }
 
   bool HasMask() const;
-  intptr_t mask() const { return mask_; }
   void set_mask(intptr_t mask) { mask_ = mask; }
 
   virtual void RawSetInputAt(intptr_t i, Value* value) { inputs_[i] = value; }
