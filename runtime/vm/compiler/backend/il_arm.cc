@@ -5731,6 +5731,16 @@ struct Fixed {
   operator RegisterT() { return t; }
 };
 
+template <typename RegisterT>
+struct Temp {
+  explicit Temp(RegisterT reg) : reg_(reg) { }
+
+  operator RegisterT() { return reg_; }
+
+  RegisterT reg_;
+};
+
+
 template <QRegister reg>
 struct Fixed_ {
   inline DRegister d(intptr_t i) const {
@@ -5750,17 +5760,31 @@ struct UnwrapLocation;
 template <>
 struct UnwrapLocation<Register> {
   static Register Unwrap(const Location& loc) { return loc.reg(); }
+  template<intptr_t arity, intptr_t index>
+  static Register Unwrap(LocationSummary* locs) {
+    return Unwrap(locs->in(index));
+  }
 };
 
 template <>
 struct UnwrapLocation<QRegister> {
   static QRegister Unwrap(const Location& loc) { return loc.fpu_reg(); }
+
+  template<intptr_t arity, intptr_t index>
+  static QRegister Unwrap(LocationSummary* locs) {
+    return Unwrap(locs->in(index));
+  }
 };
 
 template <>
 struct UnwrapLocation<QRegister_> {
   static QRegister_ Unwrap(const Location& loc) {
     return QRegister_(loc.fpu_reg());
+  }
+
+  template<intptr_t arity, intptr_t index>
+  static QRegister_ Unwrap(LocationSummary* locs) {
+    return Unwrap(locs->in(index));
   }
 };
 
@@ -5770,6 +5794,11 @@ struct UnwrapLocation<Fixed<RegT, reg> > {
     assert(UnwrapLocation<RegT>::Unwrap(loc) == reg);
     return Fixed<RegT, reg>();
   }
+
+  template<intptr_t arity, intptr_t index>
+  static Fixed<RegT, reg> Unwrap(LocationSummary* locs) {
+    return Unwrap(locs->in(index));
+  }
 };
 
 template <QRegister reg>
@@ -5778,7 +5807,38 @@ struct UnwrapLocation<Fixed_<reg> > {
     assert(UnwrapLocation<QRegister>::Unwrap(loc) == reg);
     return Fixed_<reg>();
   }
+
+  template<intptr_t arity, intptr_t index>
+  static Fixed_<reg> Unwrap(LocationSummary* locs) {
+    return Unwrap(locs->in(index));
+  }
 };
+
+template <typename R>
+struct UnwrapLocation<Temp<R> > {
+  static Temp<R> Unwrap(const Location& loc) {
+    return Temp<R>(UnwrapLocation<R>::Unwrap(loc));
+  }
+
+  template<intptr_t arity, intptr_t index>
+  static Temp<R> Unwrap(LocationSummary* locs) {
+    return Unwrap(locs->temp(index - arity));
+  }
+};
+
+template <typename Out, typename In0>
+void InvokeEmitter(FlowGraphCompiler* compiler,
+                   SimdOpInstr* op,
+                   void (*Emit)(FlowGraphCompiler*,
+                                SimdOpInstr*,
+                                SimdOpInstr::Kind,
+                                Out,
+                                In0)) {
+  ASSERT(op->InputCount() == 1);
+  LocationSummary* locs = op->locs();
+  Emit(compiler, op, op->kind(), UnwrapLocation<Out>::Unwrap(locs->out(0)),
+       UnwrapLocation<In0>::template Unwrap<1, 0>(locs));
+}
 
 template <typename Out, typename In0, typename In1>
 void InvokeEmitter(FlowGraphCompiler* compiler,
@@ -5792,22 +5852,47 @@ void InvokeEmitter(FlowGraphCompiler* compiler,
   ASSERT(op->InputCount() == 2);
   LocationSummary* locs = op->locs();
   Emit(compiler, op, op->kind(), UnwrapLocation<Out>::Unwrap(locs->out(0)),
-       UnwrapLocation<In0>::Unwrap(locs->in(0)),
-       UnwrapLocation<In1>::Unwrap(locs->in(1)));
+       UnwrapLocation<In0>::template Unwrap<2, 0>(locs),
+       UnwrapLocation<In1>::template Unwrap<2, 0>(locs));
 }
 
-template <typename Out, typename In0>
+template <typename Out, typename In0, typename In1, typename In2>
 void InvokeEmitter(FlowGraphCompiler* compiler,
                    SimdOpInstr* op,
                    void (*Emit)(FlowGraphCompiler*,
                                 SimdOpInstr*,
                                 SimdOpInstr::Kind,
                                 Out,
-                                In0)) {
-  ASSERT(op->InputCount() == 1);
+                                In0,
+                                In1,
+                                In2)) {
+  ASSERT(op->InputCount() == 3);
+  LocationSummary* locs = op->locs();
+  Emit(compiler, op, op->kind(),
+       UnwrapLocation<Out>::Unwrap(locs->out(0)),
+       UnwrapLocation<In0>::template Unwrap<3, 0>(locs),
+       UnwrapLocation<In1>::template Unwrap<3, 1>(locs),
+       UnwrapLocation<In2>::template Unwrap<3, 2>(locs));
+}
+
+template <typename Out, typename In0, typename In1, typename In2, typename In3>
+void InvokeEmitter(FlowGraphCompiler* compiler,
+                   SimdOpInstr* op,
+                   void (*Emit)(FlowGraphCompiler*,
+                                SimdOpInstr*,
+                                SimdOpInstr::Kind,
+                                Out,
+                                In0,
+                                In1,
+                                In2,
+                                In3)) {
+  ASSERT(op->InputCount() == 4);
   LocationSummary* locs = op->locs();
   Emit(compiler, op, op->kind(), UnwrapLocation<Out>::Unwrap(locs->out(0)),
-       UnwrapLocation<In0>::Unwrap(locs->in(0)));
+       UnwrapLocation<In0>::template Unwrap<4, 0>(locs),
+       UnwrapLocation<In1>::template Unwrap<4, 1>(locs),
+       UnwrapLocation<In2>::template Unwrap<4, 2>(locs),
+       UnwrapLocation<In3>::template Unwrap<4, 3>(locs));
 }
 
 #define UNPACK(...) __VA_ARGS__
@@ -5910,8 +5995,71 @@ DEFINE_EMIT(Simd32x4ShuffleMix, (Fixed_<Q6> result, Fixed_<Q4> left, Fixed_<Q5> 
   __ vmovs(result.s(3), right.s((mask >> 6) & 0x3));
 }
 
-DEFINE_EMIT(Simd32x4GetSignMask, (Register out, Fixed_<Q5> value, Temp<Register> reg)) {
 
+DEFINE_EMIT(Simd32x4GetSignMask, (Register out, Fixed_<Q5> value, Temp<Register> temp)) {
+  // X lane.
+  __ vmovrs(out, value.s(0));
+  __ Lsr(out, out, Operand(31));
+  // Y lane.
+  __ vmovrs(temp, value.s(1));
+  __ Lsr(temp, temp, Operand(31));
+  __ orr(out, out, Operand(temp, LSL, 1));
+  // Z lane.
+  __ vmovrs(temp, value.s(2));
+  __ Lsr(temp, temp, Operand(31));
+  __ orr(out, out, Operand(temp, LSL, 2));
+  // W lane.
+  __ vmovrs(temp, value.s(3));
+  __ Lsr(temp, temp, Operand(31));
+  __ orr(out, out, Operand(temp, LSL, 3));
+}
+
+// Low (< 7) Q registers are needed for the vcvtsd instruction.
+DEFINE_EMIT(Float32x4Constructor, (Fixed_<Q6> out, QRegister_ q0, QRegister_ q1, QRegister_ q2, QRegister_ q3)) {
+  __ vcvtsd(out.s(0), q0.d(0));
+  __ vcvtsd(out.s(1), q1.d(0));
+  __ vcvtsd(out.s(2), q2.d(0));
+  __ vcvtsd(out.s(3), q3.d(0));
+}
+
+DEFINE_EMIT(Float32x4Zero, (QRegister out)) {
+  __ veorq(out, out, out);
+}
+
+DEFINE_EMIT(Float32x4Splat, (QRegister result, QRegister_ value)) {
+  // Convert to Float32.
+  __ vcvtsd(STMP, value.d(0));
+
+  // Splat across all lanes.
+  __ vdup(kWord, result, DTMP, 0);
+}
+
+DEFINE_EMIT(Float32x4Comparison, (QRegister result, QRegister left, QRegister right)) {
+  switch (kind) {
+    case SimdOpInstr::kFloat32x4Equal:
+      __ vceqqs(result, left, right);
+      break;
+    case SimdOpInstr::kFloat32x4NotEqual:
+      __ vceqqs(result, left, right);
+      // Invert the result.
+      __ vmvnq(result, result);
+      break;
+    case SimdOpInstr::kFloat32x4GreaterThan:
+      __ vcgtqs(result, left, right);
+      break;
+    case SimdOpInstr::kFloat32x4GreaterThanOrEqual:
+      __ vcgeqs(result, left, right);
+      break;
+    case SimdOpInstr::kFloat32x4LessThan:
+      __ vcgtqs(result, right, left);
+      break;
+    case SimdOpInstr::kFloat32x4LessThanOrEqual:
+      __ vcgeqs(result, right, left);
+      break;
+
+    default:
+      UNREACHABLE();
+  }
 }
 
 // FIXME
@@ -5980,6 +6128,16 @@ void SimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     case kInt32x4ShuffleMix:
       InvokeEmitter(compiler, this, &EmitSimd32x4ShuffleMix);
       break;
+
+    case kFloat32x4GetSignMask:
+    case kInt32x4GetSignMask:
+      InvokeEmitter(compiler, this, &EmitSimd32x4GetSignMask);
+      break;
+
+    case kFloat32x4Constructor:
+      InvokeEmitter(compiler, this, &EmitFloat32x4Constructor);
+      break;
+
 
     default:
       UNREACHABLE();
