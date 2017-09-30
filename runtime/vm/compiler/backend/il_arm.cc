@@ -6062,6 +6062,10 @@ DEFINE_EMIT(Float32x4Comparison, (QRegister result, QRegister left, QRegister ri
   }
 }
 
+DEFINE_EMIT(Float32x4MinMax, (QRegister result, QRegister left, QRegister right)) {
+
+}
+
 // FIXME
 static bool IsCpuRegisterRep(Representation r) {
   return (kUnboxedInt32 <= r && r <= kUnboxedInt64) || r == kTagged;
