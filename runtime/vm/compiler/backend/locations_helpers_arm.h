@@ -46,16 +46,15 @@ struct UnwrapLocation<QRegister_> {
     return QRegister_(loc.fpu_reg());
   }
 
-  template<intptr_t arity, intptr_t index>
+  template <intptr_t arity, intptr_t index>
   static QRegister_ Unwrap(LocationSummary* locs) {
     return Unwrap(locs->in(index));
   }
 
-  template<intptr_t arity, intptr_t index>
+  template <intptr_t arity, intptr_t index>
   static void SetConstraint(LocationSummary* locs) {
     locs->set_in(index, ToConstraint());
   }
-
 
   static Location ToConstraint() { return Location::RequiresFpuRegister(); }
 };
@@ -69,12 +68,12 @@ struct UnwrapLocation<Fixed_<reg> > {
     return Fixed_<reg>();
   }
 
-  template<intptr_t arity, intptr_t index>
+  template <intptr_t arity, intptr_t index>
   static Fixed_<reg> Unwrap(LocationSummary* locs) {
     return Unwrap(locs->in(index));
   }
 
-  template<intptr_t arity, intptr_t index>
+  template <intptr_t arity, intptr_t index>
   static void SetConstraint(LocationSummary* locs) {
     locs->set_in(index, ToConstraint());
   }

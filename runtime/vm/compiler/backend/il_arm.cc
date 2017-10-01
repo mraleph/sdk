@@ -5727,7 +5727,6 @@ class QRegister_ {
   QRegister reg_;
 };
 
-
 template <QRegister reg>
 struct Fixed_ {
   inline DRegister d(intptr_t i) const {
@@ -5749,16 +5748,15 @@ struct UnwrapLocation<QRegister_> {
     return QRegister_(loc.fpu_reg());
   }
 
-  template<intptr_t arity, intptr_t index>
+  template <intptr_t arity, intptr_t index>
   static QRegister_ Unwrap(LocationSummary* locs) {
     return Unwrap(locs->in(index));
   }
 
-  template<intptr_t arity, intptr_t index>
+  template <intptr_t arity, intptr_t index>
   static void SetConstraint(LocationSummary* locs) {
     locs->set_in(index, ToConstraint());
   }
-
 
   static Location ToConstraint() { return Location::RequiresFpuRegister(); }
 };
@@ -5772,12 +5770,12 @@ struct UnwrapLocation<Fixed_<reg> > {
     return Fixed_<reg>();
   }
 
-  template<intptr_t arity, intptr_t index>
+  template <intptr_t arity, intptr_t index>
   static Fixed_<reg> Unwrap(LocationSummary* locs) {
     return Unwrap(locs->in(index));
   }
 
-  template<intptr_t arity, intptr_t index>
+  template <intptr_t arity, intptr_t index>
   static void SetConstraint(LocationSummary* locs) {
     locs->set_in(index, ToConstraint());
   }
@@ -5922,7 +5920,8 @@ DEFINE_EMIT(Simd32x4Shuffle, (Fixed_<Q6> result, Fixed_<Q4> value)) {
 }
 
 // Low (< Q7) Q registers are needed for the vcvtds and vmovs instructions.
-DEFINE_EMIT(Simd32x4ShuffleMix, (Fixed_<Q6> result, Fixed_<Q4> left, Fixed_<Q5> right)) {
+DEFINE_EMIT(Simd32x4ShuffleMix,
+            (Fixed_<Q6> result, Fixed_<Q4> left, Fixed_<Q5> right)) {
   const intptr_t mask = op->mask();
   __ vmovs(result.s(0), left.s((mask >> 0) & 0x3));
   __ vmovs(result.s(1), left.s((mask >> 2) & 0x3));
@@ -5930,8 +5929,8 @@ DEFINE_EMIT(Simd32x4ShuffleMix, (Fixed_<Q6> result, Fixed_<Q4> left, Fixed_<Q5> 
   __ vmovs(result.s(3), right.s((mask >> 6) & 0x3));
 }
 
-
-DEFINE_EMIT(Simd32x4GetSignMask, (Register out, Fixed_<Q5> value, Temp<Register> temp)) {
+DEFINE_EMIT(Simd32x4GetSignMask,
+            (Register out, Fixed_<Q5> value, Temp<Register> temp)) {
   // X lane.
   __ vmovrs(out, value.s(0));
   __ Lsr(out, out, Operand(31));
@@ -5950,7 +5949,12 @@ DEFINE_EMIT(Simd32x4GetSignMask, (Register out, Fixed_<Q5> value, Temp<Register>
 }
 
 // Low (< 7) Q registers are needed for the vcvtsd instruction.
-DEFINE_EMIT(Float32x4Constructor, (Fixed_<Q6> out, QRegister_ q0, QRegister_ q1, QRegister_ q2, QRegister_ q3)) {
+DEFINE_EMIT(Float32x4Constructor,
+            (Fixed_<Q6> out,
+             QRegister_ q0,
+             QRegister_ q1,
+             QRegister_ q2,
+             QRegister_ q3)) {
   __ vcvtsd(out.s(0), q0.d(0));
   __ vcvtsd(out.s(1), q1.d(0));
   __ vcvtsd(out.s(2), q2.d(0));
@@ -5969,7 +5973,8 @@ DEFINE_EMIT(Float32x4Splat, (QRegister result, QRegister_ value)) {
   __ vdup(kWord, result, DTMP, 0);
 }
 
-DEFINE_EMIT(Float32x4Sqrt, (QRegister result, QRegister left, Temp<QRegister> temp)) {
+DEFINE_EMIT(Float32x4Sqrt,
+            (QRegister result, QRegister left, Temp<QRegister> temp)) {
   __ Vsqrtqs(result, left, temp);
 }
 
@@ -5996,13 +6001,16 @@ DEFINE_EMIT(Float32x4Unary, (QRegister result, QRegister left)) {
   }
 }
 
-DEFINE_EMIT(Float32x4Clamp, (QRegister result, QRegister left, QRegister lower, QRegister upper)) {
+DEFINE_EMIT(
+    Float32x4Clamp,
+    (QRegister result, QRegister left, QRegister lower, QRegister upper)) {
   __ vminqs(result, left, upper);
   __ vmaxqs(result, result, lower);
 }
 
 // Low (< 7) Q registers are needed for the vmovs instruction.
-DEFINE_EMIT(Float32x4With, (Fixed_<Q6> result, QRegister_ replacement, QRegister value)) {
+DEFINE_EMIT(Float32x4With,
+            (Fixed_<Q6> result, QRegister_ replacement, QRegister value)) {
   __ vcvtsd(STMP, replacement.d(0));
   __ vmovq(result, value);
   switch (kind) {
@@ -6046,7 +6054,8 @@ DEFINE_EMIT(Float64x2Splat, (QRegister_ result, QRegister_ value)) {
   __ vmovd(result.d(1), value.d(0));
 }
 
-DEFINE_EMIT(Float64x2Constructor, (QRegister_ r, QRegister_ q0, QRegister_ q1)) {
+DEFINE_EMIT(Float64x2Constructor,
+            (QRegister_ r, QRegister_ q0, QRegister_ q1)) {
   __ vmovd(r.d(0), q0.d(0));
   __ vmovd(r.d(1), q1.d(0));
 }
@@ -6098,7 +6107,8 @@ DEFINE_EMIT(Float64x2Unary, (QRegister_ result, QRegister_ value)) {
   }
 }
 
-DEFINE_EMIT(Float64x2Binary, (SameAsFirstInput, QRegister_ left, QRegister_ right)) {
+DEFINE_EMIT(Float64x2Binary,
+            (SameAsFirstInput, QRegister_ left, QRegister_ right)) {
   switch (kind) {
     case SimdOpInstr::kFloat64x2Scale:
       __ vmuld(left.d(0), left.d(0), right.d(0));
@@ -6137,13 +6147,21 @@ DEFINE_EMIT(Float64x2Binary, (SameAsFirstInput, QRegister_ left, QRegister_ righ
   }
 }
 
-DEFINE_EMIT(Int32x4Constructor, (QRegister_ result, Register v0, Register v1, Register v2, Register v3)) {
+DEFINE_EMIT(
+    Int32x4Constructor,
+    (QRegister_ result, Register v0, Register v1, Register v2, Register v3)) {
   __ veorq(result, result, result);
   __ vmovdrr(result.d(0), v0, v1);
   __ vmovdrr(result.d(1), v2, v3);
 }
 
-DEFINE_EMIT(Int32x4BoolConstructor, (QRegister_ result, Register v0, Register v1, Register v2, Register v3, Temp<Register> temp)) {
+DEFINE_EMIT(Int32x4BoolConstructor,
+            (QRegister_ result,
+             Register v0,
+             Register v1,
+             Register v2,
+             Register v3,
+             Temp<Register> temp)) {
   __ veorq(result, result, result);
   __ LoadImmediate(temp, 0xffffffff);
 
@@ -6185,7 +6203,12 @@ DEFINE_EMIT(Int32x4GetFlag, (Register result, Fixed_<Q6> value)) {
   __ LoadObject(result, Bool::False(), EQ);
 }
 
-DEFINE_EMIT(Int32x4Select, (QRegister out, QRegister mask, QRegister trueValue, QRegister falseValue, Temp<QRegister> temp)) {
+DEFINE_EMIT(Int32x4Select,
+            (QRegister out,
+             QRegister mask,
+             QRegister trueValue,
+             QRegister falseValue,
+             Temp<QRegister> temp)) {
   // Copy mask.
   __ vmovq(temp, mask);
   // Invert it.
@@ -6199,7 +6222,8 @@ DEFINE_EMIT(Int32x4Select, (QRegister out, QRegister mask, QRegister trueValue, 
 }
 
 // FIXME SameAsFirstInput?
-DEFINE_EMIT(Int32x4SetFlag, (QRegister_ result, QRegister mask, Register flag)) {
+DEFINE_EMIT(Int32x4SetFlag,
+            (QRegister_ result, QRegister mask, Register flag)) {
   __ vmovq(result, mask);
   __ CompareObject(flag, Bool::True());
   __ LoadImmediate(TMP, 0xffffffff, EQ);
@@ -6227,100 +6251,101 @@ DEFINE_EMIT(Int32x4ToFloat32x4, (QRegister result, QRegister value)) {
   __ vmovq(result, value);
 }
 
-#define EMITTERS(V, ____, SIMPLE) \
-  CASE(Float32x4Add) \
-  CASE(Float32x4Sub) \
-  CASE(Float32x4Mul) \
-  CASE(Float32x4Div) \
-  CASE(Float32x4Equal) \
-  CASE(Float32x4NotEqual) \
-  CASE(Float32x4GreaterThan) \
-  CASE(Float32x4GreaterThanOrEqual) \
-  CASE(Float32x4LessThan) \
-  CASE(Float32x4LessThanOrEqual) \
-  CASE(Float32x4Min) \
-  CASE(Float32x4Max) \
-  CASE(Float32x4Scale) \
-  CASE(Int32x4BitAnd) \
-  CASE(Int32x4BitOr) \
-  CASE(Int32x4BitXor) \
-  CASE(Int32x4Add) \
-  CASE(Int32x4Sub) \
-  ____(Simd32x4BinaryOp)\
-  CASE(Float64x2Add) \
-  CASE(Float64x2Sub) \
-  CASE(Float64x2Mul) \
-  CASE(Float64x2Div) \
-  ____(Float64x2BinaryOp) \
-  CASE(Float32x4ShuffleX) \
-  CASE(Float32x4ShuffleY) \
-  CASE(Float32x4ShuffleZ) \
-  CASE(Float32x4ShuffleW) \
-  CASE(Int32x4Shuffle) \
-  CASE(Float32x4Shuffle) \
-  ____(Simd32x4Shuffle) \
-  CASE(Float32x4ShuffleMix) \
-  CASE(Int32x4ShuffleMix) \
-  ____(Simd32x4ShuffleMix) \
-  CASE(Float32x4GetSignMask) \
-  CASE(Int32x4GetSignMask) \
-  ____(Simd32x4GetSignMask) \
-  SIMPLE(Float32x4Constructor) \
-  SIMPLE(Float32x4Zero) \
-  SIMPLE(Float32x4Splat) \
-  SIMPLE(Float32x4Sqrt) \
-  CASE(Float32x4Negate) \
-  CASE(Float32x4Absolute) \
-  CASE(Float32x4Reciprocal) \
-  CASE(Float32x4ReciprocalSqrt) \
-  CASE(Float32x4ToInt32x4) \
-  ____(Float32x4Unary) \
-  SIMPLE(Float32x4Clamp) \
-  CASE(Float32x4WithX) \
-  CASE(Float32x4WithY) \
-  CASE(Float32x4WithZ) \
-  CASE(Float32x4WithW) \
-  ____(Float32x4With) \
-  CASE(Float64x2GetX) \
-  CASE(Float64x2GetY) \
-  ____(Simd64x2Shuffle) \
-  SIMPLE(Float64x2Zero) \
-  SIMPLE(Float64x2Splat) \
-  SIMPLE(Float64x2Constructor) \
-  SIMPLE(Float64x2ToFloat32x4) \
-  SIMPLE(Float32x4ToFloat64x2) \
-  SIMPLE(Float64x2GetSignMask) \
-  CASE(Float64x2Negate) \
-  CASE(Float64x2Abs) \
-  CASE(Float64x2Sqrt) \
-  ____(Float64x2Unary) \
-  CASE(Float64x2Scale) \
-  CASE(Float64x2WithX) \
-  CASE(Float64x2WithY) \
-  CASE(Float64x2Min) \
-  CASE(Float64x2Max) \
-  ____(Float64x2Binary) \
-  SIMPLE(Int32x4Constructor) \
-  SIMPLE(Int32x4BoolConstructor) \
-  CASE(Int32x4GetFlagX) \
-  CASE(Int32x4GetFlagY) \
-  CASE(Int32x4GetFlagZ) \
-  CASE(Int32x4GetFlagW) \
-  ____(Int32x4GetFlag) \
-  SIMPLE(Int32x4Select) \
-  CASE(Int32x4WithFlagX) \
-  CASE(Int32x4WithFlagY) \
-  CASE(Int32x4WithFlagZ) \
-  CASE(Int32x4WithFlagW) \
-  ____(Int32x4SetFlag) \
-  SIMPLE(Int32x4ToFloat32x4) \
+#define EMITTERS(V, ____, SIMPLE)                                              \
+  CASE(Float32x4Add)                                                           \
+  CASE(Float32x4Sub)                                                           \
+  CASE(Float32x4Mul)                                                           \
+  CASE(Float32x4Div)                                                           \
+  CASE(Float32x4Equal)                                                         \
+  CASE(Float32x4NotEqual)                                                      \
+  CASE(Float32x4GreaterThan)                                                   \
+  CASE(Float32x4GreaterThanOrEqual)                                            \
+  CASE(Float32x4LessThan)                                                      \
+  CASE(Float32x4LessThanOrEqual)                                               \
+  CASE(Float32x4Min)                                                           \
+  CASE(Float32x4Max)                                                           \
+  CASE(Float32x4Scale)                                                         \
+  CASE(Int32x4BitAnd)                                                          \
+  CASE(Int32x4BitOr)                                                           \
+  CASE(Int32x4BitXor)                                                          \
+  CASE(Int32x4Add)                                                             \
+  CASE(Int32x4Sub)                                                             \
+  ____(Simd32x4BinaryOp)                                                       \
+  CASE(Float64x2Add)                                                           \
+  CASE(Float64x2Sub)                                                           \
+  CASE(Float64x2Mul)                                                           \
+  CASE(Float64x2Div)                                                           \
+  ____(Float64x2BinaryOp)                                                      \
+  CASE(Float32x4ShuffleX)                                                      \
+  CASE(Float32x4ShuffleY)                                                      \
+  CASE(Float32x4ShuffleZ)                                                      \
+  CASE(Float32x4ShuffleW)                                                      \
+  CASE(Int32x4Shuffle)                                                         \
+  CASE(Float32x4Shuffle)                                                       \
+  ____(Simd32x4Shuffle)                                                        \
+  CASE(Float32x4ShuffleMix)                                                    \
+  CASE(Int32x4ShuffleMix)                                                      \
+  ____(Simd32x4ShuffleMix)                                                     \
+  CASE(Float32x4GetSignMask)                                                   \
+  CASE(Int32x4GetSignMask)                                                     \
+  ____(Simd32x4GetSignMask)                                                    \
+  SIMPLE(Float32x4Constructor)                                                 \
+  SIMPLE(Float32x4Zero)                                                        \
+  SIMPLE(Float32x4Splat)                                                       \
+  SIMPLE(Float32x4Sqrt)                                                        \
+  CASE(Float32x4Negate)                                                        \
+  CASE(Float32x4Absolute)                                                      \
+  CASE(Float32x4Reciprocal)                                                    \
+  CASE(Float32x4ReciprocalSqrt)                                                \
+  CASE(Float32x4ToInt32x4)                                                     \
+  ____(Float32x4Unary)                                                         \
+  SIMPLE(Float32x4Clamp)                                                       \
+  CASE(Float32x4WithX)                                                         \
+  CASE(Float32x4WithY)                                                         \
+  CASE(Float32x4WithZ)                                                         \
+  CASE(Float32x4WithW)                                                         \
+  ____(Float32x4With)                                                          \
+  CASE(Float64x2GetX)                                                          \
+  CASE(Float64x2GetY)                                                          \
+  ____(Simd64x2Shuffle)                                                        \
+  SIMPLE(Float64x2Zero)                                                        \
+  SIMPLE(Float64x2Splat)                                                       \
+  SIMPLE(Float64x2Constructor)                                                 \
+  SIMPLE(Float64x2ToFloat32x4)                                                 \
+  SIMPLE(Float32x4ToFloat64x2)                                                 \
+  SIMPLE(Float64x2GetSignMask)                                                 \
+  CASE(Float64x2Negate)                                                        \
+  CASE(Float64x2Abs)                                                           \
+  CASE(Float64x2Sqrt)                                                          \
+  ____(Float64x2Unary)                                                         \
+  CASE(Float64x2Scale)                                                         \
+  CASE(Float64x2WithX)                                                         \
+  CASE(Float64x2WithY)                                                         \
+  CASE(Float64x2Min)                                                           \
+  CASE(Float64x2Max)                                                           \
+  ____(Float64x2Binary)                                                        \
+  SIMPLE(Int32x4Constructor)                                                   \
+  SIMPLE(Int32x4BoolConstructor)                                               \
+  CASE(Int32x4GetFlagX)                                                        \
+  CASE(Int32x4GetFlagY)                                                        \
+  CASE(Int32x4GetFlagZ)                                                        \
+  CASE(Int32x4GetFlagW)                                                        \
+  ____(Int32x4GetFlag)                                                         \
+  SIMPLE(Int32x4Select)                                                        \
+  CASE(Int32x4WithFlagX)                                                       \
+  CASE(Int32x4WithFlagY)                                                       \
+  CASE(Int32x4WithFlagZ)                                                       \
+  CASE(Int32x4WithFlagW)                                                       \
+  ____(Int32x4SetFlag)                                                         \
+  SIMPLE(Int32x4ToFloat32x4)
 
 LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone, bool opt) const {
   switch (kind()) {
 #define CASE(Name) case k##Name:
-#define EMIT(Name) return MakeLocationSummaryFromEmitter(zone, this, &Emit##Name);
+#define EMIT(Name)                                                             \
+  return MakeLocationSummaryFromEmitter(zone, this, &Emit##Name);
 #define SIMPLE(Name) CASE(Name) EMIT(Name)
-EMITTERS(CASE, EMIT, SIMPLE)
+    EMITTERS(CASE, EMIT, SIMPLE)
 #undef CASE
 #undef EMIT
 #undef SIMPLE
@@ -6330,9 +6355,11 @@ EMITTERS(CASE, EMIT, SIMPLE)
 void SimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   switch (kind()) {
 #define CASE(Name) case k##Name:
-#define EMIT(Name) InvokeEmitter(compiler, this, &Emit##Name); break;
+#define EMIT(Name)                                                             \
+  InvokeEmitter(compiler, this, &Emit##Name);                                  \
+  break;
 #define SIMPLE(Name) CASE(Name) EMIT(Name)
-EMITTERS(CASE, EMIT, SIMPLE)
+    EMITTERS(CASE, EMIT, SIMPLE)
 #undef CASE
 #undef EMIT
 #undef SIMPLE

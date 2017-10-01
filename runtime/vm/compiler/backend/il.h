@@ -5422,7 +5422,10 @@ class SimdOpInstr : public Definition {
 
   PRINT_OPERANDS_TO_SUPPORT
 
-  intptr_t mask() const { ASSERT(HasMask()); return mask_; }
+  intptr_t mask() const {
+    ASSERT(HasMask());
+    return mask_;
+  }
 
  private:
   SimdOpInstr(Kind kind, intptr_t deopt_id)
