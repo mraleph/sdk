@@ -10,6 +10,7 @@
 #include "vm/compiler/backend/flow_graph.h"
 #include "vm/compiler/backend/flow_graph_compiler.h"
 #include "vm/compiler/backend/locations.h"
+#include "vm/compiler/backend/locations_helpers.h"
 #include "vm/compiler/backend/range_analysis.h"
 #include "vm/compiler/jit/compiler.h"
 #include "vm/dart_entry.h"
@@ -3778,376 +3779,6 @@ Condition DoubleTestOpInstr::EmitComparisonCode(FlowGraphCompiler* compiler,
   }
 }
 
-// FIXME
-static bool IsCpuRegisterRep(Representation r) {
-  return (kUnboxedInt32 <= r && r <= kUnboxedInt64) || r == kTagged;
-}
-
-LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone, bool opt) const {
-  Location temp;
-  Location out;
-
-  switch (kind()) {
-    case kInt32x4GetFlagX:
-    case kInt32x4GetFlagY:
-    case kInt32x4GetFlagZ:
-    case kInt32x4GetFlagW:
-      temp = Location::RequiresFpuRegister();
-      out = Location::RegisterLocation(RDX);
-      break;
-
-    case kInt32x4WithFlagX:
-    case kInt32x4WithFlagY:
-    case kInt32x4WithFlagZ:
-    case kInt32x4WithFlagW:
-    case kInt32x4BoolConstructor:
-      temp = Location::RegisterLocation(RDX);
-      break;
-
-    case kInt32x4Select:
-      temp = Location::RequiresFpuRegister();
-      break;
-
-    default:
-      break;
-  }
-
-  LocationSummary* summary = new (zone) LocationSummary(
-      zone, InputCount(), temp.IsInvalid() ? 0 : 1, LocationSummary::kNoCall);
-  for (intptr_t i = 0; i < InputCount(); i++) {
-    summary->set_in(i, IsCpuRegisterRep(RequiredInputRepresentation(i))
-                           ? Location::RequiresRegister()
-                           : Location::RequiresFpuRegister());
-  }
-  if (!temp.IsInvalid()) {
-    summary->set_temp(0, temp);
-  }
-
-  if (out.IsInvalid()) {
-    if (IsCpuRegisterRep(representation())) {
-      out = Location::RequiresRegister();
-    } else if (InputCount() == 0 ||
-               (IsCpuRegisterRep(RequiredInputRepresentation(0)) !=
-                IsCpuRegisterRep(representation()))) {
-      out = Location::RequiresFpuRegister();
-    } else {
-      out = Location::SameAsFirstInput();
-    }
-  }
-  summary->set_out(0, out);
-
-  return summary;
-}
-
-#define SIMD_BINARY_FLOAT_OP_BACKEND(V, Type, suffix)                          \
-  V(Type##Add, add##suffix)                                                    \
-  V(Type##Sub, sub##suffix)                                                    \
-  V(Type##Mul, mul##suffix)                                                    \
-  V(Type##Div, div##suffix)
-
-#define SIMD_OP_BACKEND(Unary, Binary)                                         \
-  SIMD_BINARY_FLOAT_OP_BACKEND(Binary, Float32x4, ps)                          \
-  SIMD_BINARY_FLOAT_OP_BACKEND(Binary, Float64x2, pd)                          \
-  Binary(Int32x4Add, addpl) Binary(Int32x4Sub, subpl) Binary(                  \
-      Int32x4BitAnd, andps) Binary(Int32x4BitOr, orps)                         \
-      Binary(Int32x4BitXor, xorps) Binary(Float32x4Equal, cmppseq) Binary(     \
-          Float32x4NotEqual, cmppsneq) Binary(Float32x4GreaterThan, cmppsnle)  \
-          Binary(Float32x4GreaterThanOrEqual, cmppsnlt)                        \
-              Binary(Float32x4LessThan, cmppslt)                               \
-                  Binary(Float32x4LessThanOrEqual, cmppsle)                    \
-                      Binary(Float32x4Min, minps) Binary(Float32x4Max, maxps)  \
-                          Unary(Float32x4Sqrt, sqrtps)                         \
-                              Unary(Float32x4Reciprocal, reciprocalps) Unary(  \
-                                  Float32x4ReciprocalSqrt, rsqrtps)            \
-                                  Unary(Float32x4Negate, negateps)             \
-                                      Unary(Float32x4Absolute, absps) Unary(   \
-                                          Float64x2Negate, negatepd)           \
-                                          Unary(Float64x2Abs, abspd) Unary(    \
-                                              Float64x2Sqrt, sqrtpd)           \
-                                              Binary(Float64x2Min, minpd)      \
-                                                  Binary(Float64x2Max, maxpd)
-
-void SimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  XmmRegister left = InputCount() > 0 && locs()->in(0).IsFpuRegister()
-                         ? locs()->in(0).fpu_reg()
-                         : kNoFpuRegister;
-  XmmRegister right = InputCount() > 1 && locs()->in(1).IsFpuRegister()
-                          ? locs()->in(1).fpu_reg()
-                          : kNoFpuRegister;
-
-  switch (kind()) {
-#define CASE_UNARY(Name, op)                                                   \
-  case k##Name:                                                                \
-    __ op(left);                                                               \
-    break;
-#define CASE_BINARY(Name, op)                                                  \
-  case k##Name:                                                                \
-    __ op(left, right);                                                        \
-    break;
-    SIMD_OP_BACKEND(CASE_UNARY, CASE_BINARY)
-#undef CASE
-    case kFloat32x4ShuffleX:
-      // Shuffle not necessary.
-      __ cvtss2sd(left, left);
-      break;
-    case kFloat32x4ShuffleY:
-      __ shufps(left, left, Immediate(0x55));
-      __ cvtss2sd(left, left);
-      break;
-    case kFloat32x4ShuffleZ:
-      __ shufps(left, left, Immediate(0xAA));
-      __ cvtss2sd(left, left);
-      break;
-    case kFloat32x4ShuffleW:
-      __ shufps(left, left, Immediate(0xFF));
-      __ cvtss2sd(left, left);
-      break;
-    case kFloat32x4Shuffle:
-    case kInt32x4Shuffle:
-      __ shufps(left, left, Immediate(mask()));
-      break;
-    case kFloat32x4ShuffleMix:
-    case kInt32x4ShuffleMix:
-      __ shufps(left, right, Immediate(mask()));
-      break;
-    case kFloat32x4Splat:  // Convert to Float32.
-      __ cvtsd2ss(left, left);
-      // Splat across all lanes.
-      __ shufps(left, left, Immediate(0x00));
-      break;
-    case kFloat32x4GetSignMask:
-    case kInt32x4GetSignMask:
-      __ movmskps(locs()->out(0).reg(), left);
-      break;
-    case kFloat32x4Scale:
-      __ cvtsd2ss(left, left);
-      __ shufps(left, left, Immediate(0x00));
-      __ mulps(left, right);
-      break;
-    case kFloat32x4Constructor: {
-      // TODO FIXME
-      XmmRegister v0 = locs()->in(0).fpu_reg();
-      XmmRegister v1 = locs()->in(1).fpu_reg();
-      XmmRegister v2 = locs()->in(2).fpu_reg();
-      XmmRegister v3 = locs()->in(3).fpu_reg();
-      ASSERT(v0 == locs()->out(0).fpu_reg());
-      __ AddImmediate(RSP, Immediate(-16));
-      __ cvtsd2ss(v0, v0);
-      __ movss(Address(RSP, 0), v0);
-      __ movsd(v0, v1);
-      __ cvtsd2ss(v0, v0);
-      __ movss(Address(RSP, 4), v0);
-      __ movsd(v0, v2);
-      __ cvtsd2ss(v0, v0);
-      __ movss(Address(RSP, 8), v0);
-      __ movsd(v0, v3);
-      __ cvtsd2ss(v0, v0);
-      __ movss(Address(RSP, 12), v0);
-      __ movups(v0, Address(RSP, 0));
-      __ AddImmediate(RSP, Immediate(16));
-      break;
-    }
-    case kFloat64x2Constructor: {
-      // shufpd mask 0x0 results in:
-      // Lower 64-bits of v0 = Lower 64-bits of v0.
-      // Upper 64-bits of v0 = Lower 64-bits of v1.
-      __ shufpd(left, right, Immediate(0x0));
-      break;
-    }
-
-    case kInt32x4Constructor: {
-      // TODO(FIXME)
-      XmmRegister result = locs()->out(0).fpu_reg();
-      __ AddImmediate(RSP, Immediate(-4 * kInt32Size));
-      for (intptr_t i = 0; i < 4; i++) {
-        __ movl(Address(RSP, i * kInt32Size), locs()->in(i).reg());
-      }
-      __ movups(result, Address(RSP, 0));
-      __ AddImmediate(RSP, Immediate(4 * kInt32Size));
-      break;
-    }
-
-    case kInt32x4BoolConstructor: {
-      ASSERT(locs()->temp(0).reg() == RDX);  // We need a byte register.
-      XmmRegister result = locs()->out(0).fpu_reg();
-
-      // TODO FIXME instead of 4 memory moves you can do 2 memory moves
-      // There are also instruction sequences that don't involve memory
-      // moves at all.
-      __ SubImmediate(RSP, Immediate(16));
-      for (intptr_t i = 0; i < 4; i++) {
-        Label done, load_false;
-        __ xorq(RDX, RDX);
-        __ CompareObject(locs()->in(i).reg(), Bool::True());
-        __ setcc(EQUAL, DL);
-        __ negl(RDX);
-        __ movl(Address(RSP, i * kInt32Size), RDX);
-      }
-      __ movups(result, Address(RSP, 0));
-      __ AddImmediate(RSP, Immediate(16));
-      break;
-    }
-
-    case kFloat32x4Zero: {
-      XmmRegister value = locs()->out(0).fpu_reg();
-      __ xorps(value, value);
-      break;
-    }
-
-    case kFloat32x4Clamp: {
-      XmmRegister lower = locs()->in(1).fpu_reg();
-      XmmRegister upper = locs()->in(2).fpu_reg();
-      __ minps(left, upper);
-      __ maxps(left, lower);
-      break;
-    }
-
-    case kInt32x4GetFlagX:
-    case kInt32x4GetFlagY:
-    case kInt32x4GetFlagZ:
-    case kInt32x4GetFlagW: {
-      ASSERT_BOOL_FALSE_FOLLOWS_BOOL_TRUE();
-      ASSERT(locs()->out(0).reg() == RDX);
-      FpuRegister value = left;
-      if (kind() == kInt32x4GetFlagZ || kind() == kInt32x4GetFlagW) {
-        value = locs()->temp(0).fpu_reg();
-        __ movhlps(value, left);  // extract upper half
-      }
-      if (kind() == kInt32x4GetFlagY || kind() == kInt32x4GetFlagW) {
-        __ movq(RDX, value);
-        __ shrq(RDX, Immediate(32));  // extract upper 32bits.
-      } else {
-        __ movd(RDX, value);
-      }
-      __ testl(RDX, RDX);
-      __ setcc(ZERO, DL);
-      __ movzxb(RDX, RDX);
-      __ movq(RDX, Address(THR, RDX, TIMES_8, Thread::bool_true_offset()));
-      break;
-    }
-
-    // FIXME INSERTPS on SSE4.1
-    case kFloat32x4WithX:
-    case kFloat32x4WithY:
-    case kFloat32x4WithZ:
-    case kFloat32x4WithW: {
-      COMPILE_ASSERT(kFloat32x4WithY == (kFloat32x4WithX + 1) &&
-                     kFloat32x4WithZ == (kFloat32x4WithX + 2) &&
-                     kFloat32x4WithW == (kFloat32x4WithX + 3));
-      __ cvtsd2ss(left, left);
-      __ AddImmediate(RSP, Immediate(-16));
-      __ movups(Address(RSP, 0), right);
-      __ movss(Address(RSP, 4 * (kind() - kFloat32x4WithX)), left);
-      __ movups(left, Address(RSP, 0));
-      __ AddImmediate(RSP, Immediate(16));
-      break;
-    }
-
-    // FIXME No memory version
-    case kInt32x4WithFlagX:
-    case kInt32x4WithFlagY:
-    case kInt32x4WithFlagZ:
-    case kInt32x4WithFlagW: {
-      COMPILE_ASSERT(kInt32x4WithFlagY == (kInt32x4WithFlagX + 1) &&
-                     kInt32x4WithFlagZ == (kInt32x4WithFlagX + 2) &&
-                     kInt32x4WithFlagW == (kInt32x4WithFlagX + 3));
-      XmmRegister mask = locs()->in(0).fpu_reg();
-      Register flag = locs()->in(1).reg();
-      ASSERT(locs()->temp(0).reg() == RDX);
-      ASSERT(mask == locs()->out(0).fpu_reg());
-
-      // Load
-      __ AddImmediate(RSP, Immediate(-16));
-      __ movups(Address(RSP, 0), mask);
-
-      // RDX = flag == true ? -1 : 0
-      __ xorq(RDX, RDX);
-      __ CompareObject(flag, Bool::True());
-      __ setcc(EQUAL, DL);
-      __ negl(RDX);
-
-      __ movl(Address(RSP, (kind() - kInt32x4WithFlagX) * kInt32Size), RDX);
-      __ movups(mask, Address(RSP, 0));
-      __ AddImmediate(RSP, Immediate(16));
-      break;
-    }
-
-    case kInt32x4ToFloat32x4:
-    case kFloat32x4ToInt32x4: {
-      // NOP
-      break;
-    }
-
-    case kFloat32x4ToFloat64x2:
-      __ cvtps2pd(left, left);
-      break;
-    case kFloat64x2ToFloat32x4:
-      __ cvtpd2ps(left, left);
-      break;
-
-    case kFloat64x2GetX: {
-      // NOP
-      break;
-    }
-    case kFloat64x2GetY:
-      // FIXME. Register constraints are chosen badly.
-      __ shufpd(left, left, Immediate(0x33));
-      break;
-
-    case kFloat64x2Splat:
-      // FIXME. Register constraints are chosen badly.
-      __ shufpd(left, left, Immediate(0x0));
-      break;
-
-    case kFloat64x2Zero: {
-      XmmRegister value = locs()->out(0).fpu_reg();
-      __ xorpd(value, value);
-      break;
-    }
-    case kFloat64x2GetSignMask:
-      __ movmskpd(locs()->out(0).reg(), left);
-      break;
-
-    case kFloat64x2Scale:
-      __ shufpd(right, right, Immediate(0x00));
-      __ mulpd(left, right);
-      break;
-
-    case kFloat64x2WithX:
-    case kFloat64x2WithY: {
-      COMPILE_ASSERT(kFloat64x2WithY == (kFloat64x2WithX + 1));
-      // FIXME there must be non memory form of this
-      __ subq(RSP, Immediate(16));
-      __ movups(Address(RSP, 0), left);
-      __ movsd(Address(RSP, (kind() - kFloat64x2WithX) * kDoubleSize), right);
-      __ movups(left, Address(RSP, 0));
-      __ addq(RSP, Immediate(16));
-      break;
-    }
-
-    case kInt32x4Select: {
-      XmmRegister mask = locs()->in(0).fpu_reg();
-      XmmRegister trueValue = locs()->in(1).fpu_reg();
-      XmmRegister falseValue = locs()->in(2).fpu_reg();
-      XmmRegister out = locs()->out(0).fpu_reg();
-      XmmRegister temp = locs()->temp(0).fpu_reg();
-      ASSERT(out == mask);
-
-      // Copy mask.
-      __ movaps(temp, mask);
-      // Invert it.
-      __ notps(temp);
-      // mask = mask & trueValue.
-      __ andps(mask, trueValue);
-      // temp = temp & falseValue.
-      __ andps(temp, falseValue);
-      // out = mask | temp.
-      __ orps(mask, temp);
-      break;
-    }
-  }
-}
-
 LocationSummary* MathUnaryInstr::MakeLocationSummary(Zone* zone,
                                                      bool opt) const {
   ASSERT((kind() == MathUnaryInstr::kSqrt) ||
@@ -5689,6 +5320,381 @@ void DebugStepCheckInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   __ CallPatchable(*StubCode::DebugStepCheck_entry());
   compiler->AddCurrentDescriptor(stub_kind_, deopt_id_, token_pos());
   compiler->RecordSafepoint(locs());
+}
+
+// SIMD
+
+#define DEFINE_EMIT(Name, Args)                                                \
+  void Emit##Name(FlowGraphCompiler* compiler, SimdOpInstr* op,                \
+                  SimdOpInstr::Kind kind, UNPACK Args)
+
+#define SIMD_BINARY_FLOAT_OP_BACKEND(V, Type, suffix)                          \
+  V(Type##Add, add##suffix)                                                    \
+  V(Type##Sub, sub##suffix)                                                    \
+  V(Type##Mul, mul##suffix)                                                    \
+  V(Type##Div, div##suffix)
+
+// clang-format off
+#define SIMD_OP_SIMPLE_BINARY(V)                                          \
+  SIMD_BINARY_FLOAT_OP_BACKEND(V, Float32x4, ps)                          \
+  SIMD_BINARY_FLOAT_OP_BACKEND(V, Float64x2, pd)                          \
+  V(Int32x4Add, addpl)                                                    \
+  V(Int32x4Sub, subpl)                                                    \
+  V(Int32x4BitAnd, andps)                                                 \
+  V(Int32x4BitOr, orps)                                                   \
+  V(Int32x4BitXor, xorps)                                                 \
+  V(Float32x4Equal, cmppseq)                                              \
+  V(Float32x4NotEqual, cmppsneq)                                          \
+  V(Float32x4GreaterThan, cmppsnle)                                       \
+  V(Float32x4GreaterThanOrEqual, cmppsnlt)                                \
+  V(Float32x4LessThan, cmppslt)                                           \
+  V(Float32x4LessThanOrEqual, cmppsle)                                    \
+  V(Float32x4Min, minps)                                                  \
+  V(Float32x4Max, maxps)                                                  \
+  V(Float64x2Min, minpd)                                                  \
+  V(Float64x2Max, maxpd)                                                  \
+
+#define SIMD_OP_SIMPLE_UNARY(V) \
+  V(Float32x4Sqrt, sqrtps)                                                 \
+  V(Float32x4Reciprocal, reciprocalps)                                     \
+  V(Float32x4ReciprocalSqrt, rsqrtps)                                      \
+  V(Float32x4Negate, negateps)                                             \
+  V(Float32x4Absolute, absps)                                              \
+  V(Float64x2Negate, negatepd)                                             \
+  V(Float64x2Abs, abspd)                                                   \
+  V(Float64x2Sqrt, sqrtpd)                                                 \
+// clang-format on
+
+DEFINE_EMIT(SimdBinaryOp, (SameAsFirstInput, XmmRegister left, XmmRegister right)) {
+  switch (op->kind()) {
+#define EMIT(Name, op)                                                  \
+    case SimdOpInstr::k##Name:                                                              \
+    __ op(left, right);                                                        \
+    break;
+    SIMD_OP_SIMPLE_BINARY(EMIT)
+#undef EMIT
+    case SimdOpInstr::kFloat32x4Scale:
+      __ cvtsd2ss(left, left);
+      __ shufps(left, left, Immediate(0x00));
+      __ mulps(left, right);
+      break;
+    case SimdOpInstr::kFloat32x4ShuffleMix:
+    case SimdOpInstr::kInt32x4ShuffleMix:
+      __ shufps(left, right, Immediate(op->mask()));
+      break;
+    case SimdOpInstr::kFloat64x2Constructor:
+      // shufpd mask 0x0 results in:
+      // Lower 64-bits of v0 = Lower 64-bits of v0.
+      // Upper 64-bits of v0 = Lower 64-bits of v1.
+      __ shufpd(left, right, Immediate(0x0));
+      break;
+    case SimdOpInstr::kFloat64x2Scale:
+      __ shufpd(right, right, Immediate(0x00));
+      __ mulpd(left, right);
+      break;
+    case SimdOpInstr::kFloat64x2WithX:
+    case SimdOpInstr::kFloat64x2WithY: {
+      COMPILE_ASSERT(SimdOpInstr::kFloat64x2WithY == (SimdOpInstr::kFloat64x2WithX + 1));
+      // FIXME there must be non memory form of this
+      __ subq(RSP, Immediate(16));
+      __ movups(Address(RSP, 0), left);
+      __ movsd(Address(RSP, (op->kind() - SimdOpInstr::kFloat64x2WithX) * kDoubleSize), right);
+      __ movups(left, Address(RSP, 0));
+      __ addq(RSP, Immediate(16));
+      break;
+    }
+    // FIXME INSERTPS on SSE4.1
+    case SimdOpInstr::kFloat32x4WithX:
+    case SimdOpInstr::kFloat32x4WithY:
+    case SimdOpInstr::kFloat32x4WithZ:
+    case SimdOpInstr::kFloat32x4WithW: {
+      COMPILE_ASSERT(SimdOpInstr::kFloat32x4WithY == (SimdOpInstr::kFloat32x4WithX + 1) &&
+                      SimdOpInstr::kFloat32x4WithZ == (SimdOpInstr::kFloat32x4WithX + 2) &&
+                      SimdOpInstr::kFloat32x4WithW == (SimdOpInstr::kFloat32x4WithX + 3));
+      __ cvtsd2ss(left, left);
+      __ AddImmediate(RSP, Immediate(-16));
+      __ movups(Address(RSP, 0), right);
+      __ movss(Address(RSP, 4 * (op->kind() - SimdOpInstr::kFloat32x4WithX)), left);
+      __ movups(left, Address(RSP, 0));
+      __ AddImmediate(RSP, Immediate(16));
+      break;
+    }
+
+    default:
+      UNREACHABLE();
+  }
+}
+
+DEFINE_EMIT(SimdUnaryOp, (SameAsFirstInput, XmmRegister value)) {
+  switch (op->kind()) {
+#define EMIT(Name, op)                                                  \
+    case SimdOpInstr::k##Name:                                                              \
+      __ op(value);                                                        \
+      break;
+    SIMD_OP_SIMPLE_UNARY(EMIT)
+#undef EMIT
+    case SimdOpInstr::kFloat32x4ShuffleX:
+      // Shuffle not necessary.
+      __ cvtss2sd(value, value);
+      break;
+    case SimdOpInstr::kFloat32x4ShuffleY:
+      __ shufps(value, value, Immediate(0x55));
+      __ cvtss2sd(value, value);
+      break;
+    case SimdOpInstr::kFloat32x4ShuffleZ:
+      __ shufps(value, value, Immediate(0xAA));
+      __ cvtss2sd(value, value);
+      break;
+    case SimdOpInstr::kFloat32x4ShuffleW:
+      __ shufps(value, value, Immediate(0xFF));
+      __ cvtss2sd(value, value);
+      break;
+    case SimdOpInstr::kFloat32x4Shuffle:
+    case SimdOpInstr::kInt32x4Shuffle:
+      __ shufps(value, value, Immediate(op->mask()));
+      break;
+    case SimdOpInstr::kFloat32x4Splat:
+      // Convert to Float32.
+      __ cvtsd2ss(value, value);
+      // Splat across all lanes.
+      __ shufps(value, value, Immediate(0x00));
+      break;
+    case SimdOpInstr::kFloat32x4ToFloat64x2:
+      __ cvtps2pd(value, value);
+      break;
+    case SimdOpInstr::kFloat64x2ToFloat32x4:
+      __ cvtpd2ps(value, value);
+      break;
+    case SimdOpInstr::kInt32x4ToFloat32x4:
+    case SimdOpInstr::kFloat32x4ToInt32x4:
+      // NOP
+      break;
+    case SimdOpInstr::kFloat64x2GetX:
+      // NOP
+      break;
+    case SimdOpInstr::kFloat64x2GetY:
+      // FIXME. Register constraints are chosen badly.
+      __ shufpd(value, value, Immediate(0x33));
+      break;
+    case SimdOpInstr::kFloat64x2Splat:
+      // FIXME. Register constraints are chosen badly.
+      __ shufpd(value, value, Immediate(0x0));
+      break;
+    default:
+      UNREACHABLE();
+      break;
+  }
+}
+
+DEFINE_EMIT(SimdGetSignMask, (Register out, XmmRegister value)) {
+  switch (kind) {
+    case SimdOpInstr::kFloat32x4GetSignMask:
+    case SimdOpInstr::kInt32x4GetSignMask:
+      __ movmskps(out, value);
+      break;
+    case SimdOpInstr::kFloat64x2GetSignMask:
+      __ movmskpd(out, value);
+      break;
+    default:
+      UNREACHABLE();
+      break;
+  }
+}
+
+// TODO FIXME
+DEFINE_EMIT(Float32x4Constructor, (SameAsFirstInput, XmmRegister v0, XmmRegister, XmmRegister, XmmRegister)) {
+  const XmmRegister out = v0;
+  __ AddImmediate(RSP, Immediate(-4 * kFloatSize));
+  for (intptr_t i = 0; i < 4; i++) {
+    XmmRegister in = op->locs()->in(i).fpu_reg();
+    if (out != in) {
+      __ movsd(out, in);
+    }
+    __ cvtsd2ss(out, out);
+    __ movss(Address(RSP, kFloatSize * i), out);
+  }
+  __ movups(out, Address(RSP, 0));
+  __ AddImmediate(RSP, Immediate(4 * kFloatSize));
+}
+
+// TODO FIXME
+DEFINE_EMIT(Int32x4Constructor, (XmmRegister result, Register, Register, Register, Register)) {
+  __ AddImmediate(RSP, Immediate(-4 * kInt32Size));
+  for (intptr_t i = 0; i < 4; i++) {
+    __ movl(Address(RSP, i * kInt32Size), op->locs()->in(i).reg());
+  }
+  __ movups(result, Address(RSP, 0));
+  __ AddImmediate(RSP, Immediate(4 * kInt32Size));
+}
+
+DEFINE_EMIT(Float32x4Zero, (XmmRegister value)) {
+  __ xorps(value, value);
+}
+
+DEFINE_EMIT(Float64x2Zero, (XmmRegister value)) {
+  __ xorpd(value, value);
+}
+
+DEFINE_EMIT(Float32x4Clamp, (SameAsFirstInput, XmmRegister value, XmmRegister lower, XmmRegister upper)) {
+  __ minps(value, upper);
+  __ maxps(value, lower);
+}
+
+DEFINE_EMIT(Int32x4BoolConstructor, (XmmRegister result, Register, Register, Register, Register, Temp<Fixed<Register, RDX> >)) {
+  // TODO FIXME instead of 4 memory moves you can do 2 memory moves
+  // There are also instruction sequences that don't involve memory
+  // moves at all.
+  __ AddImmediate(RSP, Immediate(-4 * kInt32Size));
+  for (intptr_t i = 0; i < 4; i++) {
+    Label done, load_false;
+    __ xorq(RDX, RDX);
+    __ CompareObject(op->locs()->in(i).reg(), Bool::True());
+    __ setcc(EQUAL, DL);
+    __ negl(RDX);
+    __ movl(Address(RSP, i * kInt32Size), RDX);
+  }
+  __ movups(result, Address(RSP, 0));
+  __ AddImmediate(RSP, Immediate(4 * kInt32Size));
+}
+
+static void EmitRDXToBoolean(FlowGraphCompiler* compiler) {
+  ASSERT_BOOL_FALSE_FOLLOWS_BOOL_TRUE();
+  __ testl(RDX, RDX);
+  __ setcc(ZERO, DL);
+  __ movzxb(RDX, RDX);
+  __ movq(RDX, Address(THR, RDX, TIMES_8, Thread::bool_true_offset()));
+}
+
+// Need byte register for setcc.
+DEFINE_EMIT(Int32x4GetFlagZorW, (Fixed<Register, RDX> out, XmmRegister value, Temp<XmmRegister> temp)) {
+  __ movhlps(temp, value);  // extract upper half
+  __ movq(RDX, temp);
+  if (kind == SimdOpInstr::kInt32x4GetFlagW) {
+    __ shrq(RDX, Immediate(32));  // extract upper 32bits.
+  }
+  EmitRDXToBoolean(compiler);
+}
+
+// Need byte register for setcc.
+DEFINE_EMIT(Int32x4GetFlagXorY, (Fixed<Register, RDX> out, XmmRegister value)) {
+  __ movq(RDX, value);
+  if (kind == SimdOpInstr::kInt32x4GetFlagY) {
+    __ shrq(RDX, Immediate(32));  // extract upper 32bits.
+  }
+  EmitRDXToBoolean(compiler);
+}
+
+// Need byte register for setcc.
+DEFINE_EMIT(Int32x4WithFlag, (SameAsFirstInput, XmmRegister mask, Register flag, Temp<Fixed<Register, RDX> >)) {
+  // FIXME No memory version
+  COMPILE_ASSERT(SimdOpInstr::kInt32x4WithFlagY == (SimdOpInstr::kInt32x4WithFlagX + 1) &&
+                 SimdOpInstr::kInt32x4WithFlagZ == (SimdOpInstr::kInt32x4WithFlagX + 2) &&
+                 SimdOpInstr::kInt32x4WithFlagW == (SimdOpInstr::kInt32x4WithFlagX + 3));
+  __ AddImmediate(RSP, Immediate(-16));
+  __ movups(Address(RSP, 0), mask);
+
+  // RDX = flag == true ? -1 : 0
+  __ xorq(RDX, RDX);
+  __ CompareObject(flag, Bool::True());
+  __ setcc(EQUAL, DL);
+  __ negl(RDX);
+
+  __ movl(Address(RSP, (op->kind() - SimdOpInstr::kInt32x4WithFlagX) * kInt32Size), RDX);
+  __ movups(mask, Address(RSP, 0));
+  __ AddImmediate(RSP, Immediate(16));
+}
+
+DEFINE_EMIT(Int32x4Select, (SameAsFirstInput, XmmRegister mask, XmmRegister trueValue, XmmRegister falseValue, Temp<XmmRegister> temp)) {
+  // Copy mask.
+  __ movaps(temp, mask);
+  // Invert it.
+  __ notps(temp);
+  // mask = mask & trueValue.
+  __ andps(mask, trueValue);
+  // temp = temp & falseValue.
+  __ andps(temp, falseValue);
+  // out = mask | temp.
+  __ orps(mask, temp);
+}
+
+#define SIMD_OP_VARIANTS(CASE, ____, SIMPLE) \
+  SIMD_OP_SIMPLE_BINARY(CASE) \
+  CASE(Float32x4Scale) \
+  CASE(Float32x4ShuffleMix) \
+  CASE(Int32x4ShuffleMix) \
+  CASE(Float64x2Constructor) \
+  CASE(Float64x2Scale) \
+  CASE(Float64x2WithX) \
+  CASE(Float64x2WithY) \
+  CASE(Float32x4WithX) \
+  CASE(Float32x4WithY) \
+  CASE(Float32x4WithZ) \
+  CASE(Float32x4WithW) \
+  ____(SimdBinaryOp) \
+  SIMD_OP_SIMPLE_UNARY(CASE) \
+  CASE(Float32x4ShuffleX) \
+  CASE(Float32x4ShuffleY) \
+  CASE(Float32x4ShuffleZ) \
+  CASE(Float32x4ShuffleW) \
+  CASE(Float32x4Shuffle) \
+  CASE(Int32x4Shuffle) \
+  CASE(Float32x4Splat) \
+  CASE(Float32x4ToFloat64x2) \
+  CASE(Float64x2ToFloat32x4) \
+  CASE(Int32x4ToFloat32x4) \
+  CASE(Float32x4ToInt32x4) \
+  CASE(Float64x2GetX) \
+  CASE(Float64x2GetY) \
+  CASE(Float64x2Splat) \
+  ____(SimdUnaryOp) \
+  CASE(Float32x4GetSignMask) \
+  CASE(Int32x4GetSignMask) \
+  CASE(Float64x2GetSignMask) \
+  ____(SimdGetSignMask) \
+  SIMPLE(Float32x4Constructor) \
+  SIMPLE(Int32x4Constructor) \
+  SIMPLE(Int32x4BoolConstructor) \
+  SIMPLE(Float32x4Zero) \
+  SIMPLE(Float64x2Zero) \
+  SIMPLE(Float32x4Clamp) \
+  CASE(Int32x4GetFlagX) \
+  CASE(Int32x4GetFlagY) \
+  ____(Int32x4GetFlagXorY) \
+  CASE(Int32x4GetFlagZ) \
+  CASE(Int32x4GetFlagW) \
+  ____(Int32x4GetFlagZorW) \
+  CASE(Int32x4WithFlagX) \
+  CASE(Int32x4WithFlagY) \
+  CASE(Int32x4WithFlagZ) \
+  CASE(Int32x4WithFlagW) \
+  ____(Int32x4WithFlag)  \
+  SIMPLE(Int32x4Select) \
+
+LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone, bool opt) const {
+  switch (kind()) {
+#define CASE(Name, ...) case k##Name:
+#define EMIT(Name)                                                             \
+  return MakeLocationSummaryFromEmitter(zone, this, &Emit##Name);
+#define SIMPLE(Name) CASE(Name) EMIT(Name)
+    SIMD_OP_VARIANTS(CASE, EMIT, SIMPLE)
+#undef CASE
+#undef EMIT
+#undef SIMPLE
+  }
+}
+
+void SimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
+  switch (kind()) {
+#define CASE(Name, ...) case k##Name:
+#define EMIT(Name)                                                             \
+  InvokeEmitter(compiler, this, &Emit##Name);                                  \
+  break;
+#define SIMPLE(Name) CASE(Name) EMIT(Name)
+    SIMD_OP_VARIANTS(CASE, EMIT, SIMPLE)
+#undef CASE
+#undef EMIT
+#undef SIMPLE
+  }
 }
 
 }  // namespace dart
