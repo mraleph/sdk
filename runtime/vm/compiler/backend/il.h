@@ -5285,8 +5285,8 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
   M(2, _, Float32x4NotEqual, (Float32x4, Float32x4), Int32x4)                  \
   M(2, _, Float32x4Min, (Float32x4, Float32x4), Float32x4)                     \
   M(2, _, Float32x4Max, (Float32x4, Float32x4), Float32x4)                     \
-  M(1, _, Float32x4GetSignMask, (Float32x4), Word)                             \
-  M(1, _, Int32x4GetSignMask, (Int32x4), Word)                                 \
+  M(1, _, Float32x4GetSignMask, (Float32x4), Int32)                            \
+  M(1, _, Int32x4GetSignMask, (Int32x4), Int32)                                \
   M(2, _, Float32x4Scale, (Double, Float32x4), Float32x4)                      \
   M(1, _, Float32x4Sqrt, (Float32x4), Float32x4)                               \
   M(1, _, Float32x4Reciprocal, (Float32x4), Float32x4)                         \
@@ -5318,7 +5318,7 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
   M(1, _, Float64x2Negate, (Float64x2), Float64x2)                             \
   M(1, _, Float64x2Abs, (Float64x2), Float64x2)                                \
   M(1, _, Float64x2Sqrt, (Float64x2), Float64x2)                               \
-  M(1, _, Float64x2GetSignMask, (Float64x2), Word)                             \
+  M(1, _, Float64x2GetSignMask, (Float64x2), Int32)                            \
   M(2, _, Float64x2Scale, (Float64x2, Double), Float64x2)                      \
   M(2, _, Float64x2WithX, (Float64x2, Double), Float64x2)                      \
   M(2, _, Float64x2WithY, (Float64x2, Double), Float64x2)                      \

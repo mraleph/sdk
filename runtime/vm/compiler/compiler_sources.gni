@@ -58,6 +58,8 @@ compiler_sources = [
   "backend/linearscan.h",
   "backend/locations.cc",
   "backend/locations.h",
+  "backend/locations_helpers.h",
+  "backend/locations_helpers_arm.h",
   "backend/range_analysis.cc",
   "backend/range_analysis.h",
   "backend/redundancy_elimination.cc",

@@ -1300,7 +1300,7 @@ CompileType DoubleTestOpInstr::ComputeType() const {
 }
 
 static const intptr_t simd_op_result_cids[] = {
-#define kWordCid -1
+#define kInt32Cid -1
 #define CASE(Arity, Mask, Name, Args, Result) k##Result##Cid,
     SIMD_OP_LIST(CASE, CASE)
 #undef CASE
