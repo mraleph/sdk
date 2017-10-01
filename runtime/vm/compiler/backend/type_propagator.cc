@@ -1299,6 +1299,7 @@ CompileType DoubleTestOpInstr::ComputeType() const {
   return CompileType::FromCid(kBoolCid);
 }
 
+// FIXME for GetSignMask we know that result would fit into a Smi
 static const intptr_t simd_op_result_cids[] = {
 #define kInt32Cid -1
 #define CASE(Arity, Mask, Name, Args, Result) k##Result##Cid,
