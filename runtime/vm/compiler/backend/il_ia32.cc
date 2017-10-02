@@ -5577,7 +5577,7 @@ DEFINE_EMIT(SimdBinaryOp,
       break;
     case SimdOpInstr::kFloat64x2WithX:
     case SimdOpInstr::kFloat64x2WithY: {
-      // FIXME there must be non memory form of this
+      // TODO(dartbug.com/30949) avoid transfer through memory
       COMPILE_ASSERT(SimdOpInstr::kFloat64x2WithY ==
                      (SimdOpInstr::kFloat64x2WithX + 1));
       __ SubImmediate(ESP, Immediate(kSimd128Size));
@@ -5593,7 +5593,9 @@ DEFINE_EMIT(SimdBinaryOp,
     case SimdOpInstr::kFloat32x4WithY:
     case SimdOpInstr::kFloat32x4WithZ:
     case SimdOpInstr::kFloat32x4WithW: {
-      // FIXME Must have a variant without memory operations
+      // TODO(dartbug.com/30949) avoid transfer through memory. SSE4.1 has
+      // insertps. SSE2 these instructions can be implemented via a combination
+      // of shufps/movss/movlhps.
       COMPILE_ASSERT(
           SimdOpInstr::kFloat32x4WithY == (SimdOpInstr::kFloat32x4WithX + 1) &&
           SimdOpInstr::kFloat32x4WithZ == (SimdOpInstr::kFloat32x4WithX + 2) &&
@@ -5699,6 +5701,8 @@ DEFINE_EMIT(SimdGetSignMask, (Register out, XmmRegister value)) {
 DEFINE_EMIT(
     Float32x4Constructor,
     (SameAsFirstInput, XmmRegister v0, XmmRegister, XmmRegister, XmmRegister)) {
+  // TODO(dartbug.com/30949) avoid transfer through memory. SSE4.1 has
+  // insertps, with SSE2 this instruction can be implemented through unpcklps.
   const XmmRegister out = v0;
   __ SubImmediate(ESP, Immediate(kSimd128Size));
   for (intptr_t i = 0; i < 4; i++) {
@@ -5730,9 +5734,9 @@ DEFINE_EMIT(Float32x4Clamp,
   __ maxps(left, lower);
 }
 
-// FIXME
 DEFINE_EMIT(Int32x4Constructor,
             (XmmRegister result, Register, Register, Register, Register)) {
+  // TODO(dartbug.com/30949) avoid transfer through memory.
   __ SubImmediate(ESP, Immediate(kSimd128Size));
   for (intptr_t i = 0; i < 4; i++) {
     __ movl(Address(ESP, i * kInt32Size), op->locs()->in(i).reg());
@@ -5741,90 +5745,57 @@ DEFINE_EMIT(Int32x4Constructor,
   __ AddImmediate(ESP, Immediate(kSimd128Size));
 }
 
-// FIXME
 DEFINE_EMIT(
     Int32x4BoolConstructor,
     (XmmRegister result, Register v0, Register v1, Register v2, Register v3)) {
-  Label x_false, x_done;
-  Label y_false, y_done;
-  Label z_false, z_done;
-  Label w_false, w_done;
-  __ subl(ESP, Immediate(16));
-  __ CompareObject(v0, Bool::True());
-  __ j(NOT_EQUAL, &x_false);
-  __ movl(Address(ESP, 0), Immediate(0xFFFFFFFF));
-  __ jmp(&x_done);
-  __ Bind(&x_false);
-  __ movl(Address(ESP, 0), Immediate(0x0));
-  __ Bind(&x_done);
-
-  __ CompareObject(v1, Bool::True());
-  __ j(NOT_EQUAL, &y_false);
-  __ movl(Address(ESP, 4), Immediate(0xFFFFFFFF));
-  __ jmp(&y_done);
-  __ Bind(&y_false);
-  __ movl(Address(ESP, 4), Immediate(0x0));
-  __ Bind(&y_done);
-
-  __ CompareObject(v2, Bool::True());
-  __ j(NOT_EQUAL, &z_false);
-  __ movl(Address(ESP, 8), Immediate(0xFFFFFFFF));
-  __ jmp(&z_done);
-  __ Bind(&z_false);
-  __ movl(Address(ESP, 8), Immediate(0x0));
-  __ Bind(&z_done);
-
-  __ CompareObject(v3, Bool::True());
-  __ j(NOT_EQUAL, &w_false);
-  __ movl(Address(ESP, 12), Immediate(0xFFFFFFFF));
-  __ jmp(&w_done);
-  __ Bind(&w_false);
-  __ movl(Address(ESP, 12), Immediate(0x0));
-  __ Bind(&w_done);
-
+  // TODO(dartbug.com/30949) avoid transfer through memory and branches.
+  __ SubImmediate(ESP, Immediate(kSimd128Size));
+  for (intptr_t i = 0; i < 4; i++) {
+    Label store_false, done;
+    __ CompareObject(v0, Bool::True());
+    __ j(NOT_EQUAL, &store_false);
+    __ movl(Address(ESP, kInt32Size * i), Immediate(0xFFFFFFFF));
+    __ jmp(&done);
+    __ Bind(&store_false);
+    __ movl(Address(ESP, kInt32Size * i), Immediate(0x0));
+    __ Bind(&done);
+  }
   __ movups(result, Address(ESP, 0));
-  __ addl(ESP, Immediate(16));
+  __ AddImmediate(ESP, Immediate(kSimd128Size));
 }
 
-// TODO FIXME
-DEFINE_EMIT(Int32x4GetFlag, (Register result, XmmRegister value)) {
-  Label done;
-  Label non_zero;
-  __ subl(ESP, Immediate(16));
-  // Move value to stack.
+// Need byte register for setcc(...).
+DEFINE_EMIT(Int32x4GetFlag, (Fixed<Register, EDX> result, XmmRegister value)) {
+  // TODO(dartbug.com/30949) avoid transfer through memory.
+  __ SubImmediate(ESP, Immediate(kSimd128Size));
   __ movups(Address(ESP, 0), value);
-  __ movl(result, Address(ESP, kFloatSize * (op->kind() -
-                                             SimdOpInstr::kInt32x4GetFlagX)));
-  __ addl(ESP, Immediate(16));
-  __ testl(result, result);
-  __ j(NOT_ZERO, &non_zero, Assembler::kNearJump);
-  __ LoadObject(result, Bool::False());
-  __ jmp(&done);
-  __ Bind(&non_zero);
-  __ LoadObject(result, Bool::True());
-  __ Bind(&done);
+  __ movl(EDX, Address(ESP, kInt32Size * (op->kind() - SimdOpInstr::kInt32x4GetFlagX)));
+  __ AddImmediate(ESP, Immediate(kSimd128Size));
+  __ testl(EDX, EDX);
+  __ setcc(ZERO, DL);
+  __ movzxb(EDX, DL);
+
+  ASSERT_BOOL_FALSE_FOLLOWS_BOOL_TRUE();
+  __ movl(EDX, Address(THR, EDX, TIMES_4, Thread::bool_true_offset()));
 }
 
-DEFINE_EMIT(Int32x4WithFlag,
-            (SameAsFirstInput, XmmRegister mask, Register flag)) {
-  __ subl(ESP, Immediate(16));
-  // Copy mask to stack.
+
+DEFINE_EMIT(Int32x4WithFlag, (SameAsFirstInput, XmmRegister mask, Register flag, Temp<Fixed<Register, EDX> > temp)) {
+  // TODO(dartbug.com/30949) avoid transfer through memory.
+  __ SubImmediate(ESP, Immediate(kSimd128Size));
   __ movups(Address(ESP, 0), mask);
-  Label falsePath, exitPath;
+
+  // EDX = flag == true ? -1 : 0
+  __ xorl(EDX, EDX);
   __ CompareObject(flag, Bool::True());
-  __ j(NOT_EQUAL, &falsePath);
-  __ movl(
-      Address(ESP, kFloatSize * (op->kind() - SimdOpInstr::kInt32x4WithFlagX)),
-      Immediate(0xFFFFFFFF));
-  __ jmp(&exitPath);
-  __ Bind(&falsePath);
-  __ movl(
-      Address(ESP, kFloatSize * (op->kind() - SimdOpInstr::kInt32x4WithFlagX)),
-      Immediate(0x0));
-  __ Bind(&exitPath);
+  __ setcc(EQUAL, DL);
+  __ negl(EDX);
+
+  __ movl(Address(ESP, kFloatSize * (op->kind() - SimdOpInstr::kInt32x4WithFlagX)), EDX);
+
   // Copy mask back to register.
   __ movups(mask, Address(ESP, 0));
-  __ addl(ESP, Immediate(16));
+  __ AddImmediate(ESP, Immediate(kSimd128Size));
 }
 
 DEFINE_EMIT(Int32x4Select,

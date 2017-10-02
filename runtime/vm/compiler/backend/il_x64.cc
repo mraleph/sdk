@@ -5382,7 +5382,7 @@ DEFINE_EMIT(SimdBinaryOp,
       break;
     case SimdOpInstr::kFloat64x2WithX:
     case SimdOpInstr::kFloat64x2WithY: {
-      // FIXME there must be non memory form of this
+      // TODO(dartbug.com/30949) avoid transfer through memory.
       COMPILE_ASSERT(SimdOpInstr::kFloat64x2WithY ==
                      (SimdOpInstr::kFloat64x2WithX + 1));
       __ SubImmediate(RSP, Immediate(kSimd128Size));
@@ -5394,11 +5394,13 @@ DEFINE_EMIT(SimdBinaryOp,
       __ AddImmediate(RSP, Immediate(kSimd128Size));
       break;
     }
-    // FIXME INSERTPS on SSE4.1
     case SimdOpInstr::kFloat32x4WithX:
     case SimdOpInstr::kFloat32x4WithY:
     case SimdOpInstr::kFloat32x4WithZ:
     case SimdOpInstr::kFloat32x4WithW: {
+      // TODO(dartbug.com/30949) avoid transfer through memory. SSE4.1 has
+      // insertps. SSE2 these instructions can be implemented via a combination
+      // of shufps/movss/movlhps.
       COMPILE_ASSERT(
           SimdOpInstr::kFloat32x4WithY == (SimdOpInstr::kFloat32x4WithX + 1) &&
           SimdOpInstr::kFloat32x4WithZ == (SimdOpInstr::kFloat32x4WithX + 2) &&
@@ -5505,10 +5507,11 @@ DEFINE_EMIT(SimdGetSignMask, (Register out, XmmRegister value)) {
   }
 }
 
-// TODO FIXME
 DEFINE_EMIT(
     Float32x4Constructor,
     (SameAsFirstInput, XmmRegister v0, XmmRegister, XmmRegister, XmmRegister)) {
+  // TODO(dartbug.com/30949) avoid transfer through memory. SSE4.1 has
+  // insertps, with SSE2 this instruction can be implemented through unpcklps.
   const XmmRegister out = v0;
   __ SubImmediate(RSP, Immediate(kSimd128Size));
   for (intptr_t i = 0; i < 4; i++) {
@@ -5540,9 +5543,9 @@ DEFINE_EMIT(Float32x4Clamp,
   __ maxps(value, lower);
 }
 
-// TODO FIXME
 DEFINE_EMIT(Int32x4Constructor,
             (XmmRegister result, Register, Register, Register, Register)) {
+  // TODO(dartbug.com/30949) avoid transfer through memory.
   __ SubImmediate(RSP, Immediate(kSimd128Size));
   for (intptr_t i = 0; i < 4; i++) {
     __ movl(Address(RSP, i * kInt32Size), op->locs()->in(i).reg());
@@ -5558,20 +5561,18 @@ DEFINE_EMIT(Int32x4BoolConstructor,
              Register,
              Register,
              Temp<Fixed<Register, RDX> >)) {
-  // TODO FIXME instead of 4 memory moves you can do 2 memory moves
-  // There are also instruction sequences that don't involve memory
-  // moves at all.
-  __ AddImmediate(RSP, Immediate(-4 * kInt32Size));
+  // TODO(dartbug.com/30949) avoid transfer through memory and branches.
+  __ SubImmediate(RSP, Immediate(kSimd128Size));
   for (intptr_t i = 0; i < 4; i++) {
     Label done, load_false;
     __ xorq(RDX, RDX);
     __ CompareObject(op->locs()->in(i).reg(), Bool::True());
     __ setcc(EQUAL, DL);
     __ negl(RDX);
-    __ movl(Address(RSP, i * kInt32Size), RDX);
+    __ movl(Address(RSP, kInt32Size * i), RDX);
   }
   __ movups(result, Address(RSP, 0));
-  __ AddImmediate(RSP, Immediate(4 * kInt32Size));
+  __ AddImmediate(RSP, Immediate(kSimd128Size));
 }
 
 static void EmitRDXToBoolean(FlowGraphCompiler* compiler) {
