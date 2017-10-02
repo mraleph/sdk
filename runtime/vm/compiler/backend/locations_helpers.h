@@ -322,7 +322,7 @@ void InvokeEmitter(
 #elif defined(TARGET_ARCH_X64)
 
 #elif defined(TARGET_ARCH_ARM)
-#include "vm/compiler/assembler/assembler_arm.h"
+#include "vm/compiler/backend/locations_helpers_arm.h"
 #elif defined(TARGET_ARCH_ARM64)
 
 #elif defined(TARGET_ARCH_DBC)

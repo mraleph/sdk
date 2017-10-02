@@ -4866,7 +4866,6 @@ DEFINE_EMIT(
 DEFINE_EMIT(Float32x4With,
             (VRegister result, VRegister replacement, VRegister value)) {
   __ fcvtsd(VTMP, replacement);
-  // FIXME SameAsSecondInput?
   __ vmov(result, value);
   switch (op->kind()) {
     case SimdOpInstr::kFloat32x4WithX:
@@ -4887,7 +4886,9 @@ DEFINE_EMIT(Float32x4With,
 }
 
 DEFINE_EMIT(Simd32x4ToSimd32x4, (SameAsFirstInput, VRegister value)) {
-  // Nothing to do.
+  // TODO(dartbug.com/30949) these operations are essentially nop and should
+  // not generate any code. They should be removed from the graph before
+  // code generation.
 }
 
 DEFINE_EMIT(SimdZero, (VRegister v)) {

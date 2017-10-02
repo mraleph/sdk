@@ -5382,7 +5382,8 @@ static bool IsPowerOfTwoKind(intptr_t v1, intptr_t v2) {
 LocationSummary* IfThenElseInstr::MakeLocationSummary(Zone* zone,
                                                       bool opt) const {
   comparison()->InitializeLocationSummary(zone, opt);
-  // TODO(vegorov): support byte register constraints in the register allocator.
+  // TODO(dartbug.com/30953): support byte register constraints in the
+  // register allocator.
   comparison()->locs()->set_out(0, Location::RegisterLocation(EDX));
   return comparison()->locs();
 }
@@ -5586,7 +5587,7 @@ DEFINE_EMIT(SimdBinaryOp,
                                 kDoubleSize),
                right);
       __ movups(left, Address(ESP, 0));
-      __ addl(ESP, Immediate(kSimd128Size));
+      __ AddImmediate(ESP, Immediate(kSimd128Size));
       break;
     }
     case SimdOpInstr::kFloat32x4WithX:
@@ -5623,6 +5624,9 @@ DEFINE_EMIT(SimdBinaryOp,
   V(Float32x4ReciprocalSqrt, rsqrtps)
 
 DEFINE_EMIT(SimdUnaryOp, (SameAsFirstInput, XmmRegister value)) {
+  // TODO(dartbug.com/30949) select better register constraints to avoid
+  // redundant move of input into a different register because all instructions
+  // below support two operand forms.
   switch (op->kind()) {
 #define EMIT(Name, op)                                                         \
   case SimdOpInstr::k##Name:                                                   \
@@ -5664,17 +5668,17 @@ DEFINE_EMIT(SimdUnaryOp, (SameAsFirstInput, XmmRegister value)) {
       break;
     case SimdOpInstr::kFloat32x4ToInt32x4:
     case SimdOpInstr::kInt32x4ToFloat32x4:
-      // NOP.
+      // TODO(dartbug.com/30949) these operations are essentially nop and should
+      // not generate any code. They should be removed from the graph before
+      // code generation.
       break;
     case SimdOpInstr::kFloat64x2GetX:
       // NOP.
       break;
     case SimdOpInstr::kFloat64x2GetY:
-      // FIXME. Register constraints are chosen badly.
       __ shufpd(value, value, Immediate(0x33));
       break;
     case SimdOpInstr::kFloat64x2Splat:
-      // FIXME. Register constraints are chosen badly.
       __ shufpd(value, value, Immediate(0x0));
       break;
     default:
@@ -5697,7 +5701,6 @@ DEFINE_EMIT(SimdGetSignMask, (Register out, XmmRegister value)) {
   }
 }
 
-// FIXME must have a variant without memory operations
 DEFINE_EMIT(
     Float32x4Constructor,
     (SameAsFirstInput, XmmRegister v0, XmmRegister, XmmRegister, XmmRegister)) {
@@ -5745,9 +5748,8 @@ DEFINE_EMIT(Int32x4Constructor,
   __ AddImmediate(ESP, Immediate(kSimd128Size));
 }
 
-DEFINE_EMIT(
-    Int32x4BoolConstructor,
-    (XmmRegister result, Register, Register, Register, Register)) {
+DEFINE_EMIT(Int32x4BoolConstructor,
+            (XmmRegister result, Register, Register, Register, Register)) {
   // TODO(dartbug.com/30949) avoid transfer through memory and branches.
   __ SubImmediate(ESP, Immediate(kSimd128Size));
   for (intptr_t i = 0; i < 4; i++) {
@@ -5764,12 +5766,13 @@ DEFINE_EMIT(
   __ AddImmediate(ESP, Immediate(kSimd128Size));
 }
 
-// Need byte register for setcc(...).
+// TODO(dartbug.com/30953) need register with a byte component for setcc.
 DEFINE_EMIT(Int32x4GetFlag, (Fixed<Register, EDX> result, XmmRegister value)) {
   // TODO(dartbug.com/30949) avoid transfer through memory.
   __ SubImmediate(ESP, Immediate(kSimd128Size));
   __ movups(Address(ESP, 0), value);
-  __ movl(EDX, Address(ESP, kInt32Size * (op->kind() - SimdOpInstr::kInt32x4GetFlagX)));
+  __ movl(EDX, Address(ESP, kInt32Size *
+                                (op->kind() - SimdOpInstr::kInt32x4GetFlagX)));
   __ AddImmediate(ESP, Immediate(kSimd128Size));
   __ testl(EDX, EDX);
   __ setcc(ZERO, DL);
@@ -5779,8 +5782,12 @@ DEFINE_EMIT(Int32x4GetFlag, (Fixed<Register, EDX> result, XmmRegister value)) {
   __ movl(EDX, Address(THR, EDX, TIMES_4, Thread::bool_true_offset()));
 }
 
-
-DEFINE_EMIT(Int32x4WithFlag, (SameAsFirstInput, XmmRegister mask, Register flag, Temp<Fixed<Register, EDX> > temp)) {
+// TODO(dartbug.com/30953) need register with a byte component for setcc.
+DEFINE_EMIT(Int32x4WithFlag,
+            (SameAsFirstInput,
+             XmmRegister mask,
+             Register flag,
+             Temp<Fixed<Register, EDX> > temp)) {
   // TODO(dartbug.com/30949) avoid transfer through memory.
   __ SubImmediate(ESP, Immediate(kSimd128Size));
   __ movups(Address(ESP, 0), mask);
@@ -5791,7 +5798,9 @@ DEFINE_EMIT(Int32x4WithFlag, (SameAsFirstInput, XmmRegister mask, Register flag,
   __ setcc(EQUAL, DL);
   __ negl(EDX);
 
-  __ movl(Address(ESP, kInt32Size * (op->kind() - SimdOpInstr::kInt32x4WithFlagX)), EDX);
+  __ movl(
+      Address(ESP, kInt32Size * (op->kind() - SimdOpInstr::kInt32x4WithFlagX)),
+      EDX);
 
   // Copy mask back to register.
   __ movups(mask, Address(ESP, 0));

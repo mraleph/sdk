@@ -145,7 +145,8 @@ static bool IsPowerOfTwoKind(intptr_t v1, intptr_t v2) {
 LocationSummary* IfThenElseInstr::MakeLocationSummary(Zone* zone,
                                                       bool opt) const {
   comparison()->InitializeLocationSummary(zone, opt);
-  // TODO(vegorov): support byte register constraints in the register allocator.
+  // TODO(dartbug.com/30952) support convertion of Register to corresponding
+  // least significant byte register (e.g. RAX -> AL, RSI -> SIL, r15 -> r15b).
   comparison()->locs()->set_out(0, Location::RegisterLocation(RDX));
   return comparison()->locs();
 }
@@ -5432,6 +5433,9 @@ DEFINE_EMIT(SimdBinaryOp,
   V(Float64x2Sqrt, sqrtpd)
 
 DEFINE_EMIT(SimdUnaryOp, (SameAsFirstInput, XmmRegister value)) {
+  // TODO(dartbug.com/30949) select better register constraints to avoid
+  // redundant move of input into a different register because all instructions
+  // below support two operand forms.
   switch (op->kind()) {
 #define EMIT(Name, op)                                                         \
   case SimdOpInstr::k##Name:                                                   \
@@ -5473,17 +5477,17 @@ DEFINE_EMIT(SimdUnaryOp, (SameAsFirstInput, XmmRegister value)) {
       break;
     case SimdOpInstr::kInt32x4ToFloat32x4:
     case SimdOpInstr::kFloat32x4ToInt32x4:
-      // NOP.
+      // TODO(dartbug.com/30949) these operations are essentially nop and should
+      // not generate any code. They should be removed from the graph before
+      // code generation.
       break;
     case SimdOpInstr::kFloat64x2GetX:
       // NOP.
       break;
     case SimdOpInstr::kFloat64x2GetY:
-      // FIXME. Register constraints are chosen badly.
       __ shufpd(value, value, Immediate(0x33));
       break;
     case SimdOpInstr::kFloat64x2Splat:
-      // FIXME. Register constraints are chosen badly.
       __ shufpd(value, value, Immediate(0x0));
       break;
     default:
@@ -5554,6 +5558,9 @@ DEFINE_EMIT(Int32x4Constructor,
   __ AddImmediate(RSP, Immediate(kSimd128Size));
 }
 
+// TODO(dartbug.com/30952) RDX is fixed here because we can't go from
+// an arbitrary Register to its corresponding least significant byte register
+// (e.g. RAX -> AL, RSI -> SIL, r15 -> r15b).
 DEFINE_EMIT(Int32x4BoolConstructor,
             (XmmRegister result,
              Register,
@@ -5583,7 +5590,9 @@ static void EmitRDXToBoolean(FlowGraphCompiler* compiler) {
   __ movq(RDX, Address(THR, RDX, TIMES_8, Thread::bool_true_offset()));
 }
 
-// Need byte register for setcc.
+// TODO(dartbug.com/30952) RDX is fixed here because we can't go from
+// an arbitrary Register to its corresponding least significant byte register
+// (e.g. RAX -> AL, RSI -> SIL, r15 -> r15b).
 DEFINE_EMIT(Int32x4GetFlagZorW,
             (Fixed<Register, RDX> out,
              XmmRegister value,
@@ -5596,7 +5605,9 @@ DEFINE_EMIT(Int32x4GetFlagZorW,
   EmitRDXToBoolean(compiler);
 }
 
-// Need byte register for setcc.
+// TODO(dartbug.com/30952) RDX is fixed here because we can't go from
+// an arbitrary Register to its corresponding least significant byte register
+// (e.g. RAX -> AL, RSI -> SIL, r15 -> r15b).
 DEFINE_EMIT(Int32x4GetFlagXorY, (Fixed<Register, RDX> out, XmmRegister value)) {
   __ movq(RDX, value);
   if (op->kind() == SimdOpInstr::kInt32x4GetFlagY) {
@@ -5605,7 +5616,9 @@ DEFINE_EMIT(Int32x4GetFlagXorY, (Fixed<Register, RDX> out, XmmRegister value)) {
   EmitRDXToBoolean(compiler);
 }
 
-// Need byte register for setcc.
+// TODO(dartbug.com/30952) RDX is fixed here because we can't go from
+// an arbitrary Register to its corresponding least significant byte register
+// (e.g. RAX -> AL, RSI -> SIL, r15 -> r15b).
 DEFINE_EMIT(Int32x4WithFlag,
             (SameAsFirstInput,
              XmmRegister mask,

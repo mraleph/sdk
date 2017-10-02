@@ -5705,83 +5705,7 @@ void DebugStepCheckInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   compiler->RecordSafepoint(locs());
 }
 
-//
 // SIMD
-//
-
-class QRegister_ {
- public:
-  inline DRegister d(intptr_t i) const {
-    return static_cast<DRegister>(reg_ * 2 + i);
-  }
-
-  inline SRegister s(intptr_t i) const {
-    return static_cast<SRegister>(reg_ * 4 + i);
-  }
-
-  explicit QRegister_(QRegister reg) : reg_(reg) {}
-
-  operator QRegister() const { return reg_; }
-
- private:
-  QRegister reg_;
-};
-
-template <QRegister reg>
-struct Fixed_ {
-  inline DRegister d(intptr_t i) const {
-    return static_cast<DRegister>(reg * 2 + i);
-  }
-
-  inline SRegister s(intptr_t i) const {
-    return static_cast<SRegister>(reg * 4 + i);
-  }
-
-  operator QRegister() const { return reg; }
-};
-
-template <>
-struct UnwrapLocation<QRegister_> {
-  static const bool kIsTemp = false;
-
-  static QRegister_ Unwrap(const Location& loc) {
-    return QRegister_(loc.fpu_reg());
-  }
-
-  template <intptr_t arity, intptr_t index>
-  static QRegister_ Unwrap(LocationSummary* locs) {
-    return Unwrap(locs->in(index));
-  }
-
-  template <intptr_t arity, intptr_t index>
-  static void SetConstraint(LocationSummary* locs) {
-    locs->set_in(index, ToConstraint());
-  }
-
-  static Location ToConstraint() { return Location::RequiresFpuRegister(); }
-};
-
-template <QRegister reg>
-struct UnwrapLocation<Fixed_<reg> > {
-  static const bool kIsTemp = false;
-
-  static Fixed_<reg> Unwrap(const Location& loc) {
-    assert(UnwrapLocation<QRegister>::Unwrap(loc) == reg);
-    return Fixed_<reg>();
-  }
-
-  template <intptr_t arity, intptr_t index>
-  static Fixed_<reg> Unwrap(LocationSummary* locs) {
-    return Unwrap(locs->in(index));
-  }
-
-  template <intptr_t arity, intptr_t index>
-  static void SetConstraint(LocationSummary* locs) {
-    locs->set_in(index, ToConstraint());
-  }
-
-  static Location ToConstraint() { return Location::FpuRegisterLocation(reg); }
-};
 
 #define DEFINE_EMIT(Name, Args)                                                \
   static void Emit##Name(FlowGraphCompiler* compiler, SimdOpInstr* op,         \
@@ -5878,6 +5802,7 @@ DEFINE_EMIT(Float64x2BinaryOp,
 }
 
 // Low (< Q7) Q registers are needed for the vcvtds and vmovs instructions.
+// TODO(dartbug.com/30953) support register range constraints in the regalloc.
 DEFINE_EMIT(Simd32x4Shuffle, (Fixed_<Q6> result, Fixed_<Q4> value)) {
   switch (op->kind()) {
     case SimdOpInstr::kFloat32x4ShuffleX:
@@ -5919,7 +5844,7 @@ DEFINE_EMIT(Simd32x4Shuffle, (Fixed_<Q6> result, Fixed_<Q4> value)) {
   }
 }
 
-// Low (< Q7) Q registers are needed for the vcvtds and vmovs instructions.
+// TODO(dartbug.com/30953) support register range constraints in the regalloc.
 DEFINE_EMIT(Simd32x4ShuffleMix,
             (Fixed_<Q6> result, Fixed_<Q4> left, Fixed_<Q5> right)) {
   const intptr_t mask = op->mask();
@@ -5929,6 +5854,7 @@ DEFINE_EMIT(Simd32x4ShuffleMix,
   __ vmovs(result.s(3), right.s((mask >> 6) & 0x3));
 }
 
+// TODO(dartbug.com/30953) support register range constraints in the regalloc.
 DEFINE_EMIT(Simd32x4GetSignMask,
             (Register out, Fixed_<Q5> value, Temp<Register> temp)) {
   // X lane.
@@ -5949,6 +5875,7 @@ DEFINE_EMIT(Simd32x4GetSignMask,
 }
 
 // Low (< 7) Q registers are needed for the vcvtsd instruction.
+// TODO(dartbug.com/30953) support register range constraints in the regalloc.
 DEFINE_EMIT(Float32x4Constructor,
             (Fixed_<Q6> out,
              QRegister_ q0,
@@ -5993,7 +5920,10 @@ DEFINE_EMIT(Float32x4Unary, (QRegister result, QRegister left)) {
       __ VreciprocalSqrtqs(result, left);
       break;
     case SimdOpInstr::kFloat32x4ToInt32x4:
-      // FIXME SameAsFirstInput
+    case SimdOpInstr::kInt32x4ToFloat32x4:
+      // TODO(dartbug.com/30949) these operations are essentially nop and should
+      // not generate any code. They should be removed from the graph before
+      // code generation.
       __ vmovq(result, left);
       break;
     default:
@@ -6009,6 +5939,7 @@ DEFINE_EMIT(
 }
 
 // Low (< 7) Q registers are needed for the vmovs instruction.
+// TODO(dartbug.com/30953) support register range constraints in the regalloc.
 DEFINE_EMIT(Float32x4With,
             (Fixed_<Q6> result, QRegister_ replacement, QRegister value)) {
   __ vcvtsd(STMP, replacement.d(0));
@@ -6061,6 +5992,7 @@ DEFINE_EMIT(Float64x2Constructor,
 }
 
 // Low (< 7) Q registers are needed for the vcvtsd instruction.
+// TODO(dartbug.com/30953) support register range constraints in the regalloc.
 DEFINE_EMIT(Float64x2ToFloat32x4, (Fixed_<Q6> r, QRegister_ q)) {
   __ veorq(r, r, r);
   // Set X lane.
@@ -6070,6 +6002,7 @@ DEFINE_EMIT(Float64x2ToFloat32x4, (Fixed_<Q6> r, QRegister_ q)) {
 }
 
 // Low (< 7) Q registers are needed for the vcvtsd instruction.
+// TODO(dartbug.com/30953) support register range constraints in the regalloc.
 DEFINE_EMIT(Float32x4ToFloat64x2, (Fixed_<Q6> r, QRegister_ q)) {
   // Set X.
   __ vcvtds(r.d(0), q.s(0));
@@ -6078,6 +6011,7 @@ DEFINE_EMIT(Float32x4ToFloat64x2, (Fixed_<Q6> r, QRegister_ q)) {
 }
 
 // Grabbing the S components means we need a low (< 7) Q.
+// TODO(dartbug.com/30953) support register range constraints in the regalloc.
 DEFINE_EMIT(Float64x2GetSignMask, (Register out, Fixed_<Q6> value)) {
   // Upper 32-bits of X lane.
   __ vmovrs(out, value.s(1));
@@ -6180,6 +6114,7 @@ DEFINE_EMIT(Int32x4BoolConstructor,
 }
 
 // Low (< 7) Q registers are needed for the vmovrs instruction.
+// TODO(dartbug.com/30953) support register range constraints in the regalloc.
 DEFINE_EMIT(Int32x4GetFlag, (Register result, Fixed_<Q6> value)) {
   switch (op->kind()) {
     case SimdOpInstr::kInt32x4GetFlagX:
@@ -6221,7 +6156,6 @@ DEFINE_EMIT(Int32x4Select,
   __ vorrq(out, mask, temp);
 }
 
-// FIXME SameAsFirstInput?
 DEFINE_EMIT(Int32x4SetFlag,
             (QRegister_ result, QRegister mask, Register flag)) {
   __ vmovq(result, mask);
@@ -6244,11 +6178,6 @@ DEFINE_EMIT(Int32x4SetFlag,
     default:
       UNREACHABLE();
   }
-}
-
-// FIXME SameAsFirstInput?
-DEFINE_EMIT(Int32x4ToFloat32x4, (QRegister result, QRegister value)) {
-  __ vmovq(result, value);
 }
 
 #define EMITTERS(V, ____, SIMPLE)                                              \
@@ -6298,6 +6227,7 @@ DEFINE_EMIT(Int32x4ToFloat32x4, (QRegister result, QRegister value)) {
   CASE(Float32x4Reciprocal)                                                    \
   CASE(Float32x4ReciprocalSqrt)                                                \
   CASE(Float32x4ToInt32x4)                                                     \
+  CASE(Int32x4ToFloat32x4)                                                     \
   ____(Float32x4Unary)                                                         \
   SIMPLE(Float32x4Clamp)                                                       \
   CASE(Float32x4WithX)                                                         \
@@ -6336,8 +6266,7 @@ DEFINE_EMIT(Int32x4ToFloat32x4, (QRegister result, QRegister value)) {
   CASE(Int32x4WithFlagY)                                                       \
   CASE(Int32x4WithFlagZ)                                                       \
   CASE(Int32x4WithFlagW)                                                       \
-  ____(Int32x4SetFlag)                                                         \
-  SIMPLE(Int32x4ToFloat32x4)
+  ____(Int32x4SetFlag)
 
 LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone, bool opt) const {
   switch (kind()) {

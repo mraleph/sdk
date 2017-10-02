@@ -33,12 +33,6 @@ enum Representation {
   kNumRepresentations,
 };
 
-#if defined(ARCH_IS_64_BIT)
-static const Representation kUnboxedWord = kUnboxedInt64;
-#else
-static const Representation kUnboxedWord = kUnboxedInt32;
-#endif
-
 // Location objects are used to connect register allocator and code generator.
 // Instruction templates used by code generator have a corresponding
 // LocationSummary object which specifies expected location for every input

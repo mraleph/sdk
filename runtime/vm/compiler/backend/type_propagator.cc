@@ -1299,9 +1299,8 @@ CompileType DoubleTestOpInstr::ComputeType() const {
   return CompileType::FromCid(kBoolCid);
 }
 
-// FIXME for GetSignMask we know that result would fit into a Smi
 static const intptr_t simd_op_result_cids[] = {
-#define kInt32Cid -1
+#define kInt8Cid kSmiCid
 #define CASE(Arity, Mask, Name, Args, Result) k##Result##Cid,
     SIMD_OP_LIST(CASE, CASE)
 #undef CASE
@@ -1309,11 +1308,7 @@ static const intptr_t simd_op_result_cids[] = {
 };
 
 CompileType SimdOpInstr::ComputeType() const {
-  const intptr_t cid = simd_op_result_cids[kind()];
-  if (cid == -1) {
-    return CompileType::Int();
-  }
-  return CompileType::FromCid(cid);
+  return CompileType::FromCid(simd_op_result_cids[kind()]);
 }
 
 CompileType MathUnaryInstr::ComputeType() const {

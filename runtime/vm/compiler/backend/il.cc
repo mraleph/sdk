@@ -4164,6 +4164,7 @@ void NativeCallInstr::SetupNative() {
 }
 
 // SIMD
+
 SimdOpInstr::Kind SimdOpInstr::KindForOperator(intptr_t cid, Token::Kind op) {
   switch (cid) {
     case kFloat32x4Cid:
@@ -4235,64 +4236,70 @@ SimdOpInstr::Kind SimdOpInstr::KindForMethod(MethodRecognizer::Kind kind) {
   return kFloat32x4Add;
 }
 
-static const intptr_t simd_op_input_count[] = {
-#define CASE(Arity, Mask, ...) Arity,
+// bits  0...2 arity
+//       3...3 has mask
+//       4...7 ouput representation
+//       8..11 input #0 representation
+//      12..15 input #1 representation
+//      16..19 input #2 representation
+//      20..24 input #3 representation
+typedef BitField<uint32_t, uint8_t, 0, 3> ArityBitField;
+typedef BitField<uint32_t, bool, 3, 1> HasMaskField;
+typedef BitField<uint32_t, Representation, 4, 4> OutputRepresentationField;
+typedef BitField<uint32_t, Representation, 8, 4> Input0RepresentationField;
+static const Representation kUnboxedBool = kTagged;
+static const Representation kUnboxedInt8 = kUnboxedInt32;
+static const uint32_t simd_op_information[] = {
+#define ENCODE_INFORMATION(Arity, HasMask, Out, Ins)                           \
+  ArityBitField::encode(Arity) | HasMaskField::encode(HasMask) |               \
+      OutputRepresentationField::encode(Out) | (Ins)
+#define REP(T) (kUnboxed##T)
+#define ENCODE_INPUTS_0() (0)
+#define ENCODE_INPUTS_1(In0, ...) (Input0RepresentationField::encode(REP(In0)))
+#define ENCODE_INPUTS_2(In0, ...)                                              \
+  (Input0RepresentationField::encode(REP(In0)) |                               \
+   (ENCODE_INPUTS_1(__VA_ARGS__) << Input0RepresentationField::bitsize()))
+#define ENCODE_INPUTS_3(In0, ...)                                              \
+  (Input0RepresentationField::encode(REP(In0)) |                               \
+   (ENCODE_INPUTS_2(__VA_ARGS__) << Input0RepresentationField::bitsize()))
+#define ENCODE_INPUTS_4(In0, ...)                                              \
+  (Input0RepresentationField::encode(REP(In0)) |                               \
+   (ENCODE_INPUTS_3(__VA_ARGS__) << Input0RepresentationField::bitsize()))
+#define HAS__ false
+#define HAS_MASK true
+#define CASE(Arity, Mask, Name, Args, Result)                                  \
+  ENCODE_INFORMATION(Arity, HAS_##Mask, REP(Result),                           \
+                     ENCODE_INPUTS_##Arity Args),
     SIMD_OP_LIST(CASE, CASE)
+#undef ENCODE_INFORMATION
+#undef REP
+#undef ENCODE_INPUTS_0
+#undef ENCODE_INPUTS_1
+#undef ENCODE_INPUTS_2
+#undef ENCODE_INPUTS_3
+#undef ENCODE_INPUTS_4
+#undef HAS__
+#undef HAS_MASK
 #undef CASE
 };
 
 intptr_t SimdOpInstr::InputCount() const {
-  return simd_op_input_count[kind()];
+  return ArityBitField::decode(simd_op_information[kind()]);
 }
-
-static const Representation simd_op_result_representations[] = {
-#define kUnboxedBool kTagged
-#define CASE(Arity, Mask, Name, Args, Result) kUnboxed##Result,
-    SIMD_OP_LIST(CASE, CASE)
-#undef CASE
-#undef kUnboxedBool
-};
 
 Representation SimdOpInstr::representation() const {
-  return simd_op_result_representations[kind()];
+  return OutputRepresentationField::decode(simd_op_information[kind()]);
 }
-
-static const uint32_t simd_op_input_representations[] = {
-#define kUnboxedBool kTagged
-#define REP(T) (kUnboxed##T)
-#define ENCODE_0() kNoRepresentation
-#define ENCODE_1(Arg0) REP(Arg0)
-#define ENCODE_2(Arg0, ...) ((ENCODE_1(__VA_ARGS__) << 4) | REP(Arg0))
-#define ENCODE_3(Arg0, ...) ((ENCODE_2(__VA_ARGS__) << 4) | REP(Arg0))
-#define ENCODE_4(Arg0, ...) ((ENCODE_3(__VA_ARGS__) << 4) | REP(Arg0))
-#define CASE(Arity, Mask, Name, Args, Result) ENCODE_##Arity Args,
-    SIMD_OP_LIST(CASE, CASE)
-#undef kUnboxedBool
-#undef REP
-#undef ENCODE_0
-#undef ENCODE_1
-#undef ENCODE_2
-#undef ENCODE_3
-#undef ENCODE_4
-#undef CASE
-};
 
 Representation SimdOpInstr::RequiredInputRepresentation(intptr_t idx) const {
   ASSERT(0 <= idx && idx < InputCount());
-  return static_cast<Representation>(
-      (simd_op_input_representations[kind()] >> (4 * idx)) & 0xF);
+  return Input0RepresentationField::decode(
+      simd_op_information[kind()] >>
+      (Input0RepresentationField::bitsize() * idx));
 }
 
-static const bool simd_op_has_mask[] = {
-#define HAS__ false
-#define HAS_MASK true
-#define CASE(Arity, Mask, Name, Args, Result) HAS_##Mask,
-    SIMD_OP_LIST(CASE, CASE)
-#undef CASE
-};
-
 bool SimdOpInstr::HasMask() const {
-  return simd_op_has_mask[kind()];
+  return HasMaskField::decode(simd_op_information[kind()]);
 }
 
 #undef __
