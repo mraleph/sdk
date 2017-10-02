@@ -5747,12 +5747,12 @@ DEFINE_EMIT(Int32x4Constructor,
 
 DEFINE_EMIT(
     Int32x4BoolConstructor,
-    (XmmRegister result, Register v0, Register v1, Register v2, Register v3)) {
+    (XmmRegister result, Register, Register, Register, Register)) {
   // TODO(dartbug.com/30949) avoid transfer through memory and branches.
   __ SubImmediate(ESP, Immediate(kSimd128Size));
   for (intptr_t i = 0; i < 4; i++) {
     Label store_false, done;
-    __ CompareObject(v0, Bool::True());
+    __ CompareObject(op->locs()->in(i).reg(), Bool::True());
     __ j(NOT_EQUAL, &store_false);
     __ movl(Address(ESP, kInt32Size * i), Immediate(0xFFFFFFFF));
     __ jmp(&done);
@@ -5769,8 +5769,7 @@ DEFINE_EMIT(Int32x4GetFlag, (Fixed<Register, EDX> result, XmmRegister value)) {
   // TODO(dartbug.com/30949) avoid transfer through memory.
   __ SubImmediate(ESP, Immediate(kSimd128Size));
   __ movups(Address(ESP, 0), value);
-  __ movl(EDX, Address(ESP, kInt32Size *
-                                (op->kind() - SimdOpInstr::kInt32x4GetFlagX)));
+  __ movl(EDX, Address(ESP, kInt32Size * (op->kind() - SimdOpInstr::kInt32x4GetFlagX)));
   __ AddImmediate(ESP, Immediate(kSimd128Size));
   __ testl(EDX, EDX);
   __ setcc(ZERO, DL);
@@ -5780,11 +5779,8 @@ DEFINE_EMIT(Int32x4GetFlag, (Fixed<Register, EDX> result, XmmRegister value)) {
   __ movl(EDX, Address(THR, EDX, TIMES_4, Thread::bool_true_offset()));
 }
 
-DEFINE_EMIT(Int32x4WithFlag,
-            (SameAsFirstInput,
-             XmmRegister mask,
-             Register flag,
-             Temp<Fixed<Register, EDX> > temp)) {
+
+DEFINE_EMIT(Int32x4WithFlag, (SameAsFirstInput, XmmRegister mask, Register flag, Temp<Fixed<Register, EDX> > temp)) {
   // TODO(dartbug.com/30949) avoid transfer through memory.
   __ SubImmediate(ESP, Immediate(kSimd128Size));
   __ movups(Address(ESP, 0), mask);
@@ -5795,9 +5791,7 @@ DEFINE_EMIT(Int32x4WithFlag,
   __ setcc(EQUAL, DL);
   __ negl(EDX);
 
-  __ movl(
-      Address(ESP, kFloatSize * (op->kind() - SimdOpInstr::kInt32x4WithFlagX)),
-      EDX);
+  __ movl(Address(ESP, kInt32Size * (op->kind() - SimdOpInstr::kInt32x4WithFlagX)), EDX);
 
   // Copy mask back to register.
   __ movups(mask, Address(ESP, 0));

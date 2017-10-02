@@ -5611,7 +5611,7 @@ DEFINE_EMIT(Int32x4WithFlag,
              XmmRegister mask,
              Register flag,
              Temp<Fixed<Register, RDX> >)) {
-  // FIXME No memory version
+  // TODO(dartbug.com/30949) avoid transfer through memory.
   COMPILE_ASSERT(
       SimdOpInstr::kInt32x4WithFlagY == (SimdOpInstr::kInt32x4WithFlagX + 1) &&
       SimdOpInstr::kInt32x4WithFlagZ == (SimdOpInstr::kInt32x4WithFlagX + 2) &&
@@ -5626,7 +5626,7 @@ DEFINE_EMIT(Int32x4WithFlag,
   __ negl(RDX);
 
   __ movl(
-      Address(RSP, (op->kind() - SimdOpInstr::kInt32x4WithFlagX) * kInt32Size),
+      Address(RSP, kInt32Size * (op->kind() - SimdOpInstr::kInt32x4WithFlagX)),
       RDX);
   __ movups(mask, Address(RSP, 0));
   __ AddImmediate(RSP, Immediate(16));
