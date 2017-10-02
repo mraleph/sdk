@@ -2,6 +2,10 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+// This file contains two helper functions MakeLocationSummaryFromEmitter
+// and InvokeEmitter which
+//
+
 #ifndef RUNTIME_VM_COMPILER_BACKEND_LOCATIONS_HELPERS_H_
 #define RUNTIME_VM_COMPILER_BACKEND_LOCATIONS_HELPERS_H_
 

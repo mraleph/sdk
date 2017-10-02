@@ -6180,7 +6180,13 @@ DEFINE_EMIT(Int32x4SetFlag,
   }
 }
 
-#define EMITTERS(V, ____, SIMPLE)                                              \
+// Map SimdOpInstr::Kind-s to corresponding emit functions. Uses the following
+// format:
+//
+//     CASE(OpA) CASE(OpB) ____(Emitter) - Emitter is used to emit OpA and OpB.
+//     SIMPLE(OpA) - Emitter with name OpA is used to emit OpA.
+//
+#define SIMD_OP_VARIANTS(CASE, ____, SIMPLE)                                   \
   CASE(Float32x4Add)                                                           \
   CASE(Float32x4Sub)                                                           \
   CASE(Float32x4Mul)                                                           \
@@ -6274,7 +6280,7 @@ LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone, bool opt) const {
 #define EMIT(Name)                                                             \
   return MakeLocationSummaryFromEmitter(zone, this, &Emit##Name);
 #define SIMPLE(Name) CASE(Name) EMIT(Name)
-    EMITTERS(CASE, EMIT, SIMPLE)
+    SIMD_OP_VARIANTS(CASE, EMIT, SIMPLE)
 #undef CASE
 #undef EMIT
 #undef SIMPLE
@@ -6290,7 +6296,7 @@ void SimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   InvokeEmitter(compiler, this, &Emit##Name);                                  \
   break;
 #define SIMPLE(Name) CASE(Name) EMIT(Name)
-    EMITTERS(CASE, EMIT, SIMPLE)
+    SIMD_OP_VARIANTS(CASE, EMIT, SIMPLE)
 #undef CASE
 #undef EMIT
 #undef SIMPLE

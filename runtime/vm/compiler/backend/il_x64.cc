@@ -5326,17 +5326,20 @@ void DebugStepCheckInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
 // SIMD
 
 #define DEFINE_EMIT(Name, Args)                                                \
-  void Emit##Name(FlowGraphCompiler* compiler, SimdOpInstr* op, UNPACK Args)
+  static void Emit##Name(FlowGraphCompiler* compiler, SimdOpInstr* op,         \
+                         UNPACK Args)
 
-#define SIMD_BINARY_FLOAT_OP_BACKEND(V, Type, suffix)                          \
-  V(Type##Add, add##suffix)                                                    \
-  V(Type##Sub, sub##suffix)                                                    \
-  V(Type##Mul, mul##suffix)                                                    \
-  V(Type##Div, div##suffix)
+#define SIMD_OP_FLOAT_ARITH(V, Name, op)                                       \
+  V(Float32x4##Name, op##ps)                                                   \
+  V(Float64x2##Name, op##pd)
 
 #define SIMD_OP_SIMPLE_BINARY(V)                                               \
-  SIMD_BINARY_FLOAT_OP_BACKEND(V, Float32x4, ps)                               \
-  SIMD_BINARY_FLOAT_OP_BACKEND(V, Float64x2, pd)                               \
+  SIMD_OP_FLOAT_ARITH(V, Add, add)                                             \
+  SIMD_OP_FLOAT_ARITH(V, Sub, sub)                                             \
+  SIMD_OP_FLOAT_ARITH(V, Mul, mul)                                             \
+  SIMD_OP_FLOAT_ARITH(V, Div, div)                                             \
+  SIMD_OP_FLOAT_ARITH(V, Min, min)                                             \
+  SIMD_OP_FLOAT_ARITH(V, Max, max)                                             \
   V(Int32x4Add, addpl)                                                         \
   V(Int32x4Sub, subpl)                                                         \
   V(Int32x4BitAnd, andps)                                                      \
@@ -5347,11 +5350,7 @@ void DebugStepCheckInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   V(Float32x4GreaterThan, cmppsnle)                                            \
   V(Float32x4GreaterThanOrEqual, cmppsnlt)                                     \
   V(Float32x4LessThan, cmppslt)                                                \
-  V(Float32x4LessThanOrEqual, cmppsle)                                         \
-  V(Float32x4Min, minps)                                                       \
-  V(Float32x4Max, maxps)                                                       \
-  V(Float64x2Min, minpd)                                                       \
-  V(Float64x2Max, maxpd)
+  V(Float32x4LessThanOrEqual, cmppsle)
 
 DEFINE_EMIT(SimdBinaryOp,
             (SameAsFirstInput, XmmRegister left, XmmRegister right)) {
@@ -5423,14 +5422,11 @@ DEFINE_EMIT(SimdBinaryOp,
 }
 
 #define SIMD_OP_SIMPLE_UNARY(V)                                                \
-  V(Float32x4Sqrt, sqrtps)                                                     \
+  SIMD_OP_FLOAT_ARITH(V, Sqrt, sqrt)                                           \
+  SIMD_OP_FLOAT_ARITH(V, Negate, negate)                                       \
+  SIMD_OP_FLOAT_ARITH(V, Abs, abs)                                             \
   V(Float32x4Reciprocal, reciprocalps)                                         \
   V(Float32x4ReciprocalSqrt, rsqrtps)                                          \
-  V(Float32x4Negate, negateps)                                                 \
-  V(Float32x4Abs, absps)                                                       \
-  V(Float64x2Negate, negatepd)                                                 \
-  V(Float64x2Abs, abspd)                                                       \
-  V(Float64x2Sqrt, sqrtpd)
 
 DEFINE_EMIT(SimdUnaryOp, (SameAsFirstInput, XmmRegister value)) {
   // TODO(dartbug.com/30949) select better register constraints to avoid
@@ -5663,6 +5659,12 @@ DEFINE_EMIT(Int32x4Select,
   __ orps(mask, temp);
 }
 
+// Map SimdOpInstr::Kind-s to corresponding emit functions. Uses the following
+// format:
+//
+//     CASE(OpA) CASE(OpB) ____(Emitter) - Emitter is used to emit OpA and OpB.
+//     SIMPLE(OpA) - Emitter with name OpA is used to emit OpA.
+//
 #define SIMD_OP_VARIANTS(CASE, ____, SIMPLE)                                   \
   SIMD_OP_SIMPLE_BINARY(CASE)                                                  \
   CASE(Float32x4Scale)                                                         \

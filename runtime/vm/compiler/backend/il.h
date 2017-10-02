@@ -6501,89 +6501,103 @@ class UnboxedIntConverterInstr : public TemplateDefinition<1, NoThrow> {
   DISALLOW_COPY_AND_ASSIGN(UnboxedIntConverterInstr);
 };
 
-// SIMD
+//
+// SimdOpInstr
+//
+// All SIMD intrinsics and recognized methods are represented via instances
+// of SimdOpInstr, a particular type of SimdOp is selected by SimdOpInstr::Kind.
+//
+// Defines below are used to contruct SIMD_OP_LIST - a list of all SIMD
+// operations. SIMD_OP_LIST contains information such as arity, input types and
+// output type for each SIMD op and is used to derive things like input
+// and output representations, type of return value, etc.
+//
 
-#define SIMD_BINARY_FLOAT_OP_LIST(V, T)                                        \
-  V(2, _, T##Add, (T, T), T)                                                   \
-  V(2, _, T##Sub, (T, T), T)                                                   \
-  V(2, _, T##Mul, (T, T), T)                                                   \
-  V(2, _, T##Div, (T, T), T)
+// A binary SIMD op with the given name that has signature T x T -> T.
+#define SIMD_BINARY_OP(M, T, Name) M(2, _, T##Name, (T, T), T)
 
-#define SIMD_BINARY_INTEGER_OP_LIST(V, T)                                      \
-  V(2, _, T##Add, (T, T), T)                                                   \
-  V(2, _, T##Sub, (T, T), T)                                                   \
-  V(2, _, T##BitAnd, (T, T), T)                                                \
-  V(2, _, T##BitOr, (T, T), T)                                                 \
-  V(2, _, T##BitXor, (T, T), T)
+// List of SIMD_BINARY_OPs common for Float32x4 or Float64x2.
+#define SIMD_BINARY_FLOAT_OP_LIST(M, T)                                        \
+  SIMD_BINARY_OP(M, T, Add)                                                    \
+  SIMD_BINARY_OP(M, T, Sub)                                                    \
+  SIMD_BINARY_OP(M, T, Mul)                                                    \
+  SIMD_BINARY_OP(M, T, Div)                                                    \
+  SIMD_BINARY_OP(M, T, Min)                                                    \
+  SIMD_BINARY_OP(M, T, Max)
 
+// List of SIMD_BINARY_OP for Int32x4.
+#define SIMD_BINARY_INTEGER_OP_LIST(M, T)                                      \
+  SIMD_BINARY_OP(M, T, Add)                                                    \
+  SIMD_BINARY_OP(M, T, Sub)                                                    \
+  SIMD_BINARY_OP(M, T, BitAnd)                                                 \
+  SIMD_BINARY_OP(M, T, BitOr)                                                  \
+  SIMD_BINARY_OP(M, T, BitXor)
+
+// Given a signature of a given SIMD op construct its per component variations.
+#define SIMD_PER_COMPONENT_XYZW(M, Arity, Name, Inputs, Output)                \
+  M(Arity, _, Name##X, Inputs, Output)                                         \
+  M(Arity, _, Name##Y, Inputs, Output)                                         \
+  M(Arity, _, Name##Z, Inputs, Output)                                         \
+  M(Arity, _, Name##W, Inputs, Output)
+
+// Define convertion between two SIMD types.
 #define SIMD_CONVERSION(M, FromType, ToType)                                   \
   M(1, _, FromType##To##ToType, (FromType), ToType)
 
+// List of all recognized SIMD operations.
+// Note: except for operations that map to operators (Add, Mul, Sub, Div,
+// BitXor, BitOr) all other operations must match names used by
+// MethodRecognizer. This allows to autogenerate convertion from
+// MethodRecognizer::Kind into SimdOpInstr::Kind (see KindForMethod helper).
 #define SIMD_OP_LIST(M, BINARY_OP)                                             \
   SIMD_BINARY_FLOAT_OP_LIST(BINARY_OP, Float32x4)                              \
   SIMD_BINARY_FLOAT_OP_LIST(BINARY_OP, Float64x2)                              \
   SIMD_BINARY_INTEGER_OP_LIST(BINARY_OP, Int32x4)                              \
-  M(1, _, Float32x4ShuffleX, (Float32x4), Double)                              \
-  M(1, _, Float32x4ShuffleY, (Float32x4), Double)                              \
-  M(1, _, Float32x4ShuffleZ, (Float32x4), Double)                              \
-  M(1, _, Float32x4ShuffleW, (Float32x4), Double)                              \
+  SIMD_PER_COMPONENT_XYZW(M, 1, Float32x4Shuffle, (Float32x4), Double)         \
+  SIMD_PER_COMPONENT_XYZW(M, 2, Float32x4With, (Double, Float32x4), Double)    \
+  SIMD_PER_COMPONENT_XYZW(M, 1, Int32x4GetFlag, (Int32x4), Bool)               \
+  SIMD_PER_COMPONENT_XYZW(M, 2, Int32x4WithFlag, (Int32x4, Bool), Int32x4)     \
   M(1, MASK, Float32x4Shuffle, (Float32x4), Float32x4)                         \
   M(1, MASK, Int32x4Shuffle, (Int32x4), Int32x4)                               \
   M(2, MASK, Float32x4ShuffleMix, (Float32x4, Float32x4), Float32x4)           \
   M(2, MASK, Int32x4ShuffleMix, (Int32x4, Int32x4), Int32x4)                   \
-  M(1, _, Float32x4Splat, (Double), Float32x4)                                 \
   M(2, _, Float32x4Equal, (Float32x4, Float32x4), Int32x4)                     \
   M(2, _, Float32x4GreaterThan, (Float32x4, Float32x4), Int32x4)               \
   M(2, _, Float32x4GreaterThanOrEqual, (Float32x4, Float32x4), Int32x4)        \
   M(2, _, Float32x4LessThan, (Float32x4, Float32x4), Int32x4)                  \
   M(2, _, Float32x4LessThanOrEqual, (Float32x4, Float32x4), Int32x4)           \
   M(2, _, Float32x4NotEqual, (Float32x4, Float32x4), Int32x4)                  \
-  M(2, _, Float32x4Min, (Float32x4, Float32x4), Float32x4)                     \
-  M(2, _, Float32x4Max, (Float32x4, Float32x4), Float32x4)                     \
-  M(1, _, Float32x4GetSignMask, (Float32x4), Int8)                             \
-  M(1, _, Int32x4GetSignMask, (Int32x4), Int8)                                 \
-  M(2, _, Float32x4Scale, (Double, Float32x4), Float32x4)                      \
-  M(1, _, Float32x4Sqrt, (Float32x4), Float32x4)                               \
-  M(1, _, Float32x4Reciprocal, (Float32x4), Float32x4)                         \
-  M(1, _, Float32x4ReciprocalSqrt, (Float32x4), Float32x4)                     \
-  M(4, _, Float32x4Constructor, (Double, Double, Double, Double), Float32x4)   \
   M(4, _, Int32x4Constructor, (Int32, Int32, Int32, Int32), Int32x4)           \
   M(4, _, Int32x4BoolConstructor, (Bool, Bool, Bool, Bool), Int32x4)           \
+  M(4, _, Float32x4Constructor, (Double, Double, Double, Double), Float32x4)   \
   M(2, _, Float64x2Constructor, (Double, Double), Float64x2)                   \
   M(0, _, Float32x4Zero, (), Float32x4)                                        \
+  M(0, _, Float64x2Zero, (), Float64x2)                                        \
+  M(1, _, Float32x4Splat, (Double), Float32x4)                                 \
+  M(1, _, Float64x2Splat, (Double), Float64x2)                                 \
+  M(1, _, Int32x4GetSignMask, (Int32x4), Int8)                                 \
+  M(1, _, Float32x4GetSignMask, (Float32x4), Int8)                             \
+  M(1, _, Float64x2GetSignMask, (Float64x2), Int8)                             \
+  M(2, _, Float32x4Scale, (Double, Float32x4), Float32x4)                      \
+  M(2, _, Float64x2Scale, (Float64x2, Double), Float64x2)                      \
+  M(1, _, Float32x4Sqrt, (Float32x4), Float32x4)                               \
+  M(1, _, Float64x2Sqrt, (Float64x2), Float64x2)                               \
+  M(1, _, Float32x4Reciprocal, (Float32x4), Float32x4)                         \
+  M(1, _, Float32x4ReciprocalSqrt, (Float32x4), Float32x4)                     \
   M(1, _, Float32x4Negate, (Float32x4), Float32x4)                             \
+  M(1, _, Float64x2Negate, (Float64x2), Float64x2)                             \
   M(1, _, Float32x4Abs, (Float32x4), Float32x4)                                \
+  M(1, _, Float64x2Abs, (Float64x2), Float64x2)                                \
   M(3, _, Float32x4Clamp, (Float32x4, Float32x4, Float32x4), Float32x4)        \
-  M(2, _, Float32x4WithX, (Double, Float32x4), Float32x4)                      \
-  M(2, _, Float32x4WithY, (Double, Float32x4), Float32x4)                      \
-  M(2, _, Float32x4WithZ, (Double, Float32x4), Float32x4)                      \
-  M(2, _, Float32x4WithW, (Double, Float32x4), Float32x4)                      \
+  M(1, _, Float64x2GetX, (Float64x2), Double)                                  \
+  M(1, _, Float64x2GetY, (Float64x2), Double)                                  \
+  M(2, _, Float64x2WithX, (Float64x2, Double), Float64x2)                      \
+  M(2, _, Float64x2WithY, (Float64x2, Double), Float64x2)                      \
+  M(3, _, Int32x4Select, (Int32x4, Float32x4, Float32x4), Float32x4)           \
   SIMD_CONVERSION(M, Float32x4, Int32x4)                                       \
   SIMD_CONVERSION(M, Int32x4, Float32x4)                                       \
   SIMD_CONVERSION(M, Float32x4, Float64x2)                                     \
-  SIMD_CONVERSION(M, Float64x2, Float32x4)                                     \
-  M(1, _, Int32x4GetFlagX, (Int32x4), Bool)                                    \
-  M(1, _, Int32x4GetFlagY, (Int32x4), Bool)                                    \
-  M(1, _, Int32x4GetFlagZ, (Int32x4), Bool)                                    \
-  M(1, _, Int32x4GetFlagW, (Int32x4), Bool)                                    \
-  M(1, _, Float64x2GetX, (Float64x2), Double)                                  \
-  M(1, _, Float64x2GetY, (Float64x2), Double)                                  \
-  M(1, _, Float64x2Splat, (Double), Float64x2)                                 \
-  M(0, _, Float64x2Zero, (), Float64x2)                                        \
-  M(1, _, Float64x2Negate, (Float64x2), Float64x2)                             \
-  M(1, _, Float64x2Abs, (Float64x2), Float64x2)                                \
-  M(1, _, Float64x2Sqrt, (Float64x2), Float64x2)                               \
-  M(1, _, Float64x2GetSignMask, (Float64x2), Int8)                             \
-  M(2, _, Float64x2Scale, (Float64x2, Double), Float64x2)                      \
-  M(2, _, Float64x2WithX, (Float64x2, Double), Float64x2)                      \
-  M(2, _, Float64x2WithY, (Float64x2, Double), Float64x2)                      \
-  M(2, _, Float64x2Min, (Float64x2, Float64x2), Float64x2)                     \
-  M(2, _, Float64x2Max, (Float64x2, Float64x2), Float64x2)                     \
-  M(3, _, Int32x4Select, (Int32x4, Float32x4, Float32x4), Float32x4)           \
-  M(2, _, Int32x4WithFlagX, (Int32x4, Bool), Int32x4)                          \
-  M(2, _, Int32x4WithFlagY, (Int32x4, Bool), Int32x4)                          \
-  M(2, _, Int32x4WithFlagZ, (Int32x4, Bool), Int32x4)                          \
-  M(2, _, Int32x4WithFlagW, (Int32x4, Bool), Int32x4)
+  SIMD_CONVERSION(M, Float64x2, Float32x4)
 
 class SimdOpInstr : public Definition {
  public:
@@ -6593,6 +6607,7 @@ class SimdOpInstr : public Definition {
 #undef DECLARE_ENUM
   };
 
+  // Create SimdOp from the arguments of the given call and the given receiver.
   static SimdOpInstr* CreateFromCall(Zone* zone,
                                      MethodRecognizer::Kind kind,
                                      Definition* receiver,
@@ -6601,6 +6616,7 @@ class SimdOpInstr : public Definition {
     SimdOpInstr* op =
         new (zone) SimdOpInstr(KindForMethod(kind), call->deopt_id());
     op->SetInputAt(0, new (zone) Value(receiver));
+    // Note: we are skipping receiver.
     for (intptr_t i = 1; i < op->InputCount(); i++) {
       op->SetInputAt(i, new (zone) Value(call->ArgumentAt(i)));
     }
@@ -6610,18 +6626,21 @@ class SimdOpInstr : public Definition {
     return op;
   }
 
+  // Create SimdOp from the arguments of the given factory call and the given receiver.
   static SimdOpInstr* CreateFromFactoryCall(Zone* zone,
                                             MethodRecognizer::Kind kind,
                                             Instruction* call) {
     SimdOpInstr* op =
         new (zone) SimdOpInstr(KindForMethod(kind), call->deopt_id());
     for (intptr_t i = 0; i < op->InputCount(); i++) {
+      // Note: ArgumentAt(0) is type arguments which we don't need.
       op->SetInputAt(i, new (zone) Value(call->ArgumentAt(i + 1)));
     }
     ASSERT(call->ArgumentCount() == (op->InputCount() + 1));
     return op;
   }
 
+  // Create a binary SimdOp instr.
   static SimdOpInstr* Create(Kind kind,
                              Value* left,
                              Value* right,
@@ -6629,6 +6648,7 @@ class SimdOpInstr : public Definition {
     return new SimdOpInstr(kind, left, right, deopt_id);
   }
 
+  // Create a binary SimdOp instr.
   static SimdOpInstr* Create(MethodRecognizer::Kind kind,
                              Value* left,
                              Value* right,
@@ -6636,6 +6656,7 @@ class SimdOpInstr : public Definition {
     return new SimdOpInstr(KindForMethod(kind), left, right, deopt_id);
   }
 
+  // Create a unary SimdOp.
   static SimdOpInstr* Create(MethodRecognizer::Kind kind,
                              Value* left,
                              intptr_t deopt_id) {
@@ -6643,16 +6664,30 @@ class SimdOpInstr : public Definition {
   }
 
   static Kind KindForMethod(MethodRecognizer::Kind method_kind);
+
+  // Convert a combination of SIMD cid and an arithmetic token into Kind, e.g.
+  // Float32x4 and Token::kADD becomes Float32x4Add.
   static Kind KindForOperator(intptr_t cid, Token::Kind op);
 
+  virtual intptr_t InputCount() const;
+  virtual Value* InputAt(intptr_t i) const {
+    ASSERT(0 <= i && i < InputCount());
+    return inputs_[i];
+  }
+
   Kind kind() const { return kind_; }
+  intptr_t mask() const {
+    ASSERT(HasMask());
+    return mask_;
+  }
+
+  virtual Representation representation() const;
+  virtual Representation RequiredInputRepresentation(intptr_t idx) const;
+
+  virtual CompileType ComputeType() const;
 
   virtual bool MayThrow() const { return false; }
   virtual bool ComputeCanDeoptimize() const { return false; }
-
-  virtual Representation representation() const;
-
-  virtual Representation RequiredInputRepresentation(intptr_t idx) const;
 
   virtual intptr_t DeoptimizationTarget() const {
     // Direct access since this instruction cannot deoptimize, and the deopt-id
@@ -6660,11 +6695,8 @@ class SimdOpInstr : public Definition {
     return GetDeoptId();
   }
 
-  DECLARE_INSTRUCTION(SimdOp)
-  virtual CompileType ComputeType() const;
-
-  virtual bool AllowsCSE() const { return true; }
   virtual bool HasUnknownSideEffects() const { return false; }
+  virtual bool AllowsCSE() const { return true; }
 
   virtual bool AttributesEqual(Instruction* other) const {
     SimdOpInstr* other_op = other->AsSimdOp();
@@ -6672,15 +6704,8 @@ class SimdOpInstr : public Definition {
            (!HasMask() || mask() == other_op->mask());
   }
 
-  virtual intptr_t InputCount() const;
-  virtual Value* InputAt(intptr_t i) const { return inputs_[i]; }
-
+  DECLARE_INSTRUCTION(SimdOp)
   PRINT_OPERANDS_TO_SUPPORT
-
-  intptr_t mask() const {
-    ASSERT(HasMask());
-    return mask_;
-  }
 
  private:
   SimdOpInstr(Kind kind, intptr_t deopt_id)
@@ -6702,6 +6727,9 @@ class SimdOpInstr : public Definition {
 
   virtual void RawSetInputAt(intptr_t i, Value* value) { inputs_[i] = value; }
 
+  // We consider SimdOpInstr to be very uncommon so we don't optimize them for
+  // size. Any instance of SimdOpInstr has enough space to fit any variation.
+  // TODO(dartbug.com/30949) optimize this for size.
   const Kind kind_;
   Value* inputs_[4];
   intptr_t mask_;

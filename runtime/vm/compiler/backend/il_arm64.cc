@@ -4665,7 +4665,8 @@ void DebugStepCheckInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
 // SIMD
 
 #define DEFINE_EMIT(Name, Args)                                                \
-  void Emit##Name(FlowGraphCompiler* compiler, SimdOpInstr* op, UNPACK Args)
+  static void Emit##Name(FlowGraphCompiler* compiler, SimdOpInstr* op,         \
+                         UNPACK Args)
 
 #define SIMD_OP_FLOAT_ARITH(V, Name, op)                                       \
   V(Float32x4##Name, op##s)                                                    \
@@ -5012,6 +5013,12 @@ DEFINE_EMIT(Int32x4SetFlag, (SameAsFirstInput, VRegister mask, Register flag)) {
   }
 }
 
+// Map SimdOpInstr::Kind-s to corresponding emit functions. Uses the following
+// format:
+//
+//     CASE(OpA) CASE(OpB) ____(Emitter) - Emitter is used to emit OpA and OpB.
+//     SIMPLE(OpA) - Emitter with name OpA is used to emit OpA.
+//
 #define SIMD_OP_VARIANTS(CASE, ____)                                           \
   SIMD_OP_SIMPLE_BINARY(CASE)                                                  \
   CASE(Float32x4ShuffleMix)                                                    \

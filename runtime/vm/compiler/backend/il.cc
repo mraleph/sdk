@@ -4236,24 +4236,31 @@ SimdOpInstr::Kind SimdOpInstr::KindForMethod(MethodRecognizer::Kind kind) {
   return kFloat32x4Add;
 }
 
-// bits  0...2 arity
-//       3...3 has mask
-//       4...7 ouput representation
-//       8..11 input #0 representation
-//      12..15 input #1 representation
-//      16..19 input #2 representation
-//      20..24 input #3 representation
+// Methods InputCount(), representation(), RequiredInputRepresentation() and
+// HasMask() are using a packed array of 32bit integers to lookup necessary
+// information for a given SimdOpInstr::Kind.
+//
+// Each element of the simd_op_information array below contains the following:
+//
+//     bits  0...2 | arity
+//           3...3 | has mask?
+//           4...7 | representation of the output
+//           8..11 |                       input #0
+//          12..15 |                       input #1
+//          16..19 |                       input #2
+//          20..24 |                       input #3
+//
 typedef BitField<uint32_t, uint8_t, 0, 3> ArityBitField;
 typedef BitField<uint32_t, bool, 3, 1> HasMaskField;
 typedef BitField<uint32_t, Representation, 4, 4> OutputRepresentationField;
 typedef BitField<uint32_t, Representation, 8, 4> Input0RepresentationField;
+
+// Make representaion from type name used by SIMD_OP_LIST.
+#define REP(T) (kUnboxed##T)
 static const Representation kUnboxedBool = kTagged;
 static const Representation kUnboxedInt8 = kUnboxedInt32;
-static const uint32_t simd_op_information[] = {
-#define ENCODE_INFORMATION(Arity, HasMask, Out, Ins)                           \
-  ArityBitField::encode(Arity) | HasMaskField::encode(HasMask) |               \
-      OutputRepresentationField::encode(Out) | (Ins)
-#define REP(T) (kUnboxed##T)
+
+// ENCODE_INPUTS_X packs X input reprensetations into a single integer.
 #define ENCODE_INPUTS_0() (0)
 #define ENCODE_INPUTS_1(In0, ...) (Input0RepresentationField::encode(REP(In0)))
 #define ENCODE_INPUTS_2(In0, ...)                                              \
@@ -4265,23 +4272,35 @@ static const uint32_t simd_op_information[] = {
 #define ENCODE_INPUTS_4(In0, ...)                                              \
   (Input0RepresentationField::encode(REP(In0)) |                               \
    (ENCODE_INPUTS_3(__VA_ARGS__) << Input0RepresentationField::bitsize()))
-#define HAS__ false
+
+// Helpers for correct interpretation of the Mask field in the SIMD_OP_LIST.
 #define HAS_MASK true
+#define HAS__ false
+
+// Encode the given information into a single uint32_t.
+#define ENCODE_INFORMATION(Arity, HasMask, Out, Ins)                           \
+  ArityBitField::encode(Arity) | HasMaskField::encode(HasMask) |               \
+      OutputRepresentationField::encode(Out) | (Ins)
+
+// Define the metadata array.
+static const uint32_t simd_op_information[] = {
 #define CASE(Arity, Mask, Name, Args, Result)                                  \
   ENCODE_INFORMATION(Arity, HAS_##Mask, REP(Result),                           \
                      ENCODE_INPUTS_##Arity Args),
     SIMD_OP_LIST(CASE, CASE)
+#undef CASE
+};
+
+// Undef all auxiliary macros.
 #undef ENCODE_INFORMATION
-#undef REP
+#undef HAS__
+#undef HAS_MASK
 #undef ENCODE_INPUTS_0
 #undef ENCODE_INPUTS_1
 #undef ENCODE_INPUTS_2
 #undef ENCODE_INPUTS_3
 #undef ENCODE_INPUTS_4
-#undef HAS__
-#undef HAS_MASK
-#undef CASE
-};
+#undef REP
 
 intptr_t SimdOpInstr::InputCount() const {
   return ArityBitField::decode(simd_op_information[kind()]);
