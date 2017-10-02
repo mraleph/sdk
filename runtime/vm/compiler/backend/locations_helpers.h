@@ -172,13 +172,14 @@ struct SignatureInfo<Cons<T0, Tx> > {
   }
 };
 
-template <typename Out>
-LocationSummary* MakeLocationSummaryFromEmitter(
-    Zone* zone,
-    const SimdOpInstr* op,
-    void (*Emit)(FlowGraphCompiler*, SimdOpInstr*, SimdOpInstr::Kind, Out)) {
+template <typename Instr, typename Out>
+LocationSummary* MakeLocationSummaryFromEmitter(Zone* zone,
+                                                const Instr* instr,
+                                                void (*Emit)(FlowGraphCompiler*,
+                                                             Instr*,
+                                                             Out)) {
   typedef SIGNATURE_INFO_TYPE(0) SignatureT;
-  ASSERT(op->InputCount() == SignatureT::kInputCount);
+  ASSERT(instr->InputCount() == SignatureT::kInputCount);
   LocationSummary* summary = new (zone)
       LocationSummary(zone, SignatureT::kInputCount, SignatureT::kTempCount,
                       LocationSummary::kNoCall);
@@ -188,11 +189,10 @@ LocationSummary* MakeLocationSummaryFromEmitter(
 
 #define DEFINE_MAKE_LOCATION_SUMMARY_SPECIALIZATION(Arity, Types)              \
   LocationSummary* MakeLocationSummaryFromEmitter(                             \
-      Zone* zone, const SimdOpInstr* op,                                       \
-      void (*Emit)(FlowGraphCompiler*, SimdOpInstr*, SimdOpInstr::Kind, Out,   \
-                   UNPACK Types)) {                                            \
+      Zone* zone, const Instr* instr,                                          \
+      void (*Emit)(FlowGraphCompiler*, Instr*, Out, UNPACK Types)) {           \
     typedef SIGNATURE_INFO_TYPE(Arity, UNPACK Types) SignatureT;               \
-    ASSERT(op->InputCount() == SignatureT::kInputCount);                       \
+    ASSERT(instr->InputCount() == SignatureT::kInputCount);                    \
     LocationSummary* summary = new (zone)                                      \
         LocationSummary(zone, SignatureT::kInputCount, SignatureT::kTempCount, \
                         LocationSummary::kNoCall);                             \
@@ -201,19 +201,25 @@ LocationSummary* MakeLocationSummaryFromEmitter(
     return summary;                                                            \
   }
 
-template <typename Out, typename T0>
+template <typename Instr, typename Out, typename T0>
 DEFINE_MAKE_LOCATION_SUMMARY_SPECIALIZATION(1, (T0));
 
-template <typename Out, typename T0, typename T1>
+template <typename Instr, typename Out, typename T0, typename T1>
 DEFINE_MAKE_LOCATION_SUMMARY_SPECIALIZATION(2, (T0, T1));
 
-template <typename Out, typename T0, typename T1, typename T2>
+template <typename Instr, typename Out, typename T0, typename T1, typename T2>
 DEFINE_MAKE_LOCATION_SUMMARY_SPECIALIZATION(3, (T0, T1, T2));
 
-template <typename Out, typename T0, typename T1, typename T2, typename T3>
+template <typename Instr,
+          typename Out,
+          typename T0,
+          typename T1,
+          typename T2,
+          typename T3>
 DEFINE_MAKE_LOCATION_SUMMARY_SPECIALIZATION(4, (T0, T1, T2, T3));
 
-template <typename Out,
+template <typename Instr,
+          typename Out,
           typename T0,
           typename T1,
           typename T2,
@@ -221,110 +227,87 @@ template <typename Out,
           typename T4>
 DEFINE_MAKE_LOCATION_SUMMARY_SPECIALIZATION(5, (T0, T1, T2, T3, T4));
 
-template <typename Out>
-void InvokeEmitter(
-    FlowGraphCompiler* compiler,
-    SimdOpInstr* op,
-    void (*Emit)(FlowGraphCompiler*, SimdOpInstr*, SimdOpInstr::Kind, Out)) {
+template <typename Instr, typename Out>
+void InvokeEmitter(FlowGraphCompiler* compiler,
+                   Instr* instr,
+                   void (*Emit)(FlowGraphCompiler*, Instr*, Out)) {
   typedef SIGNATURE_INFO_TYPE(0) SignatureT;
-  ASSERT(op->InputCount() == SignatureT::kInputCount);
-  LocationSummary* locs = op->locs();
-  Emit(compiler, op, op->kind(), UnwrapLocation<Out>::Unwrap(locs->out(0)));
+  ASSERT(instr->InputCount() == SignatureT::kInputCount);
+  LocationSummary* locs = instr->locs();
+  Emit(compiler, instr, UnwrapLocation<Out>::Unwrap(locs->out(0)));
 }
 
-template <typename Out, typename T0>
+template <typename Instr, typename Out, typename T0>
 void InvokeEmitter(FlowGraphCompiler* compiler,
-                   SimdOpInstr* op,
-                   void (*Emit)(FlowGraphCompiler*,
-                                SimdOpInstr*,
-                                SimdOpInstr::Kind,
-                                Out,
-                                T0)) {
+                   Instr* instr,
+                   void (*Emit)(FlowGraphCompiler*, Instr*, Out, T0)) {
   typedef SIGNATURE_INFO_TYPE(1, T0) SignatureT;
-  ASSERT(op->InputCount() == SignatureT::kInputCount);
-  LocationSummary* locs = op->locs();
-  Emit(compiler, op, op->kind(), UnwrapLocation<Out>::Unwrap(locs->out(0)),
+  ASSERT(instr->InputCount() == SignatureT::kInputCount);
+  LocationSummary* locs = instr->locs();
+  Emit(compiler, instr, UnwrapLocation<Out>::Unwrap(locs->out(0)),
        UnwrapLocation<T0>::template Unwrap<SignatureT::kInputCount, 0>(locs));
 }
 
-template <typename Out, typename T0, typename T1>
+template <typename Instr, typename Out, typename T0, typename T1>
 void InvokeEmitter(FlowGraphCompiler* compiler,
-                   SimdOpInstr* op,
-                   void (*Emit)(FlowGraphCompiler*,
-                                SimdOpInstr*,
-                                SimdOpInstr::Kind,
-                                Out,
-                                T0,
-                                T1)) {
+                   Instr* instr,
+                   void (*Emit)(FlowGraphCompiler*, Instr*, Out, T0, T1)) {
   typedef SIGNATURE_INFO_TYPE(2, T0, T1) SignatureT;
-  ASSERT(op->InputCount() == SignatureT::kInputCount);
-  LocationSummary* locs = op->locs();
-  Emit(compiler, op, op->kind(), UnwrapLocation<Out>::Unwrap(locs->out(0)),
+  ASSERT(instr->InputCount() == SignatureT::kInputCount);
+  LocationSummary* locs = instr->locs();
+  Emit(compiler, instr, UnwrapLocation<Out>::Unwrap(locs->out(0)),
        UnwrapLocation<T0>::template Unwrap<SignatureT::kInputCount, 0>(locs),
        UnwrapLocation<T1>::template Unwrap<SignatureT::kInputCount, 1>(locs));
 }
 
-template <typename Out, typename T0, typename T1, typename T2>
+template <typename Instr, typename Out, typename T0, typename T1, typename T2>
 void InvokeEmitter(FlowGraphCompiler* compiler,
-                   SimdOpInstr* op,
-                   void (*Emit)(FlowGraphCompiler*,
-                                SimdOpInstr*,
-                                SimdOpInstr::Kind,
-                                Out,
-                                T0,
-                                T1,
-                                T2)) {
+                   Instr* instr,
+                   void (*Emit)(FlowGraphCompiler*, Instr*, Out, T0, T1, T2)) {
   typedef SIGNATURE_INFO_TYPE(3, T0, T1, T2) SignatureT;
-  ASSERT(op->InputCount() == SignatureT::kInputCount);
-  LocationSummary* locs = op->locs();
-  Emit(compiler, op, op->kind(), UnwrapLocation<Out>::Unwrap(locs->out(0)),
+  ASSERT(instr->InputCount() == SignatureT::kInputCount);
+  LocationSummary* locs = instr->locs();
+  Emit(compiler, instr, UnwrapLocation<Out>::Unwrap(locs->out(0)),
        UnwrapLocation<T0>::template Unwrap<SignatureT::kInputCount, 0>(locs),
        UnwrapLocation<T1>::template Unwrap<SignatureT::kInputCount, 1>(locs),
        UnwrapLocation<T2>::template Unwrap<SignatureT::kInputCount, 2>(locs));
 }
 
-template <typename Out, typename T0, typename T1, typename T2, typename T3>
-void InvokeEmitter(FlowGraphCompiler* compiler,
-                   SimdOpInstr* op,
-                   void (*Emit)(FlowGraphCompiler*,
-                                SimdOpInstr*,
-                                SimdOpInstr::Kind,
-                                Out,
-                                T0,
-                                T1,
-                                T2,
-                                T3)) {
+template <typename Instr,
+          typename Out,
+          typename T0,
+          typename T1,
+          typename T2,
+          typename T3>
+void InvokeEmitter(
+    FlowGraphCompiler* compiler,
+    Instr* instr,
+    void (*Emit)(FlowGraphCompiler*, Instr*, Out, T0, T1, T2, T3)) {
   typedef SIGNATURE_INFO_TYPE(4, T0, T1, T2, T3) SignatureT;
-  ASSERT(op->InputCount() == SignatureT::kInputCount);
-  LocationSummary* locs = op->locs();
-  Emit(compiler, op, op->kind(), UnwrapLocation<Out>::Unwrap(locs->out(0)),
+  ASSERT(instr->InputCount() == SignatureT::kInputCount);
+  LocationSummary* locs = instr->locs();
+  Emit(compiler, instr, UnwrapLocation<Out>::Unwrap(locs->out(0)),
        UnwrapLocation<T0>::template Unwrap<SignatureT::kInputCount, 0>(locs),
        UnwrapLocation<T1>::template Unwrap<SignatureT::kInputCount, 1>(locs),
        UnwrapLocation<T2>::template Unwrap<SignatureT::kInputCount, 2>(locs),
        UnwrapLocation<T3>::template Unwrap<SignatureT::kInputCount, 3>(locs));
 }
 
-template <typename Out,
+template <typename Instr,
+          typename Out,
           typename T0,
           typename T1,
           typename T2,
           typename T3,
           typename T4>
-void InvokeEmitter(FlowGraphCompiler* compiler,
-                   SimdOpInstr* op,
-                   void (*Emit)(FlowGraphCompiler*,
-                                SimdOpInstr*,
-                                SimdOpInstr::Kind,
-                                Out,
-                                T0,
-                                T1,
-                                T2,
-                                T3,
-                                T4)) {
+void InvokeEmitter(
+    FlowGraphCompiler* compiler,
+    Instr* instr,
+    void (*Emit)(FlowGraphCompiler*, Instr*, Out, T0, T1, T2, T3, T4)) {
   typedef SIGNATURE_INFO_TYPE(5, T0, T1, T2, T3, T4) SignatureT;
-  ASSERT(op->InputCount() == SignatureT::kInputCount);
-  LocationSummary* locs = op->locs();
-  Emit(compiler, op, op->kind(), UnwrapLocation<Out>::Unwrap(locs->out(0)),
+  ASSERT(instr->InputCount() == SignatureT::kInputCount);
+  LocationSummary* locs = instr->locs();
+  Emit(compiler, instr, UnwrapLocation<Out>::Unwrap(locs->out(0)),
        UnwrapLocation<T0>::template Unwrap<SignatureT::kInputCount, 0>(locs),
        UnwrapLocation<T1>::template Unwrap<SignatureT::kInputCount, 1>(locs),
        UnwrapLocation<T2>::template Unwrap<SignatureT::kInputCount, 2>(locs),

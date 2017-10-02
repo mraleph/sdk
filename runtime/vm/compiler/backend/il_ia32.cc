@@ -5522,68 +5522,48 @@ void DebugStepCheckInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
 // SIMD
 
 #define DEFINE_EMIT(Name, Args)                                                \
-  void Emit##Name(FlowGraphCompiler* compiler, SimdOpInstr* op,                \
-                  SimdOpInstr::Kind kind, UNPACK Args)
+  void Emit##Name(FlowGraphCompiler* compiler, SimdOpInstr* op, UNPACK Args)
+
+#define SIMD_OP_FLOAT_ARITH(V, Name, op)                                       \
+  V(Float32x4##Name, op##ps)                                                   \
+  V(Float64x2##Name, op##pd)
+
+#define SIMD_OP_SIMPLE_BINARY(V)                                               \
+  SIMD_OP_FLOAT_ARITH(V, Add, add)                                             \
+  SIMD_OP_FLOAT_ARITH(V, Sub, sub)                                             \
+  SIMD_OP_FLOAT_ARITH(V, Mul, mul)                                             \
+  SIMD_OP_FLOAT_ARITH(V, Div, div)                                             \
+  SIMD_OP_FLOAT_ARITH(V, Min, min)                                             \
+  SIMD_OP_FLOAT_ARITH(V, Max, max)                                             \
+  V(Int32x4Add, addpl)                                                         \
+  V(Int32x4Sub, subpl)                                                         \
+  V(Int32x4BitAnd, andps)                                                      \
+  V(Int32x4BitOr, orps)                                                        \
+  V(Int32x4BitXor, xorps)                                                      \
+  V(Float32x4Equal, cmppseq)                                                   \
+  V(Float32x4NotEqual, cmppsneq)                                               \
+  V(Float32x4GreaterThan, cmppsnle)                                            \
+  V(Float32x4GreaterThanOrEqual, cmppsnlt)                                     \
+  V(Float32x4LessThan, cmppslt)                                                \
+  V(Float32x4LessThanOrEqual, cmppsle)
 
 DEFINE_EMIT(SimdBinaryOp,
             (SameAsFirstInput, XmmRegister left, XmmRegister right)) {
-  switch (kind) {
-    case SimdOpInstr::kFloat32x4Add:
-      __ addps(left, right);
-      break;
-    case SimdOpInstr::kFloat32x4Sub:
-      __ subps(left, right);
-      break;
-    case SimdOpInstr::kFloat32x4Mul:
-      __ mulps(left, right);
-      break;
-    case SimdOpInstr::kFloat32x4Div:
-      __ divps(left, right);
-      break;
-    case SimdOpInstr::kFloat64x2Add:
-      __ addpd(left, right);
-      break;
-    case SimdOpInstr::kFloat64x2Sub:
-      __ subpd(left, right);
-      break;
-    case SimdOpInstr::kFloat64x2Mul:
-      __ mulpd(left, right);
-      break;
-    case SimdOpInstr::kFloat64x2Div:
-      __ divpd(left, right);
-      break;
-    case SimdOpInstr::kFloat32x4Equal:
-      __ cmppseq(left, right);
-      break;
-    case SimdOpInstr::kFloat32x4NotEqual:
-      __ cmppsneq(left, right);
-      break;
-    case SimdOpInstr::kFloat32x4GreaterThan:
-      __ cmppsnle(left, right);
-      break;
-    case SimdOpInstr::kFloat32x4GreaterThanOrEqual:
-      __ cmppsnlt(left, right);
-      break;
-    case SimdOpInstr::kFloat32x4LessThan:
-      __ cmppslt(left, right);
-      break;
-    case SimdOpInstr::kFloat32x4LessThanOrEqual:
-      __ cmppsle(left, right);
-      break;
-    case SimdOpInstr::kFloat32x4Min:
-      __ minps(left, right);
-      break;
-    case SimdOpInstr::kFloat32x4Max:
-      __ maxps(left, right);
-      break;
-    case SimdOpInstr::kFloat32x4ShuffleMix:
-    case SimdOpInstr::kInt32x4ShuffleMix:
-      __ shufps(left, right, Immediate(op->mask()));
-      break;
+  switch (op->kind()) {
+#define EMIT(Name, op)                                                         \
+  case SimdOpInstr::k##Name:                                                   \
+    __ op(left, right);                                                        \
+    break;
+    SIMD_OP_SIMPLE_BINARY(EMIT)
+#undef EMIT
     case SimdOpInstr::kFloat32x4Scale:
       __ cvtsd2ss(left, left);
       __ shufps(left, left, Immediate(0x00));
       __ mulps(left, right);
+      break;
+    case SimdOpInstr::kFloat32x4ShuffleMix:
+    case SimdOpInstr::kInt32x4ShuffleMix:
+      __ shufps(left, right, Immediate(op->mask()));
       break;
     case SimdOpInstr::kFloat64x2Constructor:
       // shufpd mask 0x0 results in:
@@ -5596,55 +5576,58 @@ DEFINE_EMIT(SimdBinaryOp,
       __ mulpd(left, right);
       break;
     case SimdOpInstr::kFloat64x2WithX:
-      // FIXME
-      __ subl(ESP, Immediate(16));
-      // Move value to stack.
+    case SimdOpInstr::kFloat64x2WithY: {
+      // FIXME there must be non memory form of this
+      COMPILE_ASSERT(SimdOpInstr::kFloat64x2WithY ==
+                     (SimdOpInstr::kFloat64x2WithX + 1));
+      __ SubImmediate(ESP, Immediate(kSimd128Size));
       __ movups(Address(ESP, 0), left);
-      // Write over X value.
-      __ movsd(Address(ESP, 0), right);
-      // Move updated value into output register.
+      __ movsd(Address(ESP, (op->kind() - SimdOpInstr::kFloat64x2WithX) *
+                                kDoubleSize),
+               right);
       __ movups(left, Address(ESP, 0));
-      __ addl(ESP, Immediate(16));
+      __ addl(ESP, Immediate(kSimd128Size));
       break;
-    case SimdOpInstr::kFloat64x2WithY:
-      // FIXME
-      __ subl(ESP, Immediate(16));
-      // Move value to stack.
-      __ movups(Address(ESP, 0), left);
-      // Write over Y value.
-      __ movsd(Address(ESP, 8), right);
-      // Move updated value into output register.
+    }
+    case SimdOpInstr::kFloat32x4WithX:
+    case SimdOpInstr::kFloat32x4WithY:
+    case SimdOpInstr::kFloat32x4WithZ:
+    case SimdOpInstr::kFloat32x4WithW: {
+      // FIXME Must have a variant without memory operations
+      COMPILE_ASSERT(
+          SimdOpInstr::kFloat32x4WithY == (SimdOpInstr::kFloat32x4WithX + 1) &&
+          SimdOpInstr::kFloat32x4WithZ == (SimdOpInstr::kFloat32x4WithX + 2) &&
+          SimdOpInstr::kFloat32x4WithW == (SimdOpInstr::kFloat32x4WithX + 3));
+      __ cvtsd2ss(left, left);
+      __ SubImmediate(ESP, Immediate(kSimd128Size));
+      __ movups(Address(ESP, 0), right);
+      __ movss(Address(ESP, kFloatSize *
+                                (op->kind() - SimdOpInstr::kFloat32x4WithX)),
+               left);
       __ movups(left, Address(ESP, 0));
-      __ addl(ESP, Immediate(16));
+      __ AddImmediate(ESP, Immediate(kSimd128Size));
       break;
-    case SimdOpInstr::kFloat64x2Min:
-      __ minpd(left, right);
-      break;
-    case SimdOpInstr::kFloat64x2Max:
-      __ maxpd(left, right);
-      break;
-    case SimdOpInstr::kInt32x4BitAnd:
-      __ andps(left, right);
-      break;
-    case SimdOpInstr::kInt32x4BitOr:
-      __ orps(left, right);
-      break;
-    case SimdOpInstr::kInt32x4BitXor:
-      __ xorps(left, right);
-      break;
-    case SimdOpInstr::kInt32x4Add:
-      __ addpl(left, right);
-      break;
-    case SimdOpInstr::kInt32x4Sub:
-      __ subpl(left, right);
-      break;
+    }
     default:
       UNREACHABLE();
   }
 }
 
+#define SIMD_OP_SIMPLE_UNARY(V)                                                \
+  SIMD_OP_FLOAT_ARITH(V, Sqrt, sqrt)                                           \
+  SIMD_OP_FLOAT_ARITH(V, Negate, negate)                                       \
+  SIMD_OP_FLOAT_ARITH(V, Abs, abs)                                             \
+  V(Float32x4Reciprocal, reciprocalps)                                         \
+  V(Float32x4ReciprocalSqrt, rsqrtps)
+
 DEFINE_EMIT(SimdUnaryOp, (SameAsFirstInput, XmmRegister value)) {
-  switch (kind) {
+  switch (op->kind()) {
+#define EMIT(Name, op)                                                         \
+  case SimdOpInstr::k##Name:                                                   \
+    __ op(value);                                                              \
+    break;
+    SIMD_OP_SIMPLE_UNARY(EMIT)
+#undef EMIT
     case SimdOpInstr::kFloat32x4ShuffleX:
       // Shuffle not necessary.
       __ cvtss2sd(value, value);
@@ -5665,20 +5648,17 @@ DEFINE_EMIT(SimdUnaryOp, (SameAsFirstInput, XmmRegister value)) {
     case SimdOpInstr::kInt32x4Shuffle:
       __ shufps(value, value, Immediate(op->mask()));
       break;
-    case SimdOpInstr::kFloat32x4Sqrt:
-      __ sqrtps(value);
+    case SimdOpInstr::kFloat32x4Splat:
+      // Convert to Float32.
+      __ cvtsd2ss(value, value);
+      // Splat across all lanes.
+      __ shufps(value, value, Immediate(0x00));
       break;
-    case SimdOpInstr::kFloat32x4Reciprocal:
-      __ reciprocalps(value);
+    case SimdOpInstr::kFloat64x2ToFloat32x4:
+      __ cvtpd2ps(value, value);
       break;
-    case SimdOpInstr::kFloat32x4ReciprocalSqrt:
-      __ rsqrtps(value);
-      break;
-    case SimdOpInstr::kFloat32x4Negate:
-      __ negateps(value);
-      break;
-    case SimdOpInstr::kFloat32x4Absolute:
-      __ absps(value);
+    case SimdOpInstr::kFloat32x4ToFloat64x2:
+      __ cvtps2pd(value, value);
       break;
     case SimdOpInstr::kFloat32x4ToInt32x4:
     case SimdOpInstr::kInt32x4ToFloat32x4:
@@ -5688,67 +5668,57 @@ DEFINE_EMIT(SimdUnaryOp, (SameAsFirstInput, XmmRegister value)) {
       // NOP.
       break;
     case SimdOpInstr::kFloat64x2GetY:
+      // FIXME. Register constraints are chosen badly.
       __ shufpd(value, value, Immediate(0x33));
       break;
     case SimdOpInstr::kFloat64x2Splat:
+      // FIXME. Register constraints are chosen badly.
       __ shufpd(value, value, Immediate(0x0));
-      break;
-    case SimdOpInstr::kFloat64x2ToFloat32x4:
-      __ cvtpd2ps(value, value);
-      break;
-    case SimdOpInstr::kFloat32x4ToFloat64x2:
-      __ cvtps2pd(value, value);
-      break;
-    case SimdOpInstr::kFloat64x2Negate:
-      __ negatepd(value);
-      break;
-    case SimdOpInstr::kFloat64x2Abs:
-      __ abspd(value);
-      break;
-    case SimdOpInstr::kFloat64x2Sqrt:
-      __ sqrtpd(value);
       break;
     default:
       UNREACHABLE();
   }
 }
 
-DEFINE_EMIT(Simd32x4GetSignMask, (Register out, XmmRegister value)) {
-  __ movmskps(out, value);
+DEFINE_EMIT(SimdGetSignMask, (Register out, XmmRegister value)) {
+  switch (op->kind()) {
+    case SimdOpInstr::kFloat32x4GetSignMask:
+    case SimdOpInstr::kInt32x4GetSignMask:
+      __ movmskps(out, value);
+      break;
+    case SimdOpInstr::kFloat64x2GetSignMask:
+      __ movmskpd(out, value);
+      break;
+    default:
+      UNREACHABLE();
+      break;
+  }
 }
 
 // FIXME must have a variant without memory operations
-DEFINE_EMIT(Float32x4Constructor,
-            (SameAsFirstInput,
-             XmmRegister v0,
-             XmmRegister v1,
-             XmmRegister v2,
-             XmmRegister v3)) {
-  __ subl(ESP, Immediate(16));
-  __ cvtsd2ss(v0, v0);
-  __ movss(Address(ESP, 0), v0);
-  __ movsd(v0, v1);
-  __ cvtsd2ss(v0, v0);
-  __ movss(Address(ESP, 4), v0);
-  __ movsd(v0, v2);
-  __ cvtsd2ss(v0, v0);
-  __ movss(Address(ESP, 8), v0);
-  __ movsd(v0, v3);
-  __ cvtsd2ss(v0, v0);
-  __ movss(Address(ESP, 12), v0);
-  __ movups(v0, Address(ESP, 0));
-  __ addl(ESP, Immediate(16));
+DEFINE_EMIT(
+    Float32x4Constructor,
+    (SameAsFirstInput, XmmRegister v0, XmmRegister, XmmRegister, XmmRegister)) {
+  const XmmRegister out = v0;
+  __ SubImmediate(ESP, Immediate(kSimd128Size));
+  for (intptr_t i = 0; i < 4; i++) {
+    XmmRegister in = op->locs()->in(i).fpu_reg();
+    if (out != in) {
+      __ movsd(out, in);
+    }
+    __ cvtsd2ss(out, out);
+    __ movss(Address(ESP, kFloatSize * i), out);
+  }
+  __ movups(out, Address(ESP, 0));
+  __ AddImmediate(ESP, Immediate(kSimd128Size));
 }
 
 DEFINE_EMIT(Float32x4Zero, (XmmRegister out)) {
   __ xorps(out, out);
 }
 
-DEFINE_EMIT(Float32x4Splat, (SameAsFirstInput, XmmRegister value)) {
-  // Convert to Float32.
-  __ cvtsd2ss(value, value);
-  // Splat across all lanes.
-  __ shufps(value, value, Immediate(0x00));
+DEFINE_EMIT(Float64x2Zero, (XmmRegister value)) {
+  __ xorpd(value, value);
 }
 
 DEFINE_EMIT(Float32x4Clamp,
@@ -5760,44 +5730,15 @@ DEFINE_EMIT(Float32x4Clamp,
   __ maxps(left, lower);
 }
 
-// FIXME Must have a variant without memory operations
-DEFINE_EMIT(Float32x4With,
-            (SameAsFirstInput, XmmRegister replacement, XmmRegister value)) {
-  COMPILE_ASSERT(
-      SimdOpInstr::kFloat32x4WithY == (SimdOpInstr::kFloat32x4WithX + 1) &&
-      SimdOpInstr::kFloat32x4WithZ == (SimdOpInstr::kFloat32x4WithX + 2) &&
-      SimdOpInstr::kFloat32x4WithW == (SimdOpInstr::kFloat32x4WithX + 3));
-  __ cvtsd2ss(replacement, replacement);
-  __ subl(ESP, Immediate(16));
-  // Move value to stack.
-  __ movups(Address(ESP, 0), value);
-  // Update component.
-  __ movss(Address(ESP, kFloatSize * (kind - SimdOpInstr::kFloat32x4WithX)),
-           replacement);
-  // Move updated value into output register.
-  __ movups(replacement, Address(ESP, 0));
-  __ addl(ESP, Immediate(16));
-}
-
-DEFINE_EMIT(Float64x2Zero, (XmmRegister value)) {
-  __ xorpd(value, value);
-}
-
-DEFINE_EMIT(Float64x2GetSignMask, (Register out, XmmRegister left)) {
-  __ movmskpd(out, left);
-}
-
 // FIXME
-DEFINE_EMIT(
-    Int32x4Constructor,
-    (XmmRegister result, Register v0, Register v1, Register v2, Register v3)) {
-  __ subl(ESP, Immediate(4 * kInt32Size));
-  __ movl(Address(ESP, 0 * kInt32Size), v0);
-  __ movl(Address(ESP, 1 * kInt32Size), v1);
-  __ movl(Address(ESP, 2 * kInt32Size), v2);
-  __ movl(Address(ESP, 3 * kInt32Size), v3);
+DEFINE_EMIT(Int32x4Constructor,
+            (XmmRegister result, Register, Register, Register, Register)) {
+  __ SubImmediate(ESP, Immediate(kSimd128Size));
+  for (intptr_t i = 0; i < 4; i++) {
+    __ movl(Address(ESP, i * kInt32Size), op->locs()->in(i).reg());
+  }
   __ movups(result, Address(ESP, 0));
-  __ addl(ESP, Immediate(4 * kInt32Size));
+  __ AddImmediate(ESP, Immediate(kSimd128Size));
 }
 
 // FIXME
@@ -5845,14 +5786,15 @@ DEFINE_EMIT(
   __ addl(ESP, Immediate(16));
 }
 
+// TODO FIXME
 DEFINE_EMIT(Int32x4GetFlag, (Register result, XmmRegister value)) {
   Label done;
   Label non_zero;
   __ subl(ESP, Immediate(16));
   // Move value to stack.
   __ movups(Address(ESP, 0), value);
-  __ movl(result,
-          Address(ESP, kFloatSize * (kind - SimdOpInstr::kInt32x4GetFlagX)));
+  __ movl(result, Address(ESP, kFloatSize * (op->kind() -
+                                             SimdOpInstr::kInt32x4GetFlagX)));
   __ addl(ESP, Immediate(16));
   __ testl(result, result);
   __ j(NOT_ZERO, &non_zero, Assembler::kNearJump);
@@ -5861,6 +5803,28 @@ DEFINE_EMIT(Int32x4GetFlag, (Register result, XmmRegister value)) {
   __ Bind(&non_zero);
   __ LoadObject(result, Bool::True());
   __ Bind(&done);
+}
+
+DEFINE_EMIT(Int32x4WithFlag,
+            (SameAsFirstInput, XmmRegister mask, Register flag)) {
+  __ subl(ESP, Immediate(16));
+  // Copy mask to stack.
+  __ movups(Address(ESP, 0), mask);
+  Label falsePath, exitPath;
+  __ CompareObject(flag, Bool::True());
+  __ j(NOT_EQUAL, &falsePath);
+  __ movl(
+      Address(ESP, kFloatSize * (op->kind() - SimdOpInstr::kInt32x4WithFlagX)),
+      Immediate(0xFFFFFFFF));
+  __ jmp(&exitPath);
+  __ Bind(&falsePath);
+  __ movl(
+      Address(ESP, kFloatSize * (op->kind() - SimdOpInstr::kInt32x4WithFlagX)),
+      Immediate(0x0));
+  __ Bind(&exitPath);
+  // Copy mask back to register.
+  __ movups(mask, Address(ESP, 0));
+  __ addl(ESP, Immediate(16));
 }
 
 DEFINE_EMIT(Int32x4Select,
@@ -5881,111 +5845,61 @@ DEFINE_EMIT(Int32x4Select,
   __ orps(mask, temp);
 }
 
-DEFINE_EMIT(Int32x4SetFlag,
-            (SameAsFirstInput, XmmRegister mask, Register flag)) {
-  __ subl(ESP, Immediate(16));
-  // Copy mask to stack.
-  __ movups(Address(ESP, 0), mask);
-  Label falsePath, exitPath;
-  __ CompareObject(flag, Bool::True());
-  __ j(NOT_EQUAL, &falsePath);
-  __ movl(Address(ESP, kFloatSize * (kind - SimdOpInstr::kInt32x4WithFlagX)),
-          Immediate(0xFFFFFFFF));
-  __ jmp(&exitPath);
-  __ Bind(&falsePath);
-  __ movl(Address(ESP, kFloatSize * (kind - SimdOpInstr::kInt32x4WithFlagX)),
-          Immediate(0x0));
-  __ Bind(&exitPath);
-  // Copy mask back to register.
-  __ movups(mask, Address(ESP, 0));
-  __ addl(ESP, Immediate(16));
-}
-
 #define SIMD_OP_VARIANTS(CASE, ____, SIMPLE)                                   \
-  CASE(Float32x4Add)                                                           \
-  CASE(Float32x4Sub)                                                           \
-  CASE(Float32x4Mul)                                                           \
-  CASE(Float32x4Div)                                                           \
-  CASE(Float64x2Add)                                                           \
-  CASE(Float64x2Sub)                                                           \
-  CASE(Float64x2Mul)                                                           \
-  CASE(Float64x2Div)                                                           \
-  CASE(Float32x4Equal)                                                         \
-  CASE(Float32x4NotEqual)                                                      \
-  CASE(Float32x4GreaterThan)                                                   \
-  CASE(Float32x4GreaterThanOrEqual)                                            \
-  CASE(Float32x4LessThan)                                                      \
-  CASE(Float32x4LessThanOrEqual)                                               \
-  CASE(Float32x4Min)                                                           \
-  CASE(Float32x4Max)                                                           \
+  SIMD_OP_SIMPLE_BINARY(CASE)                                                  \
+  CASE(Float32x4Scale)                                                         \
   CASE(Float32x4ShuffleMix)                                                    \
   CASE(Int32x4ShuffleMix)                                                      \
-  CASE(Float32x4Scale)                                                         \
   CASE(Float64x2Constructor)                                                   \
   CASE(Float64x2Scale)                                                         \
   CASE(Float64x2WithX)                                                         \
   CASE(Float64x2WithY)                                                         \
-  CASE(Float64x2Min)                                                           \
-  CASE(Float64x2Max)                                                           \
-  CASE(Int32x4BitAnd)                                                          \
-  CASE(Int32x4BitOr)                                                           \
-  CASE(Int32x4BitXor)                                                          \
-  CASE(Int32x4Add)                                                             \
-  CASE(Int32x4Sub)                                                             \
+  CASE(Float32x4WithX)                                                         \
+  CASE(Float32x4WithY)                                                         \
+  CASE(Float32x4WithZ)                                                         \
+  CASE(Float32x4WithW)                                                         \
   ____(SimdBinaryOp)                                                           \
+  SIMD_OP_SIMPLE_UNARY(CASE)                                                   \
   CASE(Float32x4ShuffleX)                                                      \
   CASE(Float32x4ShuffleY)                                                      \
   CASE(Float32x4ShuffleZ)                                                      \
   CASE(Float32x4ShuffleW)                                                      \
   CASE(Float32x4Shuffle)                                                       \
   CASE(Int32x4Shuffle)                                                         \
-  CASE(Float32x4Sqrt)                                                          \
-  CASE(Float32x4Reciprocal)                                                    \
-  CASE(Float32x4ReciprocalSqrt)                                                \
-  CASE(Float32x4Negate)                                                        \
-  CASE(Float32x4Absolute)                                                      \
-  CASE(Float32x4ToInt32x4)                                                     \
+  CASE(Float32x4Splat)                                                         \
+  CASE(Float32x4ToFloat64x2)                                                   \
+  CASE(Float64x2ToFloat32x4)                                                   \
   CASE(Int32x4ToFloat32x4)                                                     \
+  CASE(Float32x4ToInt32x4)                                                     \
   CASE(Float64x2GetX)                                                          \
   CASE(Float64x2GetY)                                                          \
   CASE(Float64x2Splat)                                                         \
-  CASE(Float64x2ToFloat32x4)                                                   \
-  CASE(Float32x4ToFloat64x2)                                                   \
-  CASE(Float64x2Negate)                                                        \
-  CASE(Float64x2Abs)                                                           \
-  CASE(Float64x2Sqrt)                                                          \
   ____(SimdUnaryOp)                                                            \
-  CASE(Int32x4GetSignMask)                                                     \
   CASE(Float32x4GetSignMask)                                                   \
-  ____(Simd32x4GetSignMask)                                                    \
+  CASE(Int32x4GetSignMask)                                                     \
+  CASE(Float64x2GetSignMask)                                                   \
+  ____(SimdGetSignMask)                                                        \
   SIMPLE(Float32x4Constructor)                                                 \
-  SIMPLE(Float32x4Zero)                                                        \
-  SIMPLE(Float32x4Splat)                                                       \
-  SIMPLE(Float32x4Clamp)                                                       \
-  CASE(Float32x4WithX)                                                         \
-  CASE(Float32x4WithY)                                                         \
-  CASE(Float32x4WithZ)                                                         \
-  CASE(Float32x4WithW)                                                         \
-  ____(Float32x4With)                                                          \
-  SIMPLE(Float64x2Zero)                                                        \
-  SIMPLE(Float64x2GetSignMask)                                                 \
   SIMPLE(Int32x4Constructor)                                                   \
   SIMPLE(Int32x4BoolConstructor)                                               \
+  SIMPLE(Float32x4Zero)                                                        \
+  SIMPLE(Float64x2Zero)                                                        \
+  SIMPLE(Float32x4Clamp)                                                       \
   CASE(Int32x4GetFlagX)                                                        \
   CASE(Int32x4GetFlagY)                                                        \
   CASE(Int32x4GetFlagZ)                                                        \
   CASE(Int32x4GetFlagW)                                                        \
   ____(Int32x4GetFlag)                                                         \
-  SIMPLE(Int32x4Select)                                                        \
   CASE(Int32x4WithFlagX)                                                       \
   CASE(Int32x4WithFlagY)                                                       \
   CASE(Int32x4WithFlagZ)                                                       \
   CASE(Int32x4WithFlagW)                                                       \
-  ____(Int32x4SetFlag)
+  ____(Int32x4WithFlag)                                                        \
+  SIMPLE(Int32x4Select)
 
 LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone, bool opt) const {
   switch (kind()) {
-#define CASE(Name) case k##Name:
+#define CASE(Name, ...) case k##Name:
 #define EMIT(Name)                                                             \
   return MakeLocationSummaryFromEmitter(zone, this, &Emit##Name);
 #define SIMPLE(Name) CASE(Name) EMIT(Name)
@@ -5994,11 +5908,13 @@ LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone, bool opt) const {
 #undef EMIT
 #undef SIMPLE
   }
+  UNREACHABLE();
+  return NULL;
 }
 
 void SimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   switch (kind()) {
-#define CASE(Name) case k##Name:
+#define CASE(Name, ...) case k##Name:
 #define EMIT(Name)                                                             \
   InvokeEmitter(compiler, this, &Emit##Name);                                  \
   break;

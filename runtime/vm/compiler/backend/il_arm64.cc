@@ -4662,40 +4662,39 @@ void DebugStepCheckInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   compiler->RecordSafepoint(locs());
 }
 
-//
 // SIMD
-//
 
 #define DEFINE_EMIT(Name, Args)                                                \
-  void Emit##Name(FlowGraphCompiler* compiler, SimdOpInstr* op,                \
-                  SimdOpInstr::Kind kind, UNPACK Args)
+  void Emit##Name(FlowGraphCompiler* compiler, SimdOpInstr* op, UNPACK Args)
+
+#define SIMD_OP_FLOAT_ARITH(V, Name, op)                                       \
+  V(Float32x4##Name, op##s)                                                    \
+  V(Float64x2##Name, op##d)
+
+#define SIMD_OP_SIMPLE_BINARY(V)                                               \
+  SIMD_OP_FLOAT_ARITH(V, Add, vadd)                                            \
+  SIMD_OP_FLOAT_ARITH(V, Sub, vsub)                                            \
+  SIMD_OP_FLOAT_ARITH(V, Mul, vmul)                                            \
+  SIMD_OP_FLOAT_ARITH(V, Div, vdiv)                                            \
+  SIMD_OP_FLOAT_ARITH(V, Min, vmin)                                            \
+  SIMD_OP_FLOAT_ARITH(V, Max, vmax)                                            \
+  V(Int32x4Add, vaddw)                                                         \
+  V(Int32x4Sub, vsubw)                                                         \
+  V(Int32x4BitAnd, vand)                                                       \
+  V(Int32x4BitOr, vorr)                                                        \
+  V(Int32x4BitXor, veor)                                                       \
+  V(Float32x4Equal, vceqs)                                                     \
+  V(Float32x4GreaterThan, vcgts)                                               \
+  V(Float32x4GreaterThanOrEqual, vcges)
 
 DEFINE_EMIT(SimdBinaryOp, (VRegister result, VRegister left, VRegister right)) {
-  switch (kind) {
-    case SimdOpInstr::kFloat32x4Add:
-      __ vadds(result, left, right);
-      break;
-    case SimdOpInstr::kFloat32x4Sub:
-      __ vsubs(result, left, right);
-      break;
-    case SimdOpInstr::kFloat32x4Mul:
-      __ vmuls(result, left, right);
-      break;
-    case SimdOpInstr::kFloat32x4Div:
-      __ vdivs(result, left, right);
-      break;
-    case SimdOpInstr::kFloat64x2Add:
-      __ vaddd(result, left, right);
-      break;
-    case SimdOpInstr::kFloat64x2Sub:
-      __ vsubd(result, left, right);
-      break;
-    case SimdOpInstr::kFloat64x2Mul:
-      __ vmuld(result, left, right);
-      break;
-    case SimdOpInstr::kFloat64x2Div:
-      __ vdivd(result, left, right);
-      break;
+  switch (op->kind()) {
+#define EMIT(Name, op)                                                         \
+  case SimdOpInstr::k##Name:                                                   \
+    __ op(result, left, right);                                                \
+    break;
+    SIMD_OP_SIMPLE_BINARY(EMIT)
+#undef EMIT
     case SimdOpInstr::kFloat32x4ShuffleMix:
     case SimdOpInstr::kInt32x4ShuffleMix: {
       const intptr_t mask = op->mask();
@@ -4705,31 +4704,16 @@ DEFINE_EMIT(SimdBinaryOp, (VRegister result, VRegister left, VRegister right)) {
       __ vinss(result, 3, right, (mask >> 6) & 0x3);
       break;
     }
-    case SimdOpInstr::kFloat32x4Equal:
-      __ vceqs(result, left, right);
-      break;
     case SimdOpInstr::kFloat32x4NotEqual:
       __ vceqs(result, left, right);
       // Invert the result.
       __ vnot(result, result);
-      break;
-    case SimdOpInstr::kFloat32x4GreaterThan:
-      __ vcgts(result, left, right);
-      break;
-    case SimdOpInstr::kFloat32x4GreaterThanOrEqual:
-      __ vcges(result, left, right);
       break;
     case SimdOpInstr::kFloat32x4LessThan:
       __ vcgts(result, right, left);
       break;
     case SimdOpInstr::kFloat32x4LessThanOrEqual:
       __ vcges(result, right, left);
-      break;
-    case SimdOpInstr::kFloat32x4Min:
-      __ vmins(result, left, right);
-      break;
-    case SimdOpInstr::kFloat32x4Max:
-      __ vmaxs(result, left, right);
       break;
     case SimdOpInstr::kFloat32x4Scale:
       __ fcvtsd(VTMP, left);
@@ -4744,34 +4728,26 @@ DEFINE_EMIT(SimdBinaryOp, (VRegister result, VRegister left, VRegister right)) {
       __ vdupd(VTMP, right, 0);
       __ vmuld(result, left, VTMP);
       break;
-    case SimdOpInstr::kFloat64x2Min:
-      __ vmind(result, left, right);
-      break;
-    case SimdOpInstr::kFloat64x2Max:
-      __ vmaxd(result, left, right);
-      break;
-    case SimdOpInstr::kInt32x4BitAnd:
-      __ vand(result, left, right);
-      break;
-    case SimdOpInstr::kInt32x4BitOr:
-      __ vorr(result, left, right);
-      break;
-    case SimdOpInstr::kInt32x4BitXor:
-      __ veor(result, left, right);
-      break;
-    case SimdOpInstr::kInt32x4Add:
-      __ vaddw(result, left, right);
-      break;
-    case SimdOpInstr::kInt32x4Sub:
-      __ vsubw(result, left, right);
-      break;
     default:
       UNREACHABLE();
   }
 }
 
+#define SIMD_OP_SIMPLE_UNARY(V)                                                \
+  SIMD_OP_FLOAT_ARITH(V, Sqrt, vsqrt)                                          \
+  SIMD_OP_FLOAT_ARITH(V, Negate, vneg)                                         \
+  SIMD_OP_FLOAT_ARITH(V, Abs, vabs)                                            \
+  V(Float32x4Reciprocal, VRecps)                                               \
+  V(Float32x4ReciprocalSqrt, VRSqrts)
+
 DEFINE_EMIT(SimdUnaryOp, (VRegister result, VRegister value)) {
-  switch (kind) {
+  switch (op->kind()) {
+#define EMIT(Name, op)                                                         \
+  case SimdOpInstr::k##Name:                                                   \
+    __ op(result, value);                                                      \
+    break;
+    SIMD_OP_SIMPLE_UNARY(EMIT)
+#undef EMIT
     case SimdOpInstr::kFloat32x4ShuffleX:
       __ vinss(result, 0, value, 0);
       __ fcvtds(result, result);
@@ -4812,21 +4788,6 @@ DEFINE_EMIT(SimdUnaryOp, (VRegister result, VRegister value)) {
       // Splat across all lanes.
       __ vdups(result, VTMP, 0);
       break;
-    case SimdOpInstr::kFloat32x4Sqrt:
-      __ vsqrts(result, value);
-      break;
-    case SimdOpInstr::kFloat32x4Reciprocal:
-      __ VRecps(result, value);
-      break;
-    case SimdOpInstr::kFloat32x4ReciprocalSqrt:
-      __ VRSqrts(result, value);
-      break;
-    case SimdOpInstr::kFloat32x4Negate:
-      __ vnegs(result, value);
-      break;
-    case SimdOpInstr::kFloat32x4Absolute:
-      __ vabss(result, value);
-      break;
     case SimdOpInstr::kFloat64x2GetX:
       __ vinsd(result, 0, value, 0);
       break;
@@ -4857,15 +4818,6 @@ DEFINE_EMIT(SimdUnaryOp, (VRegister result, VRegister value)) {
       __ vinss(VTMP, 0, value, 1);
       __ fcvtds(VTMP, VTMP);
       __ vinsd(result, 1, VTMP, 0);
-      break;
-    case SimdOpInstr::kFloat64x2Negate:
-      __ vnegd(result, value);
-      break;
-    case SimdOpInstr::kFloat64x2Abs:
-      __ vabsd(result, value);
-      break;
-    case SimdOpInstr::kFloat64x2Sqrt:
-      __ vsqrtd(result, value);
       break;
     default:
       UNREACHABLE();
@@ -4916,7 +4868,7 @@ DEFINE_EMIT(Float32x4With,
   __ fcvtsd(VTMP, replacement);
   // FIXME SameAsSecondInput?
   __ vmov(result, value);
-  switch (kind) {
+  switch (op->kind()) {
     case SimdOpInstr::kFloat32x4WithX:
       __ vinss(result, 0, VTMP, 0);
       break;
@@ -4954,7 +4906,7 @@ DEFINE_EMIT(Float64x2GetSignMask, (Register out, VRegister value)) {
 
 DEFINE_EMIT(Float64x2With,
             (SameAsFirstInput, VRegister left, VRegister right)) {
-  switch (kind) {
+  switch (op->kind()) {
     case SimdOpInstr::kFloat64x2WithX:
       __ vinsd(left, 0, right, 0);
       break;
@@ -4996,7 +4948,7 @@ DEFINE_EMIT(Int32x4BoolConstructor,
 }
 
 DEFINE_EMIT(Int32x4GetFlag, (Register result, VRegister value)) {
-  switch (kind) {
+  switch (op->kind()) {
     case SimdOpInstr::kInt32x4GetFlagX:
       __ vmovrs(result, value, 0);
       break;
@@ -5041,7 +4993,7 @@ DEFINE_EMIT(Int32x4SetFlag, (SameAsFirstInput, VRegister mask, Register flag)) {
   __ CompareObject(flag, Bool::True());
   __ LoadImmediate(TMP, 0xffffffff);
   __ csel(TMP, TMP, ZR, EQ);
-  switch (kind) {
+  switch (op->kind()) {
     case SimdOpInstr::kInt32x4WithFlagX:
       __ vinsw(mask, 0, TMP);
       break;
@@ -5060,35 +5012,17 @@ DEFINE_EMIT(Int32x4SetFlag, (SameAsFirstInput, VRegister mask, Register flag)) {
 }
 
 #define SIMD_OP_VARIANTS(CASE, ____)                                           \
-  CASE(Float32x4Add)                                                           \
-  CASE(Float32x4Sub)                                                           \
-  CASE(Float32x4Mul)                                                           \
-  CASE(Float32x4Div)                                                           \
-  CASE(Float64x2Add)                                                           \
-  CASE(Float64x2Sub)                                                           \
-  CASE(Float64x2Mul)                                                           \
-  CASE(Float64x2Div)                                                           \
+  SIMD_OP_SIMPLE_BINARY(CASE)                                                  \
   CASE(Float32x4ShuffleMix)                                                    \
   CASE(Int32x4ShuffleMix)                                                      \
-  CASE(Float32x4Equal)                                                         \
   CASE(Float32x4NotEqual)                                                      \
-  CASE(Float32x4GreaterThan)                                                   \
-  CASE(Float32x4GreaterThanOrEqual)                                            \
   CASE(Float32x4LessThan)                                                      \
   CASE(Float32x4LessThanOrEqual)                                               \
-  CASE(Float32x4Min)                                                           \
-  CASE(Float32x4Max)                                                           \
   CASE(Float32x4Scale)                                                         \
   CASE(Float64x2Constructor)                                                   \
   CASE(Float64x2Scale)                                                         \
-  CASE(Float64x2Min)                                                           \
-  CASE(Float64x2Max)                                                           \
-  CASE(Int32x4BitAnd)                                                          \
-  CASE(Int32x4BitOr)                                                           \
-  CASE(Int32x4BitXor)                                                          \
-  CASE(Int32x4Add)                                                             \
-  CASE(Int32x4Sub)                                                             \
   ____(SimdBinaryOp)                                                           \
+  SIMD_OP_SIMPLE_UNARY(CASE)                                                   \
   CASE(Float32x4ShuffleX)                                                      \
   CASE(Float32x4ShuffleY)                                                      \
   CASE(Float32x4ShuffleZ)                                                      \
@@ -5096,19 +5030,11 @@ DEFINE_EMIT(Int32x4SetFlag, (SameAsFirstInput, VRegister mask, Register flag)) {
   CASE(Int32x4Shuffle)                                                         \
   CASE(Float32x4Shuffle)                                                       \
   CASE(Float32x4Splat)                                                         \
-  CASE(Float32x4Sqrt)                                                          \
-  CASE(Float32x4Reciprocal)                                                    \
-  CASE(Float32x4ReciprocalSqrt)                                                \
-  CASE(Float32x4Negate)                                                        \
-  CASE(Float32x4Absolute)                                                      \
   CASE(Float64x2GetX)                                                          \
   CASE(Float64x2GetY)                                                          \
   CASE(Float64x2Splat)                                                         \
   CASE(Float64x2ToFloat32x4)                                                   \
   CASE(Float32x4ToFloat64x2)                                                   \
-  CASE(Float64x2Negate)                                                        \
-  CASE(Float64x2Abs)                                                           \
-  CASE(Float64x2Sqrt)                                                          \
   ____(SimdUnaryOp)                                                            \
   CASE(Float32x4GetSignMask)                                                   \
   CASE(Int32x4GetSignMask)                                                     \
@@ -5152,18 +5078,20 @@ DEFINE_EMIT(Int32x4SetFlag, (SameAsFirstInput, VRegister mask, Register flag)) {
 
 LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone, bool opt) const {
   switch (kind()) {
-#define CASE(Name) case k##Name:
+#define CASE(Name, ...) case k##Name:
 #define EMIT(Name)                                                             \
   return MakeLocationSummaryFromEmitter(zone, this, &Emit##Name);
     SIMD_OP_VARIANTS(CASE, EMIT)
 #undef CASE
 #undef EMIT
   }
+  UNREACHABLE();
+  return NULL;
 }
 
 void SimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   switch (kind()) {
-#define CASE(Name) case k##Name:
+#define CASE(Name, ...) case k##Name:
 #define EMIT(Name)                                                             \
   InvokeEmitter(compiler, this, &Emit##Name);                                  \
   break;

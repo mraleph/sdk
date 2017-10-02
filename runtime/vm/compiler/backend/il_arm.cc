@@ -5784,12 +5784,12 @@ struct UnwrapLocation<Fixed_<reg> > {
 };
 
 #define DEFINE_EMIT(Name, Args)                                                \
-  void Emit##Name(FlowGraphCompiler* compiler, SimdOpInstr* op,                \
-                  SimdOpInstr::Kind kind, UNPACK Args)
+  static void Emit##Name(FlowGraphCompiler* compiler, SimdOpInstr* op,         \
+                         UNPACK Args)
 
 DEFINE_EMIT(Simd32x4BinaryOp,
             (QRegister result, QRegister left, QRegister right)) {
-  switch (kind) {
+  switch (op->kind()) {
     case SimdOpInstr::kFloat32x4Add:
       __ vaddqs(result, left, right);
       break;
@@ -5855,7 +5855,7 @@ DEFINE_EMIT(Simd32x4BinaryOp,
 
 DEFINE_EMIT(Float64x2BinaryOp,
             (QRegister_ result, QRegister_ left, QRegister_ right)) {
-  switch (kind) {
+  switch (op->kind()) {
     case SimdOpInstr::kFloat64x2Add:
       __ vaddd(result.d(0), left.d(0), right.d(0));
       __ vaddd(result.d(1), left.d(1), right.d(1));
@@ -5879,7 +5879,7 @@ DEFINE_EMIT(Float64x2BinaryOp,
 
 // Low (< Q7) Q registers are needed for the vcvtds and vmovs instructions.
 DEFINE_EMIT(Simd32x4Shuffle, (Fixed_<Q6> result, Fixed_<Q4> value)) {
-  switch (kind) {
+  switch (op->kind()) {
     case SimdOpInstr::kFloat32x4ShuffleX:
       __ vcvtds(result.d(0), value.s(0));
       break;
@@ -5979,11 +5979,11 @@ DEFINE_EMIT(Float32x4Sqrt,
 }
 
 DEFINE_EMIT(Float32x4Unary, (QRegister result, QRegister left)) {
-  switch (kind) {
+  switch (op->kind()) {
     case SimdOpInstr::kFloat32x4Negate:
       __ vnegqs(result, left);
       break;
-    case SimdOpInstr::kFloat32x4Absolute:
+    case SimdOpInstr::kFloat32x4Abs:
       __ vabsqs(result, left);
       break;
     case SimdOpInstr::kFloat32x4Reciprocal:
@@ -6013,7 +6013,7 @@ DEFINE_EMIT(Float32x4With,
             (Fixed_<Q6> result, QRegister_ replacement, QRegister value)) {
   __ vcvtsd(STMP, replacement.d(0));
   __ vmovq(result, value);
-  switch (kind) {
+  switch (op->kind()) {
     case SimdOpInstr::kFloat32x4WithX:
       __ vmovs(result.s(0), STMP);
       break;
@@ -6032,7 +6032,7 @@ DEFINE_EMIT(Float32x4With,
 }
 
 DEFINE_EMIT(Simd64x2Shuffle, (QRegister_ result, QRegister_ value)) {
-  switch (kind) {
+  switch (op->kind()) {
     case SimdOpInstr::kFloat64x2GetX:
       __ vmovd(result.d(0), value.d(0));
       break;
@@ -6089,7 +6089,7 @@ DEFINE_EMIT(Float64x2GetSignMask, (Register out, Fixed_<Q6> value)) {
 }
 
 DEFINE_EMIT(Float64x2Unary, (QRegister_ result, QRegister_ value)) {
-  switch (kind) {
+  switch (op->kind()) {
     case SimdOpInstr::kFloat64x2Negate:
       __ vnegd(result.d(0), value.d(0));
       __ vnegd(result.d(1), value.d(1));
@@ -6109,7 +6109,7 @@ DEFINE_EMIT(Float64x2Unary, (QRegister_ result, QRegister_ value)) {
 
 DEFINE_EMIT(Float64x2Binary,
             (SameAsFirstInput, QRegister_ left, QRegister_ right)) {
-  switch (kind) {
+  switch (op->kind()) {
     case SimdOpInstr::kFloat64x2Scale:
       __ vmuld(left.d(0), left.d(0), right.d(0));
       __ vmuld(left.d(1), left.d(1), right.d(0));
@@ -6181,7 +6181,7 @@ DEFINE_EMIT(Int32x4BoolConstructor,
 
 // Low (< 7) Q registers are needed for the vmovrs instruction.
 DEFINE_EMIT(Int32x4GetFlag, (Register result, Fixed_<Q6> value)) {
-  switch (kind) {
+  switch (op->kind()) {
     case SimdOpInstr::kInt32x4GetFlagX:
       __ vmovrs(result, value.s(0));
       break;
@@ -6228,7 +6228,7 @@ DEFINE_EMIT(Int32x4SetFlag,
   __ CompareObject(flag, Bool::True());
   __ LoadImmediate(TMP, 0xffffffff, EQ);
   __ LoadImmediate(TMP, 0, NE);
-  switch (kind) {
+  switch (op->kind()) {
     case SimdOpInstr::kInt32x4WithFlagX:
       __ vmovdr(result.d(0), 0, TMP);
       break;
@@ -6294,7 +6294,7 @@ DEFINE_EMIT(Int32x4ToFloat32x4, (QRegister result, QRegister value)) {
   SIMPLE(Float32x4Splat)                                                       \
   SIMPLE(Float32x4Sqrt)                                                        \
   CASE(Float32x4Negate)                                                        \
-  CASE(Float32x4Absolute)                                                      \
+  CASE(Float32x4Abs)                                                           \
   CASE(Float32x4Reciprocal)                                                    \
   CASE(Float32x4ReciprocalSqrt)                                                \
   CASE(Float32x4ToInt32x4)                                                     \
@@ -6350,6 +6350,8 @@ LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone, bool opt) const {
 #undef EMIT
 #undef SIMPLE
   }
+  UNREACHABLE();
+  return NULL;
 }
 
 void SimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {

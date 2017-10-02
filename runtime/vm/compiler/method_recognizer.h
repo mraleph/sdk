@@ -77,7 +77,7 @@ namespace dart {
     0x6264bfe8)                                                                \
   V(_Float32x4, reciprocal, Float32x4Reciprocal, Float32x4, 0x3cd7e819)        \
   V(_Float32x4, unary-, Float32x4Negate, Float32x4, 0x35f7f2b3)                \
-  V(_Float32x4, abs, Float32x4Absolute, Float32x4, 0x471cdd87)                 \
+  V(_Float32x4, abs, Float32x4Abs, Float32x4, 0x471cdd87)                      \
   V(_Float32x4, clamp, Float32x4Clamp, Float32x4, 0x2cb30492)                  \
   V(_Float32x4, withX, Float32x4WithX, Float32x4, 0x4e336aff)                  \
   V(_Float32x4, withY, Float32x4WithY, Float32x4, 0x0a72b910)                  \
@@ -86,7 +86,7 @@ namespace dart {
   V(Float64x2, Float64x2., Float64x2Constructor, Float64x2, 0x2e2098de)        \
   V(Float64x2, Float64x2.zero, Float64x2Zero, Float64x2, 0x631002be)           \
   V(Float64x2, Float64x2.splat, Float64x2Splat, Float64x2, 0x1f056dd1)         \
-  V(Float64x2, Float64x2.fromFloat32x4, Float32x4ToFloat64x2, Float64x2,     \
+  V(Float64x2, Float64x2.fromFloat32x4, Float32x4ToFloat64x2, Float64x2,       \
     0x238d44c5)                                                                \
   V(_Float64x2, get:x, Float64x2GetX, Double, 0x58c027f9)                      \
   V(_Float64x2, get:y, Float64x2GetY, Double, 0x3cf57159)                      \

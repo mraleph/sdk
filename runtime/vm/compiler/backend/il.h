@@ -5297,7 +5297,7 @@ class DoubleTestOpInstr : public TemplateComparison<1, NoThrow, Pure> {
   M(2, _, Float64x2Constructor, (Double, Double), Float64x2)                   \
   M(0, _, Float32x4Zero, (), Float32x4)                                        \
   M(1, _, Float32x4Negate, (Float32x4), Float32x4)                             \
-  M(1, _, Float32x4Absolute, (Float32x4), Float32x4)                           \
+  M(1, _, Float32x4Abs, (Float32x4), Float32x4)                                \
   M(3, _, Float32x4Clamp, (Float32x4, Float32x4, Float32x4), Float32x4)        \
   M(2, _, Float32x4WithX, (Double, Float32x4), Float32x4)                      \
   M(2, _, Float32x4WithY, (Double, Float32x4), Float32x4)                      \

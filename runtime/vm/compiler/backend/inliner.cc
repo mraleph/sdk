@@ -3273,7 +3273,7 @@ bool FlowGraphInliner::TryInlineRecognizedMethod(FlowGraph* flow_graph,
     case MethodRecognizer::kSmi_bitAndFromSmi:
       return InlineSmiBitAndFromSmi(flow_graph, call, receiver, entry, last);
 
-    case MethodRecognizer::kFloat32x4Absolute:
+    case MethodRecognizer::kFloat32x4Abs:
     case MethodRecognizer::kFloat32x4Clamp:
     case MethodRecognizer::kFloat32x4Constructor:
     case MethodRecognizer::kFloat32x4Equal:

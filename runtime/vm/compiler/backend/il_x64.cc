@@ -5325,8 +5325,7 @@ void DebugStepCheckInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
 // SIMD
 
 #define DEFINE_EMIT(Name, Args)                                                \
-  void Emit##Name(FlowGraphCompiler* compiler, SimdOpInstr* op,                \
-                  SimdOpInstr::Kind kind, UNPACK Args)
+  void Emit##Name(FlowGraphCompiler* compiler, SimdOpInstr* op, UNPACK Args)
 
 #define SIMD_BINARY_FLOAT_OP_BACKEND(V, Type, suffix)                          \
   V(Type##Add, add##suffix)                                                    \
@@ -5352,16 +5351,6 @@ void DebugStepCheckInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   V(Float32x4Max, maxps)                                                       \
   V(Float64x2Min, minpd)                                                       \
   V(Float64x2Max, maxpd)
-
-#define SIMD_OP_SIMPLE_UNARY(V)                                                \
-  V(Float32x4Sqrt, sqrtps)                                                     \
-  V(Float32x4Reciprocal, reciprocalps)                                         \
-  V(Float32x4ReciprocalSqrt, rsqrtps)                                          \
-  V(Float32x4Negate, negateps)                                                 \
-  V(Float32x4Absolute, absps)                                                  \
-  V(Float64x2Negate, negatepd)                                                 \
-  V(Float64x2Abs, abspd)                                                       \
-  V(Float64x2Sqrt, sqrtpd)
 
 DEFINE_EMIT(SimdBinaryOp,
             (SameAsFirstInput, XmmRegister left, XmmRegister right)) {
@@ -5393,16 +5382,16 @@ DEFINE_EMIT(SimdBinaryOp,
       break;
     case SimdOpInstr::kFloat64x2WithX:
     case SimdOpInstr::kFloat64x2WithY: {
+      // FIXME there must be non memory form of this
       COMPILE_ASSERT(SimdOpInstr::kFloat64x2WithY ==
                      (SimdOpInstr::kFloat64x2WithX + 1));
-      // FIXME there must be non memory form of this
-      __ subq(RSP, Immediate(16));
+      __ SubImmediate(RSP, Immediate(kSimd128Size));
       __ movups(Address(RSP, 0), left);
-      __ movsd(Address(RSP, (op->kind() - SimdOpInstr::kFloat64x2WithX) *
-                                kDoubleSize),
+      __ movsd(Address(RSP, kDoubleSize *
+                                (op->kind() - SimdOpInstr::kFloat64x2WithX)),
                right);
       __ movups(left, Address(RSP, 0));
-      __ addq(RSP, Immediate(16));
+      __ AddImmediate(RSP, Immediate(kSimd128Size));
       break;
     }
     // FIXME INSERTPS on SSE4.1
@@ -5415,12 +5404,13 @@ DEFINE_EMIT(SimdBinaryOp,
           SimdOpInstr::kFloat32x4WithZ == (SimdOpInstr::kFloat32x4WithX + 2) &&
           SimdOpInstr::kFloat32x4WithW == (SimdOpInstr::kFloat32x4WithX + 3));
       __ cvtsd2ss(left, left);
-      __ AddImmediate(RSP, Immediate(-16));
+      __ SubImmediate(RSP, Immediate(kSimd128Size));
       __ movups(Address(RSP, 0), right);
-      __ movss(Address(RSP, 4 * (op->kind() - SimdOpInstr::kFloat32x4WithX)),
+      __ movss(Address(RSP, kFloatSize *
+                                (op->kind() - SimdOpInstr::kFloat32x4WithX)),
                left);
       __ movups(left, Address(RSP, 0));
-      __ AddImmediate(RSP, Immediate(16));
+      __ AddImmediate(RSP, Immediate(kSimd128Size));
       break;
     }
 
@@ -5428,6 +5418,16 @@ DEFINE_EMIT(SimdBinaryOp,
       UNREACHABLE();
   }
 }
+
+#define SIMD_OP_SIMPLE_UNARY(V)                                                \
+  V(Float32x4Sqrt, sqrtps)                                                     \
+  V(Float32x4Reciprocal, reciprocalps)                                         \
+  V(Float32x4ReciprocalSqrt, rsqrtps)                                          \
+  V(Float32x4Negate, negateps)                                                 \
+  V(Float32x4Abs, absps)                                                       \
+  V(Float64x2Negate, negatepd)                                                 \
+  V(Float64x2Abs, abspd)                                                       \
+  V(Float64x2Sqrt, sqrtpd)
 
 DEFINE_EMIT(SimdUnaryOp, (SameAsFirstInput, XmmRegister value)) {
   switch (op->kind()) {
@@ -5471,10 +5471,10 @@ DEFINE_EMIT(SimdUnaryOp, (SameAsFirstInput, XmmRegister value)) {
       break;
     case SimdOpInstr::kInt32x4ToFloat32x4:
     case SimdOpInstr::kFloat32x4ToInt32x4:
-      // NOP
+      // NOP.
       break;
     case SimdOpInstr::kFloat64x2GetX:
-      // NOP
+      // NOP.
       break;
     case SimdOpInstr::kFloat64x2GetY:
       // FIXME. Register constraints are chosen badly.
@@ -5491,7 +5491,7 @@ DEFINE_EMIT(SimdUnaryOp, (SameAsFirstInput, XmmRegister value)) {
 }
 
 DEFINE_EMIT(SimdGetSignMask, (Register out, XmmRegister value)) {
-  switch (kind) {
+  switch (op->kind()) {
     case SimdOpInstr::kFloat32x4GetSignMask:
     case SimdOpInstr::kInt32x4GetSignMask:
       __ movmskps(out, value);
@@ -5510,7 +5510,7 @@ DEFINE_EMIT(
     Float32x4Constructor,
     (SameAsFirstInput, XmmRegister v0, XmmRegister, XmmRegister, XmmRegister)) {
   const XmmRegister out = v0;
-  __ AddImmediate(RSP, Immediate(-4 * kFloatSize));
+  __ SubImmediate(RSP, Immediate(kSimd128Size));
   for (intptr_t i = 0; i < 4; i++) {
     XmmRegister in = op->locs()->in(i).fpu_reg();
     if (out != in) {
@@ -5520,18 +5520,7 @@ DEFINE_EMIT(
     __ movss(Address(RSP, kFloatSize * i), out);
   }
   __ movups(out, Address(RSP, 0));
-  __ AddImmediate(RSP, Immediate(4 * kFloatSize));
-}
-
-// TODO FIXME
-DEFINE_EMIT(Int32x4Constructor,
-            (XmmRegister result, Register, Register, Register, Register)) {
-  __ AddImmediate(RSP, Immediate(-4 * kInt32Size));
-  for (intptr_t i = 0; i < 4; i++) {
-    __ movl(Address(RSP, i * kInt32Size), op->locs()->in(i).reg());
-  }
-  __ movups(result, Address(RSP, 0));
-  __ AddImmediate(RSP, Immediate(4 * kInt32Size));
+  __ AddImmediate(RSP, Immediate(kSimd128Size));
 }
 
 DEFINE_EMIT(Float32x4Zero, (XmmRegister value)) {
@@ -5549,6 +5538,17 @@ DEFINE_EMIT(Float32x4Clamp,
              XmmRegister upper)) {
   __ minps(value, upper);
   __ maxps(value, lower);
+}
+
+// TODO FIXME
+DEFINE_EMIT(Int32x4Constructor,
+            (XmmRegister result, Register, Register, Register, Register)) {
+  __ SubImmediate(RSP, Immediate(kSimd128Size));
+  for (intptr_t i = 0; i < 4; i++) {
+    __ movl(Address(RSP, i * kInt32Size), op->locs()->in(i).reg());
+  }
+  __ movups(result, Address(RSP, 0));
+  __ AddImmediate(RSP, Immediate(kSimd128Size));
 }
 
 DEFINE_EMIT(Int32x4BoolConstructor,
@@ -5589,7 +5589,7 @@ DEFINE_EMIT(Int32x4GetFlagZorW,
              Temp<XmmRegister> temp)) {
   __ movhlps(temp, value);  // extract upper half
   __ movq(RDX, temp);
-  if (kind == SimdOpInstr::kInt32x4GetFlagW) {
+  if (op->kind() == SimdOpInstr::kInt32x4GetFlagW) {
     __ shrq(RDX, Immediate(32));  // extract upper 32bits.
   }
   EmitRDXToBoolean(compiler);
@@ -5598,7 +5598,7 @@ DEFINE_EMIT(Int32x4GetFlagZorW,
 // Need byte register for setcc.
 DEFINE_EMIT(Int32x4GetFlagXorY, (Fixed<Register, RDX> out, XmmRegister value)) {
   __ movq(RDX, value);
-  if (kind == SimdOpInstr::kInt32x4GetFlagY) {
+  if (op->kind() == SimdOpInstr::kInt32x4GetFlagY) {
     __ shrq(RDX, Immediate(32));  // extract upper 32bits.
   }
   EmitRDXToBoolean(compiler);
@@ -5713,6 +5713,8 @@ LocationSummary* SimdOpInstr::MakeLocationSummary(Zone* zone, bool opt) const {
 #undef EMIT
 #undef SIMPLE
   }
+  UNREACHABLE();
+  return NULL;
 }
 
 void SimdOpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
