@@ -5709,7 +5709,7 @@ void DebugStepCheckInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
 
 #define DEFINE_EMIT(Name, Args)                                                \
   static void Emit##Name(FlowGraphCompiler* compiler, SimdOpInstr* op,         \
-                         UNPACK Args)
+                         UNPACK_ARGS Args)
 
 DEFINE_EMIT(Simd32x4BinaryOp,
             (QRegister result, QRegister left, QRegister right)) {

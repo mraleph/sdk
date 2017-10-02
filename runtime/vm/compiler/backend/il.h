@@ -6517,21 +6517,23 @@ class UnboxedIntConverterInstr : public TemplateDefinition<1, NoThrow> {
 #define SIMD_BINARY_OP(M, T, Name) M(2, _, T##Name, (T, T), T)
 
 // List of SIMD_BINARY_OPs common for Float32x4 or Float64x2.
-#define SIMD_BINARY_FLOAT_OP_LIST(M, T)                                        \
-  SIMD_BINARY_OP(M, T, Add)                                                    \
-  SIMD_BINARY_OP(M, T, Sub)                                                    \
-  SIMD_BINARY_OP(M, T, Mul)                                                    \
-  SIMD_BINARY_OP(M, T, Div)                                                    \
+// Note: M for recognized methods and OP for operators.
+#define SIMD_BINARY_FLOAT_OP_LIST(M, OP, T)                                    \
+  SIMD_BINARY_OP(OP, T, Add)                                                   \
+  SIMD_BINARY_OP(OP, T, Sub)                                                   \
+  SIMD_BINARY_OP(OP, T, Mul)                                                   \
+  SIMD_BINARY_OP(OP, T, Div)                                                   \
   SIMD_BINARY_OP(M, T, Min)                                                    \
   SIMD_BINARY_OP(M, T, Max)
 
 // List of SIMD_BINARY_OP for Int32x4.
-#define SIMD_BINARY_INTEGER_OP_LIST(M, T)                                      \
-  SIMD_BINARY_OP(M, T, Add)                                                    \
-  SIMD_BINARY_OP(M, T, Sub)                                                    \
-  SIMD_BINARY_OP(M, T, BitAnd)                                                 \
-  SIMD_BINARY_OP(M, T, BitOr)                                                  \
-  SIMD_BINARY_OP(M, T, BitXor)
+// Note: M for recognized methods and OP for operators.
+#define SIMD_BINARY_INTEGER_OP_LIST(M, OP, T)                                  \
+  SIMD_BINARY_OP(OP, T, Add)                                                   \
+  SIMD_BINARY_OP(OP, T, Sub)                                                   \
+  SIMD_BINARY_OP(OP, T, BitAnd)                                                \
+  SIMD_BINARY_OP(OP, T, BitOr)                                                 \
+  SIMD_BINARY_OP(OP, T, BitXor)
 
 // Given a signature of a given SIMD op construct its per component variations.
 #define SIMD_PER_COMPONENT_XYZW(M, Arity, Name, Inputs, Output)                \
@@ -6549,12 +6551,14 @@ class UnboxedIntConverterInstr : public TemplateDefinition<1, NoThrow> {
 // BitXor, BitOr) all other operations must match names used by
 // MethodRecognizer. This allows to autogenerate convertion from
 // MethodRecognizer::Kind into SimdOpInstr::Kind (see KindForMethod helper).
+// Note: M is for those SimdOp that are recognized methods and BINARY_OP
+// is for operators.
 #define SIMD_OP_LIST(M, BINARY_OP)                                             \
-  SIMD_BINARY_FLOAT_OP_LIST(BINARY_OP, Float32x4)                              \
-  SIMD_BINARY_FLOAT_OP_LIST(BINARY_OP, Float64x2)                              \
-  SIMD_BINARY_INTEGER_OP_LIST(BINARY_OP, Int32x4)                              \
+  SIMD_BINARY_FLOAT_OP_LIST(M, BINARY_OP, Float32x4)                           \
+  SIMD_BINARY_FLOAT_OP_LIST(M, BINARY_OP, Float64x2)                           \
+  SIMD_BINARY_INTEGER_OP_LIST(M, BINARY_OP, Int32x4)                           \
   SIMD_PER_COMPONENT_XYZW(M, 1, Float32x4Shuffle, (Float32x4), Double)         \
-  SIMD_PER_COMPONENT_XYZW(M, 2, Float32x4With, (Double, Float32x4), Double)    \
+  SIMD_PER_COMPONENT_XYZW(M, 2, Float32x4With, (Double, Float32x4), Float32x4) \
   SIMD_PER_COMPONENT_XYZW(M, 1, Int32x4GetFlag, (Int32x4), Bool)               \
   SIMD_PER_COMPONENT_XYZW(M, 2, Int32x4WithFlag, (Int32x4, Bool), Int32x4)     \
   M(1, MASK, Float32x4Shuffle, (Float32x4), Float32x4)                         \

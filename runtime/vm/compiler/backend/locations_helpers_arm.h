@@ -2,31 +2,42 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+// This file contains few helpful marker types that can be used with
+// MakeLocationSummaryFromEmitter and InvokeEmitter to simplify writing
+// of ARM code.
+
 #ifndef RUNTIME_VM_COMPILER_BACKEND_LOCATIONS_HELPERS_ARM_H_
 #define RUNTIME_VM_COMPILER_BACKEND_LOCATIONS_HELPERS_ARM_H_
 
 namespace dart {
 
+// QRegister_ is a wrapper around QRegister that provides helpers for accessing
+// S and D components.
 class QRegister_ {
  public:
+  explicit QRegister_(QRegister reg) : reg_(reg) {}
+
+  operator QRegister() const { return reg_; }
+
   inline DRegister d(intptr_t i) const {
+    ASSERT(0 <= i && i < 2);
     return static_cast<DRegister>(reg_ * 2 + i);
   }
 
   inline SRegister s(intptr_t i) const {
+    ASSERT(0 <= i && i < 4);
     return static_cast<SRegister>(reg_ * 4 + i);
   }
-
-  explicit QRegister_(QRegister reg) : reg_(reg) {}
-
-  operator QRegister() const { return reg_; }
 
  private:
   QRegister reg_;
 };
 
+// Fixed_<r> is a handy replacement for Fixed<QRegister, r> that provides
+// helpers for accessing S and D components.
 template <QRegister reg>
-struct Fixed_ {
+class Fixed_ {
+ public:
   inline DRegister d(intptr_t i) const {
     return static_cast<DRegister>(reg * 2 + i);
   }
@@ -39,7 +50,7 @@ struct Fixed_ {
 };
 
 template <>
-struct UnwrapLocation<QRegister_> {
+struct LocationTrait<QRegister_> {
   static const bool kIsTemp = false;
 
   static QRegister_ Unwrap(const Location& loc) {
@@ -47,12 +58,12 @@ struct UnwrapLocation<QRegister_> {
   }
 
   template <intptr_t arity, intptr_t index>
-  static QRegister_ Unwrap(LocationSummary* locs) {
+  static QRegister_ UnwrapInput(LocationSummary* locs) {
     return Unwrap(locs->in(index));
   }
 
   template <intptr_t arity, intptr_t index>
-  static void SetConstraint(LocationSummary* locs) {
+  static void SetInputConstraint(LocationSummary* locs) {
     locs->set_in(index, ToConstraint());
   }
 
@@ -60,21 +71,21 @@ struct UnwrapLocation<QRegister_> {
 };
 
 template <QRegister reg>
-struct UnwrapLocation<Fixed_<reg> > {
+struct LocationTrait<Fixed_<reg> > {
   static const bool kIsTemp = false;
 
   static Fixed_<reg> Unwrap(const Location& loc) {
-    assert(UnwrapLocation<QRegister>::Unwrap(loc) == reg);
+    ASSERT(LocationTrait<QRegister>::Unwrap(loc) == reg);
     return Fixed_<reg>();
   }
 
   template <intptr_t arity, intptr_t index>
-  static Fixed_<reg> Unwrap(LocationSummary* locs) {
+  static Fixed_<reg> UnwrapInput(LocationSummary* locs) {
     return Unwrap(locs->in(index));
   }
 
   template <intptr_t arity, intptr_t index>
-  static void SetConstraint(LocationSummary* locs) {
+  static void SetInputConstraint(LocationSummary* locs) {
     locs->set_in(index, ToConstraint());
   }
 

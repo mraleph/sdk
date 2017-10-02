@@ -4232,7 +4232,7 @@ SimdOpInstr::Kind SimdOpInstr::KindForMethod(MethodRecognizer::Kind kind) {
       break;
   }
 
-  UNREACHABLE();
+  FATAL1("Not a SIMD method: %s", MethodRecognizer::KindToCString(kind));
   return kFloat32x4Add;
 }
 

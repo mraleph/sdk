@@ -30,7 +30,7 @@ enum Representation {
   kUnboxedInt32x4,
   kUnboxedFloat64x2,
   kPairOfTagged,
-  kNumRepresentations,
+  kNumRepresentations
 };
 
 // Location objects are used to connect register allocator and code generator.

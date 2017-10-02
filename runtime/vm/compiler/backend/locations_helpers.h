@@ -3,45 +3,110 @@
 // BSD-style license that can be found in the LICENSE file.
 
 // This file contains two helper functions MakeLocationSummaryFromEmitter
-// and InvokeEmitter which
+// and InvokeEmitter which simplify definition of MakeLocationSummary and
+// EmitNativeCode methods for instructions.
 //
-
+// Classical way to define instruction backend would be to override:
+//
+// A) MakeLocationSummary method that creates and fills LocationSummary object
+// with location constraints for register allocator;
+//
+// B) EmitNativeCode method that unpacks results of register allocation from
+// LocationSummary and uses them to generate native code.
+//
+// Helpers contained in this file allow to "autogenerate" both of these methods
+// from a single *emitter* function that has the following signature:
+//
+//        void Emitter(FlowGraphCompiler*,
+//                     Instr* instr,
+//                     OutType out,
+//                     InputType1 v1, ...)
+//
+// Here Instr is the type of the instruction, OutType is a type of an output
+// register and InputType1, InputType2, etc are register types for inputs or
+// temps.
+//
+// To create LocationSummary from emitter's signature invoke
+//
+//        MakeLocationSummaryFromEmitter(zone, instr, &Emitter);
+//
+// To unpack allocation results from LocationSummary and call emitter write
+//
+//        InvokeEmitter(zone, instr, &Emitter)
+//
+// See DEFINE_BACKEND macro below that can be used to do that.
+//
+// In addition to supporting Register and FpuRegister types several markers can
+// be used to denote various register constraints, e.g. SameAsFirstInput, Fixed
+// and Temp. See below.
+//
 #ifndef RUNTIME_VM_COMPILER_BACKEND_LOCATIONS_HELPERS_H_
 #define RUNTIME_VM_COMPILER_BACKEND_LOCATIONS_HELPERS_H_
 
 namespace dart {
 
+#define DEFINE_BACKEND(Name, Args)                                             \
+  static void EmitterFor##Name(FlowGraphCompiler* compiler,                    \
+                               Name##Instr* instr, UNPACK_ARGS Args);          \
+  LocationSummary* Name##Instr::MakeLocationSummary(Zone* zone, bool opt)      \
+      const {                                                                  \
+    return MakeLocationSummaryFromEmitter(zone, this, &EmitterFor##Name);      \
+  }                                                                            \
+  void Name##Instr::EmitNativeCode(FlowGraphCompiler* compiler) {              \
+    InvokeEmitter(compiler, this, &EmitterFor##Name);                          \
+  }                                                                            \
+  static void EmitterFor##Name(FlowGraphCompiler* compiler,                    \
+                               Name##Instr* instr, UNPACK_ARGS Args)
+
+#define UNPACK_ARGS(...) __VA_ARGS__
+
+// Marker type used to signal that output has SameAsFirstInput register
+// constraint, which means that the first input needs to be in a writable
+// register and the instruction will produce output in the same register.
 struct SameAsFirstInput {};
 
-template <typename RegisterT, RegisterT t>
+// Marker type used to signal that this input, output or temp needs to
+// be in a fixed register `reg` of type `R` (either Register or FpuRegister).
+template <typename R, R reg>
 struct Fixed {
-  operator RegisterT() { return t; }
+  // Allow implicit coercion of Fixed<R, ...> to R.
+  operator R() { return reg; }
 };
 
-template <typename RegisterT>
-struct Temp {
-  explicit Temp(RegisterT reg) : reg_(reg) {}
+// Marker type to signal that emitter needs a temporary register of type R.
+template <typename R>
+class Temp {
+ public:
+  explicit Temp(R reg) : reg_(reg) {}
 
-  operator RegisterT() { return reg_; }
+  operator R() { return reg_; }
 
-  RegisterT reg_;
+ private:
+  R reg_;
 };
 
+// Implementation of MakeLocationSummaryFromEmitter and InvokeEmitter.
+
+// Trait that specifies how different types of locations (e.g. Register,
+// FpuRegister) can be extracted from Location objects and how register
+// constraints can be created for different location types and markers like
+// Temp, Fixed and SameAsFirstInput.
 template <typename T>
-struct UnwrapLocation;
+struct LocationTrait;
 
 template <>
-struct UnwrapLocation<Register> {
-  static const bool kIsTemp = false;
+struct LocationTrait<Register> {
+  static const bool kIsTemp = false;  // This is not a temporary.
 
   static Register Unwrap(const Location& loc) { return loc.reg(); }
+
   template <intptr_t arity, intptr_t index>
-  static Register Unwrap(LocationSummary* locs) {
+  static Register UnwrapInput(LocationSummary* locs) {
     return Unwrap(locs->in(index));
   }
 
   template <intptr_t arity, intptr_t index>
-  static void SetConstraint(LocationSummary* locs) {
+  static void SetInputConstraint(LocationSummary* locs) {
     locs->set_in(index, ToConstraint());
   }
 
@@ -52,18 +117,18 @@ struct UnwrapLocation<Register> {
 };
 
 template <>
-struct UnwrapLocation<FpuRegister> {
-  static const bool kIsTemp = false;
+struct LocationTrait<FpuRegister> {
+  static const bool kIsTemp = false;  // This is not a temporary.
 
   static FpuRegister Unwrap(const Location& loc) { return loc.fpu_reg(); }
 
   template <intptr_t arity, intptr_t index>
-  static FpuRegister Unwrap(LocationSummary* locs) {
+  static FpuRegister UnwrapInput(LocationSummary* locs) {
     return Unwrap(locs->in(index));
   }
 
   template <intptr_t arity, intptr_t index>
-  static void SetConstraint(LocationSummary* locs) {
+  static void SetInputConstraint(LocationSummary* locs) {
     locs->set_in(index, ToConstraint());
   }
 
@@ -74,55 +139,55 @@ struct UnwrapLocation<FpuRegister> {
 };
 
 template <typename RegisterType, RegisterType reg>
-struct UnwrapLocation<Fixed<RegisterType, reg> > {
-  static const bool kIsTemp = false;
+struct LocationTrait<Fixed<RegisterType, reg> > {
+  static const bool kIsTemp = false;  // This is not a temporary.
 
   static Fixed<RegisterType, reg> Unwrap(const Location& loc) {
-    assert(UnwrapLocation<RegisterType>::Unwrap(loc) == reg);
+    ASSERT(LocationTrait<RegisterType>::Unwrap(loc) == reg);
     return Fixed<RegisterType, reg>();
   }
 
   template <intptr_t arity, intptr_t index>
-  static Fixed<RegisterType, reg> Unwrap(LocationSummary* locs) {
+  static Fixed<RegisterType, reg> UnwrapInput(LocationSummary* locs) {
     return Unwrap(locs->in(index));
   }
 
   template <intptr_t arity, intptr_t index>
-  static void SetConstraint(LocationSummary* locs) {
+  static void SetInputConstraint(LocationSummary* locs) {
     locs->set_in(index, ToConstraint());
   }
 
   static Location ToConstraint() {
-    return UnwrapLocation<RegisterType>::ToFixedConstraint(reg);
+    return LocationTrait<RegisterType>::ToFixedConstraint(reg);
   }
 };
 
 template <typename RegisterType>
-struct UnwrapLocation<Temp<RegisterType> > {
-  static const bool kIsTemp = true;
+struct LocationTrait<Temp<RegisterType> > {
+  static const bool kIsTemp = true;  // This is a temporary.
 
   static Temp<RegisterType> Unwrap(const Location& loc) {
-    return Temp<RegisterType>(UnwrapLocation<RegisterType>::Unwrap(loc));
+    return Temp<RegisterType>(LocationTrait<RegisterType>::Unwrap(loc));
   }
 
   template <intptr_t arity, intptr_t index>
-  static Temp<RegisterType> Unwrap(LocationSummary* locs) {
+  static Temp<RegisterType> UnwrapInput(LocationSummary* locs) {
     return Unwrap(locs->temp(index - arity));
   }
 
   template <intptr_t arity, intptr_t index>
-  static void SetConstraint(LocationSummary* locs) {
+  static void SetInputConstraint(LocationSummary* locs) {
     locs->set_temp(index - arity, ToConstraint());
   }
 
   static Location ToConstraint() {
-    return UnwrapLocation<RegisterType>::ToConstraint();
+    return LocationTrait<RegisterType>::ToConstraint();
   }
 };
 
 template <>
-struct UnwrapLocation<SameAsFirstInput> {
-  static const bool kIsTemp = false;
+struct LocationTrait<SameAsFirstInput> {
+  static const bool kIsTemp = false;  // This is not a temporary.
 
   static SameAsFirstInput Unwrap(const Location& loc) {
     return SameAsFirstInput();
@@ -131,7 +196,13 @@ struct UnwrapLocation<SameAsFirstInput> {
   static Location ToConstraint() { return Location::SameAsFirstInput(); }
 };
 
-#define UNPACK(...) __VA_ARGS__
+// Auxiliary types and macro helpers to construct lists of types.
+// TODO(vegorov) rewrite this usign variadic templates when we enable C++11
+
+struct Nil;
+
+template <typename T, typename U>
+struct Cons {};
 
 #define TYPE_LIST_0() Nil
 #define TYPE_LIST_1(T0) Cons<T0, TYPE_LIST_0()>
@@ -140,19 +211,18 @@ struct UnwrapLocation<SameAsFirstInput> {
 #define TYPE_LIST_4(T0, ...) Cons<T0, TYPE_LIST_3(__VA_ARGS__)>
 #define TYPE_LIST_5(T0, ...) Cons<T0, TYPE_LIST_4(__VA_ARGS__)>
 
-#define SIGNATURE_INFO_TYPE(Arity, ...)                                        \
-  SignatureInfo<TYPE_LIST_##Arity(__VA_ARGS__)>
-
-struct Nil;
-
-template <typename T, typename U>
-struct Cons {};
+// SignatureTrait is a recursively defined type that calculates InputCount and
+// TempCount for a signature and can be used to invoke SetInputConstraint for
+// each type in a signature to populate location summary with correct
+// constraints.
+#define SIGNATURE_TRAIT(Arity, ...)                                            \
+  SignatureTrait<TYPE_LIST_##Arity(__VA_ARGS__)>
 
 template <typename T>
-struct SignatureInfo;
+struct SignatureTrait;
 
 template <>
-struct SignatureInfo<Nil> {
+struct SignatureTrait<Nil> {
   enum { kArity = 0, kTempCount = 0, kInputCount = kArity - kTempCount };
 
   template <intptr_t kArity, intptr_t kOffset>
@@ -160,21 +230,23 @@ struct SignatureInfo<Nil> {
 };
 
 template <typename T0, typename Tx>
-struct SignatureInfo<Cons<T0, Tx> > {
-  typedef SignatureInfo<Tx> Tail;
+struct SignatureTrait<Cons<T0, Tx> > {
+  typedef SignatureTrait<Tx> Tail;
 
   enum {
     kArity = 1 + Tail::kArity,
-    kTempCount = (UnwrapLocation<T0>::kIsTemp ? 1 : 0) + Tail::kTempCount,
+    kTempCount = (LocationTrait<T0>::kIsTemp ? 1 : 0) + Tail::kTempCount,
     kInputCount = kArity - kTempCount
   };
 
   template <intptr_t kArity, intptr_t kOffset>
   static void SetConstraints(LocationSummary* locs) {
-    UnwrapLocation<T0>::template SetConstraint<kArity, kOffset>(locs);
+    LocationTrait<T0>::template SetInputConstraint<kArity, kOffset>(locs);
     Tail::template SetConstraints<kArity, kOffset + 1>(locs);
   }
 };
+
+// MakeLocationSummaryFromEmitter overloadings below.
 
 template <typename Instr, typename Out>
 LocationSummary* MakeLocationSummaryFromEmitter(Zone* zone,
@@ -182,26 +254,24 @@ LocationSummary* MakeLocationSummaryFromEmitter(Zone* zone,
                                                 void (*Emit)(FlowGraphCompiler*,
                                                              Instr*,
                                                              Out)) {
-  typedef SIGNATURE_INFO_TYPE(0) SignatureT;
-  ASSERT(instr->InputCount() == SignatureT::kInputCount);
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, SignatureT::kInputCount, SignatureT::kTempCount,
-                      LocationSummary::kNoCall);
-  summary->set_out(0, UnwrapLocation<Out>::ToConstraint());
+  typedef SIGNATURE_TRAIT(0) S;
+  ASSERT(instr->InputCount() == S::kInputCount);
+  LocationSummary* summary = new (zone) LocationSummary(
+      zone, S::kInputCount, S::kTempCount, LocationSummary::kNoCall);
+  summary->set_out(0, LocationTrait<Out>::ToConstraint());
   return summary;
 }
 
 #define DEFINE_MAKE_LOCATION_SUMMARY_SPECIALIZATION(Arity, Types)              \
   LocationSummary* MakeLocationSummaryFromEmitter(                             \
       Zone* zone, const Instr* instr,                                          \
-      void (*Emit)(FlowGraphCompiler*, Instr*, Out, UNPACK Types)) {           \
-    typedef SIGNATURE_INFO_TYPE(Arity, UNPACK Types) SignatureT;               \
-    ASSERT(instr->InputCount() == SignatureT::kInputCount);                    \
-    LocationSummary* summary = new (zone)                                      \
-        LocationSummary(zone, SignatureT::kInputCount, SignatureT::kTempCount, \
-                        LocationSummary::kNoCall);                             \
-    SignatureT::template SetConstraints<SignatureT::kInputCount, 0>(summary);  \
-    summary->set_out(0, UnwrapLocation<Out>::ToConstraint());                  \
+      void (*Emit)(FlowGraphCompiler*, Instr*, Out, UNPACK_ARGS Types)) {      \
+    typedef SIGNATURE_TRAIT(Arity, UNPACK_ARGS Types) S;                       \
+    ASSERT(instr->InputCount() == S::kInputCount);                             \
+    LocationSummary* summary = new (zone) LocationSummary(                     \
+        zone, S::kInputCount, S::kTempCount, LocationSummary::kNoCall);        \
+    S::template SetConstraints<S::kInputCount, 0>(summary);                    \
+    summary->set_out(0, LocationTrait<Out>::ToConstraint());                   \
     return summary;                                                            \
   }
 
@@ -231,50 +301,52 @@ template <typename Instr,
           typename T4>
 DEFINE_MAKE_LOCATION_SUMMARY_SPECIALIZATION(5, (T0, T1, T2, T3, T4));
 
+// InvokeEmitter overloadings below.
+
 template <typename Instr, typename Out>
 void InvokeEmitter(FlowGraphCompiler* compiler,
                    Instr* instr,
                    void (*Emit)(FlowGraphCompiler*, Instr*, Out)) {
-  typedef SIGNATURE_INFO_TYPE(0) SignatureT;
-  ASSERT(instr->InputCount() == SignatureT::kInputCount);
+  typedef SIGNATURE_TRAIT(0) S;
+  ASSERT(instr->InputCount() == S::kInputCount);
   LocationSummary* locs = instr->locs();
-  Emit(compiler, instr, UnwrapLocation<Out>::Unwrap(locs->out(0)));
+  Emit(compiler, instr, LocationTrait<Out>::Unwrap(locs->out(0)));
 }
 
 template <typename Instr, typename Out, typename T0>
 void InvokeEmitter(FlowGraphCompiler* compiler,
                    Instr* instr,
                    void (*Emit)(FlowGraphCompiler*, Instr*, Out, T0)) {
-  typedef SIGNATURE_INFO_TYPE(1, T0) SignatureT;
-  ASSERT(instr->InputCount() == SignatureT::kInputCount);
+  typedef SIGNATURE_TRAIT(1, T0) S;
+  ASSERT(instr->InputCount() == S::kInputCount);
   LocationSummary* locs = instr->locs();
-  Emit(compiler, instr, UnwrapLocation<Out>::Unwrap(locs->out(0)),
-       UnwrapLocation<T0>::template Unwrap<SignatureT::kInputCount, 0>(locs));
+  Emit(compiler, instr, LocationTrait<Out>::Unwrap(locs->out(0)),
+       LocationTrait<T0>::template UnwrapInput<S::kInputCount, 0>(locs));
 }
 
 template <typename Instr, typename Out, typename T0, typename T1>
 void InvokeEmitter(FlowGraphCompiler* compiler,
                    Instr* instr,
                    void (*Emit)(FlowGraphCompiler*, Instr*, Out, T0, T1)) {
-  typedef SIGNATURE_INFO_TYPE(2, T0, T1) SignatureT;
-  ASSERT(instr->InputCount() == SignatureT::kInputCount);
+  typedef SIGNATURE_TRAIT(2, T0, T1) S;
+  ASSERT(instr->InputCount() == S::kInputCount);
   LocationSummary* locs = instr->locs();
-  Emit(compiler, instr, UnwrapLocation<Out>::Unwrap(locs->out(0)),
-       UnwrapLocation<T0>::template Unwrap<SignatureT::kInputCount, 0>(locs),
-       UnwrapLocation<T1>::template Unwrap<SignatureT::kInputCount, 1>(locs));
+  Emit(compiler, instr, LocationTrait<Out>::Unwrap(locs->out(0)),
+       LocationTrait<T0>::template UnwrapInput<S::kInputCount, 0>(locs),
+       LocationTrait<T1>::template UnwrapInput<S::kInputCount, 1>(locs));
 }
 
 template <typename Instr, typename Out, typename T0, typename T1, typename T2>
 void InvokeEmitter(FlowGraphCompiler* compiler,
                    Instr* instr,
                    void (*Emit)(FlowGraphCompiler*, Instr*, Out, T0, T1, T2)) {
-  typedef SIGNATURE_INFO_TYPE(3, T0, T1, T2) SignatureT;
-  ASSERT(instr->InputCount() == SignatureT::kInputCount);
+  typedef SIGNATURE_TRAIT(3, T0, T1, T2) S;
+  ASSERT(instr->InputCount() == S::kInputCount);
   LocationSummary* locs = instr->locs();
-  Emit(compiler, instr, UnwrapLocation<Out>::Unwrap(locs->out(0)),
-       UnwrapLocation<T0>::template Unwrap<SignatureT::kInputCount, 0>(locs),
-       UnwrapLocation<T1>::template Unwrap<SignatureT::kInputCount, 1>(locs),
-       UnwrapLocation<T2>::template Unwrap<SignatureT::kInputCount, 2>(locs));
+  Emit(compiler, instr, LocationTrait<Out>::Unwrap(locs->out(0)),
+       LocationTrait<T0>::template UnwrapInput<S::kInputCount, 0>(locs),
+       LocationTrait<T1>::template UnwrapInput<S::kInputCount, 1>(locs),
+       LocationTrait<T2>::template UnwrapInput<S::kInputCount, 2>(locs));
 }
 
 template <typename Instr,
@@ -287,14 +359,14 @@ void InvokeEmitter(
     FlowGraphCompiler* compiler,
     Instr* instr,
     void (*Emit)(FlowGraphCompiler*, Instr*, Out, T0, T1, T2, T3)) {
-  typedef SIGNATURE_INFO_TYPE(4, T0, T1, T2, T3) SignatureT;
-  ASSERT(instr->InputCount() == SignatureT::kInputCount);
+  typedef SIGNATURE_TRAIT(4, T0, T1, T2, T3) S;
+  ASSERT(instr->InputCount() == S::kInputCount);
   LocationSummary* locs = instr->locs();
-  Emit(compiler, instr, UnwrapLocation<Out>::Unwrap(locs->out(0)),
-       UnwrapLocation<T0>::template Unwrap<SignatureT::kInputCount, 0>(locs),
-       UnwrapLocation<T1>::template Unwrap<SignatureT::kInputCount, 1>(locs),
-       UnwrapLocation<T2>::template Unwrap<SignatureT::kInputCount, 2>(locs),
-       UnwrapLocation<T3>::template Unwrap<SignatureT::kInputCount, 3>(locs));
+  Emit(compiler, instr, LocationTrait<Out>::Unwrap(locs->out(0)),
+       LocationTrait<T0>::template UnwrapInput<S::kInputCount, 0>(locs),
+       LocationTrait<T1>::template UnwrapInput<S::kInputCount, 1>(locs),
+       LocationTrait<T2>::template UnwrapInput<S::kInputCount, 2>(locs),
+       LocationTrait<T3>::template UnwrapInput<S::kInputCount, 3>(locs));
 }
 
 template <typename Instr,
@@ -308,15 +380,15 @@ void InvokeEmitter(
     FlowGraphCompiler* compiler,
     Instr* instr,
     void (*Emit)(FlowGraphCompiler*, Instr*, Out, T0, T1, T2, T3, T4)) {
-  typedef SIGNATURE_INFO_TYPE(5, T0, T1, T2, T3, T4) SignatureT;
-  ASSERT(instr->InputCount() == SignatureT::kInputCount);
+  typedef SIGNATURE_TRAIT(5, T0, T1, T2, T3, T4) S;
+  ASSERT(instr->InputCount() == S::kInputCount);
   LocationSummary* locs = instr->locs();
-  Emit(compiler, instr, UnwrapLocation<Out>::Unwrap(locs->out(0)),
-       UnwrapLocation<T0>::template Unwrap<SignatureT::kInputCount, 0>(locs),
-       UnwrapLocation<T1>::template Unwrap<SignatureT::kInputCount, 1>(locs),
-       UnwrapLocation<T2>::template Unwrap<SignatureT::kInputCount, 2>(locs),
-       UnwrapLocation<T3>::template Unwrap<SignatureT::kInputCount, 3>(locs),
-       UnwrapLocation<T4>::template Unwrap<SignatureT::kInputCount, 4>(locs));
+  Emit(compiler, instr, LocationTrait<Out>::Unwrap(locs->out(0)),
+       LocationTrait<T0>::template UnwrapInput<S::kInputCount, 0>(locs),
+       LocationTrait<T1>::template UnwrapInput<S::kInputCount, 1>(locs),
+       LocationTrait<T2>::template UnwrapInput<S::kInputCount, 2>(locs),
+       LocationTrait<T3>::template UnwrapInput<S::kInputCount, 3>(locs),
+       LocationTrait<T4>::template UnwrapInput<S::kInputCount, 4>(locs));
 }
 
 }  // namespace dart

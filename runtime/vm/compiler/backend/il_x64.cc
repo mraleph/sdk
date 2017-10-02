@@ -4993,24 +4993,8 @@ void ShiftUint32OpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   __ Bind(&done);
 }
 
-LocationSummary* UnaryUint32OpInstr::MakeLocationSummary(Zone* zone,
-                                                         bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  summary->set_in(0, Location::RequiresRegister());
-  summary->set_out(0, Location::SameAsFirstInput());
-  return summary;
-}
-
-void UnaryUint32OpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  Register out = locs()->out(0).reg();
-  ASSERT(locs()->in(0).reg() == out);
-
-  ASSERT(op_kind() == Token::kBIT_NOT);
-
-  __ notl(out);
+DEFINE_BACKEND(UnaryUint32Op, (SameAsFirstInput, Register value)) {
+  __ notl(value);
 }
 
 DEFINE_UNIMPLEMENTED_INSTRUCTION(BinaryInt32OpInstr)
@@ -5327,7 +5311,7 @@ void DebugStepCheckInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
 
 #define DEFINE_EMIT(Name, Args)                                                \
   static void Emit##Name(FlowGraphCompiler* compiler, SimdOpInstr* op,         \
-                         UNPACK Args)
+                         UNPACK_ARGS Args)
 
 #define SIMD_OP_FLOAT_ARITH(V, Name, op)                                       \
   V(Float32x4##Name, op##ps)                                                   \
@@ -5426,7 +5410,7 @@ DEFINE_EMIT(SimdBinaryOp,
   SIMD_OP_FLOAT_ARITH(V, Negate, negate)                                       \
   SIMD_OP_FLOAT_ARITH(V, Abs, abs)                                             \
   V(Float32x4Reciprocal, reciprocalps)                                         \
-  V(Float32x4ReciprocalSqrt, rsqrtps)                                          \
+  V(Float32x4ReciprocalSqrt, rsqrtps)
 
 DEFINE_EMIT(SimdUnaryOp, (SameAsFirstInput, XmmRegister value)) {
   // TODO(dartbug.com/30949) select better register constraints to avoid

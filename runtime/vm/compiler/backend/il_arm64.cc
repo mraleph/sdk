@@ -4666,7 +4666,7 @@ void DebugStepCheckInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
 
 #define DEFINE_EMIT(Name, Args)                                                \
   static void Emit##Name(FlowGraphCompiler* compiler, SimdOpInstr* op,         \
-                         UNPACK Args)
+                         UNPACK_ARGS Args)
 
 #define SIMD_OP_FLOAT_ARITH(V, Name, op)                                       \
   V(Float32x4##Name, op##s)                                                    \
