@@ -3672,6 +3672,7 @@ void StaticCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
 #endif  // !defined(TARGET_ARCH_DBC)
 }
 
+#if !defined(TARGET_ARCH_X64)
 void AssertAssignableInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   compiler->GenerateAssertAssignable(token_pos(), deopt_id(), dst_type(),
                                      dst_name(), locs());
@@ -3681,6 +3682,7 @@ void AssertAssignableInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   ASSERT(locs()->in(0).reg() == locs()->out(0).reg());
 #endif  // !defined(TARGET_ARCH_DBC)
 }
+#endif
 
 void AssertSubtypeInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
 #if !defined(TARGET_ARCH_DBC)

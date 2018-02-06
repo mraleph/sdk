@@ -1841,6 +1841,10 @@ void StubCode::GenerateSubtype4TestCacheStub(Assembler* assembler) {
   GenerateSubtypeNTestCacheStub(assembler, 4);
 }
 
+void StubCode::GenerateIsSupertypeOfStub(Assembler* assembler) {
+  __ int3();
+}
+
 // Return the current stack pointer address, used to stack alignment
 // checks.
 // TOS + 0: return address

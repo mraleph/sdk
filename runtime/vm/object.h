@@ -5994,6 +5994,14 @@ class AbstractType : public Instance {
 
   virtual intptr_t Hash() const;
 
+  void set_is_supertype_of_entry_point(uword address) const {
+    StoreNonPointer(&raw_ptr()->is_supertype_of_entry_point_, address);
+  }
+
+  static intptr_t is_supertype_of_entry_point_offset() {
+    return OFFSET_OF(RawAbstractType, is_supertype_of_entry_point_);
+  }
+
   // The name of this type's class, i.e. without the type argument names of this
   // type.
   RawString* ClassName() const;

@@ -361,15 +361,56 @@ void UnboxedConstantInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
 
 LocationSummary* AssertAssignableInstr::MakeLocationSummary(Zone* zone,
                                                             bool opt) const {
-  const intptr_t kNumInputs = 3;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kCall);
-  summary->set_in(0, Location::RegisterLocation(RAX));  // Value.
-  summary->set_in(1, Location::RegisterLocation(RDX));  // Instant. type args.
-  summary->set_in(2, Location::RegisterLocation(RCX));  // Function type args.
-  summary->set_out(0, Location::RegisterLocation(RAX));
-  return summary;
+  if (dst_type().IsTypeParameter()) {
+    const intptr_t kNumInputs = 3;
+    const intptr_t kNumTemps = 1;
+    LocationSummary* summary = new (zone)
+        LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kCall);
+    summary->set_in(0, Location::RegisterLocation(RDI));  // Value.
+    summary->set_in(1, Location::RegisterLocation(RSI));  // Instant. type args.
+    summary->set_in(2, Location::RegisterLocation(RDX));  // Function type args.
+    summary->set_out(0, Location::RegisterLocation(RAX));
+    summary->set_temp(0, Location::RegisterLocation(RCX));
+    return summary;
+  } else {
+    const intptr_t kNumInputs = 3;
+    const intptr_t kNumTemps = 0;
+    LocationSummary* summary = new (zone)
+        LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kCall);
+    summary->set_in(0, Location::RegisterLocation(RAX));  // Value.
+    summary->set_in(1, Location::RegisterLocation(RDX));  // Instant. type args.
+    summary->set_in(2, Location::RegisterLocation(RCX));  // Function type args.
+    summary->set_out(0, Location::RegisterLocation(RAX));
+    return summary;
+  }
+}
+
+void AssertAssignableInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
+#if 0
+  if (dst_type().IsTypeParameter()) {
+    Label ok;
+    const TypeParameter& type_param = TypeParameter::Cast(dst_type());
+    const Register kTypeArgumentsReg = type_param.IsClassTypeParameter()
+                                           ? locs()->in(1).reg()
+                                           : locs()->in(2).reg();
+    __ CompareObject(kTypeArgumentsReg, Object::null_object());
+    __ j(EQUAL, &ok);
+    __ movq(RCX, FieldAddress(kTypeArgumentsReg, TypeArguments::type_at_offset(
+                                                     type_param.index())));
+    __ movq(RAX, FieldAddress(
+                     RCX, AbstractType::is_supertype_of_entry_point_offset()));
+    __ call(RAX);
+    __ Bind(&ok);
+    return;
+  }
+#endif
+  compiler->GenerateAssertAssignable(token_pos(), deopt_id(), dst_type(),
+                                     dst_name(), locs());
+
+// DBC does not use LocationSummaries in the same way as other architectures.
+#if !defined(TARGET_ARCH_DBC)
+  ASSERT(locs()->in(0).reg() == locs()->out(0).reg());
+#endif  // !defined(TARGET_ARCH_DBC)
 }
 
 LocationSummary* AssertSubtypeInstr::MakeLocationSummary(Zone* zone,

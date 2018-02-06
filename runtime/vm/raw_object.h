@@ -1768,6 +1768,8 @@ class RawAbstractType : public RawInstance {
     kFinalizedUninstantiated,  // Uninstantiated type ready for use.
   };
 
+  uword is_supertype_of_entry_point_;
+
  private:
   RAW_HEAP_OBJECT_IMPLEMENTATION(AbstractType);
 
@@ -1783,6 +1785,7 @@ class RawType : public RawAbstractType {
   RawObject* type_class_id_;
   RawTypeArguments* arguments_;
   RawSmi* hash_;
+  RawCode* is_supertype_of_;
   // This type object represents a function type if its signature field is a
   // non-null function object.
   // If this type is malformed or malbounded, the signature field gets

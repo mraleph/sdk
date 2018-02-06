@@ -212,15 +212,21 @@ RawSubtypeTestCache* FlowGraphCompiler::GenerateCallSubtypeTestStub(
   if (test_kind == kTestTypeOneArg) {
     ASSERT(instantiator_type_arguments_reg == kNoRegister);
     ASSERT(function_type_arguments_reg == kNoRegister);
-    __ Call(*StubCode::Subtype1TestCache_entry());
+    __ movq(CODE_REG, Address(THR, Thread::subtype1test_stub_code_offset()));
+    __ movq(TMP, Address(THR, Thread::subtype1test_stub_entry_offset()));
+    __ call(TMP);
   } else if (test_kind == kTestTypeTwoArgs) {
     ASSERT(instantiator_type_arguments_reg == kNoRegister);
     ASSERT(function_type_arguments_reg == kNoRegister);
-    __ Call(*StubCode::Subtype2TestCache_entry());
+    __ movq(CODE_REG, Address(THR, Thread::subtype2test_stub_code_offset()));
+    __ movq(TMP, Address(THR, Thread::subtype2test_stub_entry_offset()));
+    __ call(TMP);
   } else if (test_kind == kTestTypeFourArgs) {
     ASSERT(RDX == instantiator_type_arguments_reg);
     ASSERT(RCX == function_type_arguments_reg);
-    __ Call(*StubCode::Subtype4TestCache_entry());
+    __ movq(CODE_REG, Address(THR, Thread::subtype4test_stub_code_offset()));
+    __ movq(TMP, Address(THR, Thread::subtype4test_stub_entry_offset()));
+    __ call(TMP);
   } else {
     UNREACHABLE();
   }

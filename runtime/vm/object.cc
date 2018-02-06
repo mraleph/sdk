@@ -16870,6 +16870,7 @@ RawType* Type::NewNonParameterizedType(const Class& type_class) {
                       Object::null_type_arguments(), TokenPosition::kNoSource);
     type.SetIsFinalized();
     type ^= type.Canonicalize();
+    // TODO XXX set type check entry point
   }
   ASSERT(type.IsFinalized());
   return type.raw();
@@ -17676,6 +17677,36 @@ RawType* Type::New(Heap::Space space) {
   return reinterpret_cast<RawType*>(raw);
 }
 
+extern "C" intptr_t DefaultIsSubtypeOf(RawObject* instance,
+                                       RawObject* type_arguments,
+                                       RawObject* function_type_arguments,
+                                       RawObject* type) {
+  OS::Print("%s, %s, %s, %s\n", Object::Handle(instance).ToCString(),
+            Object::Handle(type_arguments).ToCString(),
+            Object::Handle(function_type_arguments).ToCString(),
+            Object::Handle(type).ToCString());
+  asm("int $3");
+  return 0;
+}
+
+
+extern "C" intptr_t DefaultIsSubtypeOfDynamic() {
+  return 0;
+}
+
+static uword GetSubtypeOfEntry(intptr_t cid) {
+  switch (cid) {
+    case kDynamicCid:
+    case kVoidCid:
+      return reinterpret_cast<uword>(&DefaultIsSubtypeOfDynamic);
+    case kVectorCid:
+      // Should not be reached.
+      return reinterpret_cast<uword>(&DefaultIsSubtypeOf);
+  }
+  UNREACHABLE();
+  return 0;
+}
+
 RawType* Type::New(const Object& clazz,
                    const TypeArguments& arguments,
                    TokenPosition token_pos,
@@ -17690,6 +17721,13 @@ RawType* Type::New(const Object& clazz,
   result.SetHash(0);
   result.set_token_pos(token_pos);
   result.StoreNonPointer(&result.raw_ptr()->type_state_, RawType::kAllocated);
+  if (!StubCode::HasBeenInitialized()) {
+    ASSERT(clazz.IsClass());
+    result.set_is_supertype_of_entry_point(GetSubtypeOfEntry(Class::Cast(clazz).id()));
+  } else {
+    result.set_is_supertype_of_entry_point(
+        reinterpret_cast<uword>(&DefaultIsSubtypeOf));
+  }
   return result.raw();
 }
 
@@ -18460,6 +18498,11 @@ RawBoundedType* BoundedType::New(const AbstractType& type,
   result.set_bound(bound);
   result.SetHash(0);
   result.set_type_parameter(type_parameter);
+  if (!StubCode::HasBeenInitialized()) {
+    UNREACHABLE();
+  }
+  result.set_is_supertype_of_entry_point(
+      reinterpret_cast<uword>(&DefaultIsSubtypeOf));
   return result.raw();
 }
 
@@ -18532,6 +18575,11 @@ RawMixinAppType* MixinAppType::New(const AbstractType& super_type,
   const MixinAppType& result = MixinAppType::Handle(MixinAppType::New());
   result.set_super_type(super_type);
   result.set_mixin_types(mixin_types);
+  if (!StubCode::HasBeenInitialized()) {
+    UNREACHABLE();
+  }
+  result.set_is_supertype_of_entry_point(
+      reinterpret_cast<uword>(&DefaultIsSubtypeOf));
   return result.raw();
 }
 
