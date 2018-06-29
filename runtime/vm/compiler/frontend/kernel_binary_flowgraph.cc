@@ -6996,6 +6996,70 @@ Fragment StreamingFlowGraphBuilder::ExitScope(intptr_t kernel_offset) {
   return flow_graph_builder_->ExitScope(kernel_offset);
 }
 
+TestFragment StreamingFlowGraphBuilder::TranslateConditionEx() {
+  // Skip all negations and go directly to the expression.
+  bool negate = false;
+  while (PeekTag() == kNot) {
+    SkipBytes(1);
+    negate = !negate;
+  }
+
+  // Handle '&&' and '||' operators.
+  TestFragment result;
+  if (PeekTag() == kLogicalExpression) {
+    SkipBytes(1);  // tag.
+    TestFragment left = TranslateConditionEx();
+    LogicalOperator op = static_cast<LogicalOperator>(ReadByte());
+    TestFragment right = TranslateConditionEx();
+
+    result.entry = left.entry;
+    if (op == kAnd) {
+      left.CreateTrueSuccessor(flow_graph_builder_) <<= right.entry;
+      result.true_successor_addresses_ = right.true_successor_addresses_;
+      result.false_successor_addresses_ = left.false_successor_addresses_;
+      result.false_successor_addresses_->AddArray(
+          *right.false_successor_addresses_);
+    } else {
+      ASSERT(op == kOr);
+      left.CreateFalseSuccessor(flow_graph_builder_) <<= right.entry;
+      result.true_successor_addresses_ = left.true_successor_addresses_;
+      result.true_successor_addresses_->AddArray(
+          *right.true_successor_addresses_);
+      result.false_successor_addresses_ = right.false_successor_addresses_;
+    }
+  } else {
+    TokenPosition position = TokenPosition::kNoSource;
+    Fragment instructions = BuildExpression(&position);  // read expression.
+
+    // Check if the top of the stack is an expression that can be merged with
+    // a branch.
+    BranchInstr* branch;
+    if (stack()->definition()->IsStrictCompare() && stack()->definition() == instructions.current) {
+      branch = new (Z) BranchInstr(Pop()->definition()->AsStrictCompare(), flow_graph_builder_->GetNextDeoptId());
+      if (instructions.current->previous() == nullptr) {
+        UNREACHABLE();
+      }
+      ASSERT(instructions.current->previous() != nullptr);
+      instructions.current = instructions.current->previous();
+    } else {
+      instructions += CheckBoolean(position);
+      instructions += Constant(Bool::True());
+      Value* right_value = Pop();
+      Value* left_value = Pop();
+      StrictCompareInstr* compare = new (Z)
+          StrictCompareInstr(TokenPosition::kNoSource, Token::kEQ_STRICT,
+                             left_value, right_value, false, flow_graph_builder_->GetNextDeoptId());
+      branch = new (Z) BranchInstr(compare, flow_graph_builder_->GetNextDeoptId());
+    }
+    instructions <<= branch;
+
+    result = TestFragment(instructions.entry, branch->true_successor_address(),
+                          branch->false_successor_address());
+  }
+
+  return result.Negate(negate);
+}
+
 Fragment StreamingFlowGraphBuilder::TranslateCondition(bool* negate) {
   *negate = PeekTag() == kNot;
   if (*negate) {
@@ -8266,7 +8330,7 @@ Fragment StreamingFlowGraphBuilder::BuildLogicalExpression(
   if (position != NULL) *position = TokenPosition::kNoSource;
 
   bool negate;
-  Fragment instructions = TranslateCondition(&negate);  // read left.
+  Fragment instructions = TranslateConditionEx(&negate);  // read left.
 
   TargetEntryInstr* right_entry;
   TargetEntryInstr* constant_entry;
@@ -9436,17 +9500,14 @@ Fragment StreamingFlowGraphBuilder::BuildContinueSwitchStatement() {
 }
 
 Fragment StreamingFlowGraphBuilder::BuildIfStatement() {
-  bool negate;
   ReadPosition();                                       // read position.
-  Fragment instructions = TranslateCondition(&negate);  // read condition.
-  TargetEntryInstr* then_entry;
-  TargetEntryInstr* otherwise_entry;
-  instructions += BranchIfTrue(&then_entry, &otherwise_entry, negate);
 
-  Fragment then_fragment(then_entry);
+  TestFragment condition = TranslateConditionEx();
+
+  Fragment then_fragment(condition.CreateTrueSuccessor(flow_graph_builder_));
   then_fragment += BuildStatement();  // read then.
 
-  Fragment otherwise_fragment(otherwise_entry);
+  Fragment otherwise_fragment(condition.CreateFalseSuccessor(flow_graph_builder_));
   otherwise_fragment += BuildStatement();  // read otherwise.
 
   if (then_fragment.is_open()) {
@@ -9454,14 +9515,14 @@ Fragment StreamingFlowGraphBuilder::BuildIfStatement() {
       JoinEntryInstr* join = BuildJoinEntry();
       then_fragment += Goto(join);
       otherwise_fragment += Goto(join);
-      return Fragment(instructions.entry, join);
+      return Fragment(condition.entry, join);
     } else {
-      return Fragment(instructions.entry, then_fragment.current);
+      return Fragment(condition.entry, then_fragment.current);
     }
   } else if (otherwise_fragment.is_open()) {
-    return Fragment(instructions.entry, otherwise_fragment.current);
+    return Fragment(condition.entry, otherwise_fragment.current);
   } else {
-    return instructions.closed();
+    return Fragment(condition.entry, nullptr);
   }
 }
 

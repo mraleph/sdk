@@ -21,8 +21,9 @@
 namespace dart {
 namespace kernel {
 
-class StreamingFlowGraphBuilder;
+class BaseFlowGraphBuilder;
 struct InferredTypeMetadata;
+class StreamingFlowGraphBuilder;
 
 class KernelConstMapKeyEqualsTraits {
  public:
@@ -168,12 +169,12 @@ class TryFinallyBlock;
 
 class Fragment {
  public:
-  Instruction* entry;
-  Instruction* current;
+  Instruction* entry = nullptr;
+  Instruction* current = nullptr;
 
-  Fragment() : entry(NULL), current(NULL) {}
+  Fragment(){};
 
-  Fragment(std::initializer_list<Fragment> list) : entry(NULL), current(NULL) {
+  Fragment(std::initializer_list<Fragment> list) {
     for (Fragment i : list) {
       *this += i;
     }
@@ -185,7 +186,7 @@ class Fragment {
   Fragment(Instruction* entry, Instruction* current)
       : entry(entry), current(current) {}
 
-  bool is_open() { return entry == NULL || current != NULL; }
+  bool is_open() { return entry == nullptr || current != nullptr; }
   bool is_closed() { return !is_open(); }
 
   void Prepend(Instruction* start);
@@ -194,6 +195,45 @@ class Fragment {
   Fragment& operator<<=(Instruction* next);
 
   Fragment closed();
+};
+
+class TestFragment {
+ public:
+  Fragment CreateTrueSuccessor(BaseFlowGraphBuilder* builder);
+  Fragment CreateFalseSuccessor(BaseFlowGraphBuilder* builder);
+
+  TestFragment Negate(bool negate) {
+    if (negate) {
+      return TestFragment(entry, false_successor_addresses_,
+                          true_successor_addresses_);
+    } else {
+      return *this;
+    }
+  }
+
+ private:
+  typedef ZoneGrowableArray<TargetEntryInstr**> SuccessorAddressArray;
+
+  TestFragment() {}
+  TestFragment(Instruction* entry,
+               SuccessorAddressArray* true_successor_addresses,
+               SuccessorAddressArray* false_successor_addresses)
+      : entry(entry),
+        true_successor_addresses_(true_successor_addresses),
+        false_successor_addresses_(false_successor_addresses) {}
+
+  TestFragment(Instruction* entry,
+               TargetEntryInstr** true_successor_address,
+               TargetEntryInstr** false_successor_address);
+
+  void ConnectBranchesTo(BaseFlowGraphBuilder* builder, const TestFragment::SuccessorAddressArray& branches, JoinEntryInstr* join);
+  Fragment CreateSuccessorFor(BaseFlowGraphBuilder* builder,  const TestFragment::SuccessorAddressArray& branches);
+
+  Instruction* entry = nullptr;
+  SuccessorAddressArray* true_successor_addresses_ = nullptr;
+  SuccessorAddressArray* false_successor_addresses_ = nullptr;
+
+  friend class StreamingFlowGraphBuilder;
 };
 
 Fragment operator+(const Fragment& first, const Fragment& second);
@@ -412,6 +452,7 @@ class BaseFlowGraphBuilder {
   void Push(Definition* definition);
   Value* Pop();
   Fragment Drop();
+  Definition* Peek();
   // Drop given number of temps from the stack but preserve top of the stack.
   Fragment DropTempsPreserveTop(intptr_t num_temps_to_drop);
   Fragment MakeTemp();

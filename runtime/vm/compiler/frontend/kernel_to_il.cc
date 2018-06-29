@@ -89,6 +89,48 @@ ActiveTypeParametersScope::ActiveTypeParametersScope(
   active_class_->local_type_parameters = &extended_params;
 }
 
+TestFragment::TestFragment(Instruction* entry,
+                           TargetEntryInstr** true_successor_address,
+                           TargetEntryInstr** false_successor_address)
+    : entry(entry),
+      true_successor_addresses_(new SuccessorAddressArray(1)),
+      false_successor_addresses_(new SuccessorAddressArray(1)) {
+  true_successor_addresses_->Add(true_successor_address);
+  false_successor_addresses_->Add(false_successor_address);
+}
+
+void TestFragment::ConnectBranchesTo(BaseFlowGraphBuilder* builder, const TestFragment::SuccessorAddressArray& branches, JoinEntryInstr* join) {
+  ASSERT(!branches.is_empty());
+  for (auto branch : branches) {
+    *branch = builder->BuildTargetEntry();
+    (*branch)->Goto(join);
+  }
+}
+
+Fragment TestFragment::CreateSuccessorFor(BaseFlowGraphBuilder* builder,  const TestFragment::SuccessorAddressArray& branches) {
+  ASSERT(!branches.is_empty());
+
+  if (branches.length() == 1) {
+    TargetEntryInstr* target = builder->BuildTargetEntry();
+    *(branches[0]) = target;
+    return Fragment(target);
+  }
+
+  JoinEntryInstr* join = builder->BuildJoinEntry();
+  ConnectBranchesTo(builder, branches, join);
+  return Fragment(join);
+}
+
+Fragment TestFragment::CreateTrueSuccessor(BaseFlowGraphBuilder* builder) {
+  ASSERT(true_successor_addresses_ != nullptr);
+  return CreateSuccessorFor(builder, *true_successor_addresses_);
+}
+
+Fragment TestFragment::CreateFalseSuccessor(BaseFlowGraphBuilder* builder) {
+  ASSERT(false_successor_addresses_ != nullptr);
+  return CreateSuccessorFor(builder, *false_successor_addresses_);
+}
+
 Fragment& Fragment::operator+=(const Fragment& other) {
   if (entry == NULL) {
     entry = other.entry;
@@ -1327,6 +1369,11 @@ void BaseFlowGraphBuilder::SetTempIndex(Definition* definition) {
 void BaseFlowGraphBuilder::Push(Definition* definition) {
   SetTempIndex(definition);
   Value::AddToList(new (Z) Value(definition), &stack_);
+}
+
+Definition* BaseFlowGraphBuilder::Peek() {
+  ASSERT(stack_ != NULL);
+  return stack_->definition();
 }
 
 Value* BaseFlowGraphBuilder::Pop() {

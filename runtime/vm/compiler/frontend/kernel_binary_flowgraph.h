@@ -801,6 +801,8 @@ class StreamingFlowGraphBuilder : public KernelReaderHelper {
   Fragment ExitScope(intptr_t kernel_offset);
 
   Fragment TranslateCondition(bool* negate);
+  TestFragment TranslateConditionEx();
+
   const TypeArguments& BuildTypeArguments();
   Fragment BuildArguments(Array* argument_names,
                           intptr_t* argument_count,
