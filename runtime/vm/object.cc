@@ -8920,7 +8920,9 @@ void Field::RecordStore(const Object& value) const {
 
   if (guarded_cid() == kDynamicCid && is_invariant_generic() != kNotTracking) {
     if (FLAG_trace_field_guards) {
-      THR_Print("  => switching off invariance tracking because guarded cid is dynamic\n");
+      THR_Print(
+          "  => switching off invariance tracking because guarded cid is "
+          "dynamic\n");
     }
     set_is_invariant_generic(kNotInvariant);
   }

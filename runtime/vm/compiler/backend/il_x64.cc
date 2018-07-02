@@ -1649,7 +1649,8 @@ void GuardFieldClassInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     // inline. If the field needs length check we fall through to runtime
     // which is responsible for computing offset of the length field
     // based on the class id.
-    if (!field().needs_length_check()) {
+    if (!(field().needs_length_check() ||
+          field().is_invariant_generic() == Field::kIsInvariant)) {
       // Uninitialized field can be handled inline. Check if the
       // field is still unitialized.
       __ cmpw(field_cid_operand, Immediate(kIllegalCid));
@@ -1854,21 +1855,19 @@ void GuardFieldTypeInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   __ movl(temp,
           FieldAddress(value_class_reg,
                        Class::type_arguments_field_offset_in_words_offset()));
-
 #if defined(DEBUG)
   {
     Label ok;
-    __ CompareImmediate(temp, Class::kNoTypeArguments);
-    __ jmp(&ok);
+    __ cmpl(temp, Immediate(Class::kNoTypeArguments));
+    __ j(NOT_EQUAL, &ok);
     __ Unreachable("Should be handled before");
     __ Bind(&ok);
   }
 #endif
 
   __ movq(temp, FieldAddress(value_reg, temp, TIMES_8, 0));
-  __ CompareObject(temp,
-                   TypeArguments::ZoneHandle(
-                       AbstractType::Handle(field().type()).arguments()));
+  __ CompareObject(temp, TypeArguments::ZoneHandle(
+                             AbstractType::Handle(field().type()).arguments()));
   if (deopt != nullptr) {
     __ j(NOT_EQUAL, deopt);
   } else {

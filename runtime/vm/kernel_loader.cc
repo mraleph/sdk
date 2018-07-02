@@ -1199,8 +1199,7 @@ void KernelLoader::FinishClassLoading(const Class& klass,
           Field::New(name, field_helper.IsStatic(), is_final,
                      field_helper.IsConst(), is_reflectable, script_class, type,
                      field_helper.position_, field_helper.end_position_));
-      if (I->strong() && field.is_final() &&
-          IsPotentialInvariantGeneric(type)) {
+      if (I->strong() && IsPotentialInvariantGeneric(type)) {
         field.set_is_invariant_generic(Field::kIsInvariant);
       }
       field.set_kernel_offset(field_offset);

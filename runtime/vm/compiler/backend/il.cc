@@ -2444,6 +2444,15 @@ Definition* LoadFieldInstr::Canonicalize(FlowGraph* flow_graph) {
       }
     } else if (CreateArrayInstr* create_array = array->AsCreateArray()) {
       return create_array->element_type()->definition();
+    } else if (LoadFieldInstr* load_array = array->AsLoadField()) {
+      // For arrays with guarded lengths, replace the length load
+      // with a constant.
+      const Field* field = load_array->field();
+      if ((field != nullptr) &&
+          (field->is_invariant_generic() < Field::kNotInvariant)) {
+        return flow_graph->GetConstant(TypeArguments::Handle(
+            AbstractType::Handle(field->type()).arguments()));
+      }
     }
   }
 
