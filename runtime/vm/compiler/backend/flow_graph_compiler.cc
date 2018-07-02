@@ -1993,7 +1993,22 @@ void FlowGraphCompiler::GenerateCidRangesCheck(Assembler* assembler,
 
 bool FlowGraphCompiler::ShouldUseTypeTestingStubFor(bool optimizing,
                                                     const AbstractType& type) {
-  return FLAG_precompiled_mode || (optimizing && type.IsTypeParameter());
+  if (FLAG_precompiled_mode) {
+    return true;
+  }
+
+  if (optimizing) {
+    if (type.IsTypeParameter()) {
+      return true;
+    }
+
+    if (type.HasResolvedTypeClass()) {
+      class Class& cls = Class::Handle(type.type_class());
+      return !cls.IsGeneric();
+    }
+  }
+
+  return false;
 }
 
 void FlowGraphCompiler::GenerateAssertAssignableViaTypeTestingStub(
