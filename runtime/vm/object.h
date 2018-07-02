@@ -3245,6 +3245,26 @@ class Field : public Object {
         HasInitializerBit::update(has_initializer, raw_ptr()->kind_bits_));
   }
 
+  enum InvariantGenericFieldState {
+    kIsInvariant,
+    kIsInvariantSuper,
+    kNotInvariant,
+    kNotTracking,
+  };
+
+  InvariantGenericFieldState is_invariant_generic() const {
+    return static_cast<InvariantGenericFieldState>(
+        raw_ptr()->is_invariant_generic_);
+  }
+
+  void set_is_invariant_generic(InvariantGenericFieldState value) const {
+    StoreNonPointer(&raw_ptr()->is_invariant_generic_, value);
+  }
+
+  static intptr_t is_invariant_generic_offset() {
+    return OFFSET_OF(RawField, is_invariant_generic_);
+  }
+
   // Return class id that any non-null value read from this field is guaranteed
   // to have or kDynamicCid if such class id is not known.
   // Stores to this field must update this information hence the name.

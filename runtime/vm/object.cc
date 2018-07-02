@@ -8360,6 +8360,7 @@ void Field::InitializeNew(const Field& result,
   result.set_is_unboxing_candidate(true);
   result.set_initializer_changed_after_initialization(false);
   result.set_kernel_offset(0);
+  result.set_is_invariant_generic(kNotTracking);
   Isolate* isolate = Isolate::Current();
 
   // Use field guards if they are enabled and the isolate has never reloaded.
@@ -8660,7 +8661,8 @@ bool Field::IsConsistentWith(const Field& other) const {
          (raw_ptr()->is_nullable_ == other.raw_ptr()->is_nullable_) &&
          (raw_ptr()->guarded_list_length_ ==
           other.raw_ptr()->guarded_list_length_) &&
-         (is_unboxing_candidate() == other.is_unboxing_candidate());
+         (is_unboxing_candidate() == other.is_unboxing_candidate()) &&
+         (is_invariant_generic() == other.is_invariant_generic());
 }
 
 bool Field::IsUninitialized() const {
@@ -8754,7 +8756,17 @@ const char* Field::GuardedPropertiesAsCString() const {
   if (guarded_cid() == kIllegalCid) {
     return "<?>";
   } else if (guarded_cid() == kDynamicCid) {
+    ASSERT(is_invariant_generic() >= kNotInvariant);
     return "<*>";
+  }
+
+  const char* invariance = "";
+  if (is_invariant_generic() == kNotInvariant) {
+    invariance = " {!invariant}";
+  } else if (is_invariant_generic() == kIsInvariant) {
+    invariance = " {invariant}";
+  } else if (is_invariant_generic() == kIsInvariantSuper) {
+    invariance = " {super-invariant}";
   }
 
   const Class& cls =
@@ -8765,16 +8777,18 @@ const char* Field::GuardedPropertiesAsCString() const {
       is_final()) {
     ASSERT(guarded_list_length() != kUnknownFixedLength);
     if (guarded_list_length() == kNoFixedLength) {
-      return Thread::Current()->zone()->PrintToString("<%s [*]>", class_name);
+      return Thread::Current()->zone()->PrintToString("<%s [*]%s>", class_name,
+                                                      invariance);
     } else {
       return Thread::Current()->zone()->PrintToString(
-          "<%s [%" Pd " @%" Pd "]>", class_name, guarded_list_length(),
-          guarded_list_length_in_object_offset());
+          "<%s [%" Pd " @%" Pd "]%s>", class_name, guarded_list_length(),
+          guarded_list_length_in_object_offset(), invariance);
     }
   }
 
   return Thread::Current()->zone()->PrintToString(
-      "<%s %s>", is_nullable() ? "nullable" : "not-nullable", class_name);
+      "<%s %s%s>", is_nullable() ? "nullable" : "not-nullable", class_name,
+      invariance);
 }
 
 void Field::InitializeGuardedListLengthInObjectOffset() const {
@@ -8856,6 +8870,41 @@ bool Field::UpdateGuardedCidAndLength(const Object& value) const {
   return true;
 }
 
+static bool FindInstantiationOf(const Type& type,
+                                const Class& cls,
+                                GrowableArray<const AbstractType*>* types) {
+  if (type.type_class() == cls.raw()) {
+    return true;  // found instantiation
+  }
+
+  Class& cls2 = Class::Handle();
+  AbstractType& super_type = AbstractType::Handle();
+  super_type = cls.super_type();
+  if (!super_type.IsNull() && !super_type.IsObjectType()) {
+    cls2 = super_type.type_class();
+    types->Add(&super_type);
+    if (FindInstantiationOf(type, cls2, types)) {
+      return true;
+    }
+    types->RemoveLast();
+  }
+
+  Array& super_interfaces = Array::Handle(cls.interfaces());
+  for (intptr_t i = 0; i < super_interfaces.Length(); i++) {
+    super_type ^= super_interfaces.At(i);
+    cls2 = super_type.type_class();
+    types->Add(&super_type);
+    if (FindInstantiationOf(type, cls2, types)) {
+      return true;
+    }
+    types->RemoveLast();
+  }
+
+  return false;
+}
+
+__thread intptr_t count = 0;
+
 void Field::RecordStore(const Object& value) const {
   ASSERT(IsOriginal());
   if (!Isolate::Current()->use_field_guards()) {
@@ -8867,7 +8916,111 @@ void Field::RecordStore(const Object& value) const {
               value.ToCString());
   }
 
-  if (UpdateGuardedCidAndLength(value)) {
+  bool invalidate = UpdateGuardedCidAndLength(value);
+
+  if (guarded_cid() == kDynamicCid && is_invariant_generic() != kNotTracking) {
+    if (FLAG_trace_field_guards) {
+      THR_Print("  => switching off invariance tracking because guarded cid is dynamic\n");
+    }
+    set_is_invariant_generic(kNotInvariant);
+  }
+
+  if ((is_invariant_generic() == kIsInvariant) && !value.IsNull()) {
+    ASSERT(guarded_cid() != kNullCid);
+
+    const Instance& instance = Instance::Cast(value);
+    Type& t = Type::Handle();
+    t ^= type();
+    ASSERT(t.IsFinalized());
+    const Class& cls = Class::Handle(instance.clazz());
+    GrowableArray<const AbstractType*> trace(10);
+    FindInstantiationOf(t, cls, &trace);
+    Error& error = Error::Handle();
+    if (trace.length() > 0) {
+      TypeArguments& args = TypeArguments::Handle();
+      AbstractType& type = AbstractType::Handle(trace.Last()->raw());
+      for (intptr_t i = trace.length() - 2; (i >= 0) && !type.IsInstantiated();
+           i--) {
+        args = trace[i]->arguments();
+        type = type.InstantiateFrom(args, TypeArguments::null_type_arguments(),
+                                    kAllFree, &error, nullptr, nullptr,
+                                    Heap::kNew);
+      }
+
+      // No reason to check anything the type is instantiated.
+      if (FLAG_trace_field_guards) {
+        THR_Print("  => %s -> %s\n", t.ToCString(), type.ToCString());
+      }
+
+      if (type.IsInstantiated()) {
+        // Check if type arguments match.
+        args = type.arguments();
+        if (args.Equals(TypeArguments::Handle(t.arguments()))) {
+          set_is_invariant_generic(kIsInvariantSuper);
+        } else {
+          if (FLAG_trace_field_guards) {
+            THR_Print(
+                "  expected %s got %s type arguments\n",
+                TypeArguments::Handle(t.arguments()).ToCString(),
+                TypeArguments::Handle(instance.GetTypeArguments()).ToCString());
+          }
+          set_is_invariant_generic(kNotInvariant);
+          invalidate = true;
+        }
+      } else {
+        ASSERT(cls.IsGeneric());
+        AbstractType& type_arg = AbstractType::Handle();
+        const intptr_t num_type_params = cls.NumTypeParameters();
+        bool simple_case =
+            (num_type_params ==
+             Class::Handle(t.type_class()).NumTypeParameters()) &&
+            instance.GetTypeArguments() == t.arguments();
+        if (!simple_case && FLAG_trace_field_guards) {
+          THR_Print(
+              "Not a simple case: %" Pd " vs %" Pd
+              " type parameters, %s vs %s type arguments\n",
+              num_type_params,
+              Class::Handle(t.type_class()).NumTypeParameters(),
+              TypeArguments::Handle(instance.GetTypeArguments()).ToCString(),
+              TypeArguments::Handle(t.arguments()).ToCString());
+        }
+        args = type.arguments();
+        for (intptr_t i = 0; (i < num_type_params) && simple_case; i++) {
+          type_arg = args.TypeAt(i);
+          if (!type_arg.IsTypeParameter() ||
+              (TypeParameter::Cast(type_arg).index() != i)) {
+            if (FLAG_trace_field_guards) {
+              THR_Print("  => encountered %s at index % " Pd "\n",
+                        type_arg.ToCString(), i);
+            }
+            simple_case = false;
+          }
+        }
+
+        if (simple_case) {
+          // Default.
+        } else {
+          set_is_invariant_generic(kNotInvariant);
+          invalidate = true;
+        }
+      }
+    } else {
+      // Check type arguments match.
+      ASSERT(cls.raw() == t.type_class());
+      if (instance.GetTypeArguments() != t.arguments()) {
+        if (FLAG_trace_field_guards) {
+          THR_Print(
+              "  expected %s got %s type arguments\n",
+              TypeArguments::Handle(t.arguments()).ToCString(),
+              TypeArguments::Handle(instance.GetTypeArguments()).ToCString());
+        }
+        set_is_invariant_generic(kNotInvariant);
+        invalidate = true;
+      }
+    }
+  }
+
+  if (invalidate) {
     if (FLAG_trace_field_guards) {
       THR_Print("    => %s\n", GuardedPropertiesAsCString());
     }
@@ -8883,6 +9036,9 @@ void Field::ForceDynamicGuardedCidAndLength() const {
   set_is_nullable(true);
   set_guarded_list_length(Field::kNoFixedLength);
   set_guarded_list_length_in_object_offset(Field::kUnknownLengthOffset);
+  if (is_invariant_generic() != kNotTracking) {
+    set_is_invariant_generic(kNotInvariant);
+  }
   // Drop any code that relied on the above assumptions.
   DeoptimizeDependentCode();
 }

@@ -1105,6 +1105,11 @@ Fragment FlowGraphBuilder::StoreInstanceFieldGuarded(
     instructions += GuardFieldClass(field_clone, GetNextDeoptId());
     instructions += LoadLocal(store_expression);
     instructions += GuardFieldLength(field_clone, GetNextDeoptId());
+    if (field_clone.is_invariant_generic() != Field::kNotTracking) {
+      instructions += LoadLocal(store_expression);
+      instructions <<=
+          new (Z) GuardFieldTypeInstr(Pop(), field_clone, GetNextDeoptId());
+    }
   }
   instructions += StoreInstanceField(field_clone, is_initialization_store);
   return instructions;

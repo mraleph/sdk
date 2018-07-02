@@ -1070,6 +1070,7 @@ class RawField : public RawObject {
   // guarded_cid_. Stored corrected by -kHeapObjectTag to simplify code
   // generated on platforms with weak addressing modes (ARM).
   int8_t guarded_list_length_in_object_offset_;
+  int8_t is_invariant_generic_;
 
   uint8_t kind_bits_;  // static, final, const, has initializer....
 

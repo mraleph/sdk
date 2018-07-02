@@ -213,8 +213,9 @@ ParsedFunction::ParsedFunction(Thread* thread, const Function& function)
 }
 
 void ParsedFunction::AddToGuardedFields(const Field* field) const {
-  if ((field->guarded_cid() == kDynamicCid) ||
-      (field->guarded_cid() == kIllegalCid)) {
+  if (((field->guarded_cid() == kDynamicCid) ||
+       (field->guarded_cid() == kIllegalCid)) &&
+      (field->is_invariant_generic() != Field::kIsInvariant)) {
     return;
   }
 

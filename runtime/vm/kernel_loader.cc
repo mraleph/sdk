@@ -1119,6 +1119,40 @@ Class& KernelLoader::LoadClass(const Library& library,
   return klass;
 }
 
+static bool ReferencesAnyTypeArguments(const AbstractType& type) {
+  if (type.IsTypeRef()) {
+    return false;
+  }
+
+  if (type.IsType()) {
+    const TypeArguments& args =
+        TypeArguments::Handle(Type::Cast(type).arguments());
+    AbstractType& arg = AbstractType::Handle();
+    for (intptr_t i = 0; i < args.Length(); i++) {
+      arg = args.TypeAt(i);
+      if (ReferencesAnyTypeArguments(arg)) {
+        return true;
+      }
+    }
+  }
+
+  return type.IsTypeParameter();
+}
+
+static bool IsPotentialInvariantGeneric(const AbstractType& type) {
+  if (type.IsType()) {
+    const TypeArguments& args =
+        TypeArguments::Handle(Type::Cast(type).arguments());
+    if (args.Length() == 0) {
+      return false;
+    }
+
+    return !ReferencesAnyTypeArguments(type);
+  }
+
+  return false;
+}
+
 void KernelLoader::FinishClassLoading(const Class& klass,
                                       const Library& library,
                                       const Class& toplevel_class,
@@ -1165,6 +1199,10 @@ void KernelLoader::FinishClassLoading(const Class& klass,
           Field::New(name, field_helper.IsStatic(), is_final,
                      field_helper.IsConst(), is_reflectable, script_class, type,
                      field_helper.position_, field_helper.end_position_));
+      if (I->strong() && field.is_final() &&
+          IsPotentialInvariantGeneric(type)) {
+        field.set_is_invariant_generic(Field::kIsInvariant);
+      }
       field.set_kernel_offset(field_offset);
       CheckForInitializer(field);
       field_helper.ReadUntilExcluding(FieldHelper::kInitializer);

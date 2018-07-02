@@ -559,6 +559,7 @@ class EmbeddedArray<T, 0> {
   M(TruncDivMod)                                                               \
   M(GuardFieldClass)                                                           \
   M(GuardFieldLength)                                                          \
+  M(GuardFieldType)                                                            \
   M(IfThenElse)                                                                \
   M(MaterializeObject)                                                         \
   M(TestSmi)                                                                   \
@@ -4237,6 +4238,23 @@ class GuardFieldLengthInstr : public GuardFieldInstr {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(GuardFieldLengthInstr);
+};
+
+class GuardFieldTypeInstr : public GuardFieldInstr {
+ public:
+  GuardFieldTypeInstr(Value* value, const Field& field, intptr_t deopt_id)
+      : GuardFieldInstr(value, field, deopt_id) {
+    CheckField(field);
+  }
+
+  DECLARE_INSTRUCTION(GuardFieldType)
+
+  virtual Instruction* Canonicalize(FlowGraph* flow_graph);
+
+  virtual bool AttributesEqual(Instruction* other) const;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(GuardFieldTypeInstr);
 };
 
 class LoadStaticFieldInstr : public TemplateDefinition<1, NoThrow> {
