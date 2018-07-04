@@ -2083,8 +2083,8 @@ void FlowGraphCompiler::GenerateAssertAssignableViaTypeTestingStub(
       // call-site, we want an optimized type testing stub and therefore record
       // it in the [TypeUsageInfo].
       if (!check_handled_at_callsite) {
-        ASSERT(type_usage_info != NULL);
-        type_usage_info->UseTypeInAssertAssignable(dst_type);
+        if (type_usage_info != nullptr)
+          type_usage_info->UseTypeInAssertAssignable(dst_type);
       }
     }
     __ LoadObject(dst_type_reg, dst_type);
