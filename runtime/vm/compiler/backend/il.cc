@@ -371,6 +371,10 @@ bool Value::Equals(Value* other) const {
   return definition() == other->definition();
 }
 
+static int OrderByValue(const intptr_t* a, const intptr_t* b) {
+  return *a - *b;
+}
+
 static int OrderById(CidRange* const* a, CidRange* const* b) {
   // Negative if 'a' should sort before 'b'.
   ASSERT((*a)->IsSingleCid());
@@ -445,6 +449,25 @@ Cids* Cids::Create(Zone* zone, const ICData& ic_data, int argument_number) {
     }
   }
   cids->SetLength(dest + 1);
+
+  return cids;
+}
+
+Cids* Cids::Create(Zone* zone, GrowableArray<intptr_t>* class_ids) {
+  class_ids->Sort(OrderByValue);
+
+  Cids* cids = new (zone) Cids(zone);
+  CidRange* last = new CidRange(class_ids->At(0), class_ids->At(0));
+  cids->Add(last);
+  for (intptr_t i = 1; i < class_ids->length(); i++) {
+    intptr_t cid = class_ids->At(i);
+    if ((last->cid_end + 1) == cid) {
+      last->cid_end = cid;
+    } else {
+      last = new CidRange(cid, cid);
+      cids->Add(last);
+    }
+  }
 
   return cids;
 }
@@ -4048,7 +4071,6 @@ void DeoptimizeInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
 }
 
 #if !defined(TARGET_ARCH_DBC)
-
 void CheckClassInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   Label* deopt = compiler->AddDeoptStub(deopt_id(), ICData::kDeoptCheckClass,
                                         licm_hoisted_ ? ICData::kHoisted : 0);

@@ -785,10 +785,6 @@ RawCode* CompileParsedFunctionHelper::Compile(CompilationPipeline* pipeline) {
       // constructor and unregisters itself upon destruction.
       CHA cha(thread());
 
-      // The cid-ranges of subclasses of a class are e.g. used for is/as checks
-      // as well as other type checks.
-      HierarchyInfo hierarchy_info(thread());
-
       // TimerScope needs an isolate to be properly terminated in case of a
       // LongJump.
       {

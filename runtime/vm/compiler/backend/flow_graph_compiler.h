@@ -509,6 +509,14 @@ class FlowGraphCompiler : public ValueObject {
                                      Label* outside_range_lbl = NULL,
                                      bool fall_through_if_inside = false);
 
+  static void GenerateCidRangesCheck(Assembler* assembler,
+                                     Register class_id_reg,
+                                     const Cids& cid_ranges,
+                                     Label* inside_range_lbl,
+                                     Label* outside_range_lbl = NULL,
+                                     bool fall_through_if_inside = false);
+
+
   void EmitOptimizedInstanceCall(const StubEntry& stub_entry,
                                  const ICData& ic_data,
                                  intptr_t deopt_id,

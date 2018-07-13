@@ -1943,7 +1943,7 @@ bool FlowGraphCompiler::GenerateSubtypeRangeCheck(Register class_id_reg,
                                                   const Class& type_class,
                                                   Label* is_subtype) {
   HierarchyInfo* hi = Thread::Current()->hierarchy_info();
-  if (hi != NULL) {
+  if (hi != NULL && FLAG_precompiled_mode) {
     const CidRangeVector& ranges = hi->SubtypeRangesForClass(type_class);
     if (ranges.length() <= kMaxNumberOfCidRangesToTest) {
       GenerateCidRangesCheck(assembler(), class_id_reg, ranges, is_subtype);
@@ -1991,6 +1991,38 @@ void FlowGraphCompiler::GenerateCidRangesCheck(Assembler* assembler,
   }
 }
 
+
+void FlowGraphCompiler::GenerateCidRangesCheck(Assembler* assembler,
+                                               Register class_id_reg,
+                                               const Cids& cid_ranges,
+                                               Label* inside_range_lbl,
+                                               Label* outside_range_lbl,
+                                               bool fall_through_if_inside) {
+  // If there are no valid class ranges, the check will fail.  If we are
+  // supposed to fall-through in the positive case, we'll explicitly jump to
+  // the [outside_range_lbl].
+  if (cid_ranges.length() == 1 && cid_ranges[0].IsIllegalRange()) {
+    if (fall_through_if_inside) {
+      assembler->Jump(outside_range_lbl);
+    }
+    return;
+  }
+
+  int bias = 0;
+  for (intptr_t i = 0; i < cid_ranges.length(); ++i) {
+    const CidRange& range = cid_ranges[i];
+    RELEASE_ASSERT(!range.IsIllegalRange());
+    const bool last_round = i == (cid_ranges.length() - 1);
+
+    Label* jump_label = last_round && fall_through_if_inside ? outside_range_lbl
+                                                             : inside_range_lbl;
+    const bool jump_on_miss = last_round && fall_through_if_inside;
+
+    bias = EmitTestAndCallCheckCid(assembler, jump_label, class_id_reg, range,
+                                   bias, jump_on_miss);
+  }
+}
+
 bool FlowGraphCompiler::ShouldUseTypeTestingStubFor(bool optimizing,
                                                     const AbstractType& type) {
   if (FLAG_precompiled_mode) {
@@ -2004,7 +2036,7 @@ bool FlowGraphCompiler::ShouldUseTypeTestingStubFor(bool optimizing,
 
     if (type.HasResolvedTypeClass()) {
       class Class& cls = Class::Handle(type.type_class());
-      return !cls.IsGeneric();
+      return (!cls.IsGeneric() && !cls.is_implemented());
     }
   }
 
@@ -2023,18 +2055,23 @@ void FlowGraphCompiler::GenerateAssertAssignableViaTypeTestingStub(
     Label* done) {
   TypeUsageInfo* type_usage_info = thread()->type_usage_info();
 
+  if (!FLAG_precompiled_mode) {
+    __ CompareObject(instance_reg, Object::Handle());
+    __ BranchIf(EQUAL, done);
+  }
+
   // If the int type is assignable to [dst_type] we special case it on the
   // caller side!
-  const Type& int_type = Type::Handle(zone(), Type::IntType());
-  bool is_non_smi = false;
-  if (int_type.IsSubtypeOf(dst_type, NULL, NULL, Heap::kOld)) {
-    __ BranchIfSmi(instance_reg, done);
-    is_non_smi = true;
-  }
+  const Type& smi_type = Type::Handle(zone(), Type::SmiType());
+  const bool smi_is_ok = smi_type.IsSubtypeOf(dst_type, NULL, NULL, Heap::kOld);
 
   // We can handle certain types very efficiently on the call site (with a
   // bailout to the normal stub, which will do a runtime call).
   if (dst_type.IsTypeParameter()) {
+    if (smi_is_ok) {
+      __ BranchIfSmi(instance_reg, done);
+    }
+
     const TypeParameter& type_param = TypeParameter::Cast(dst_type);
     const Register kTypeArgumentsReg = type_param.IsClassTypeParameter()
                                            ? instantiator_type_args_reg
@@ -2050,6 +2087,10 @@ void FlowGraphCompiler::GenerateAssertAssignableViaTypeTestingStub(
       type_usage_info->UseTypeInAssertAssignable(dst_type);
     }
   } else {
+    Label fallthrough;
+    __ BranchIfSmi(instance_reg, smi_is_ok ? done : &fallthrough);
+
+    ASSERT(!dst_type.IsObjectType() && !dst_type.IsDynamicType());
     HierarchyInfo* hi = Thread::Current()->hierarchy_info();
     if (hi != NULL) {
       const Class& type_class = Class::Handle(zone(), dst_type.type_class());
@@ -2059,13 +2100,13 @@ void FlowGraphCompiler::GenerateAssertAssignableViaTypeTestingStub(
       const bool can_use_simple_cid_range_test =
           hi->CanUseSubtypeRangeCheckFor(dst_type);
       if (can_use_simple_cid_range_test) {
-        const CidRangeVector& ranges = hi->SubtypeRangesForClass(type_class);
+        const bool should_use_subclass_ranges = (!type_class.IsGeneric() && !type_class.is_implemented());
+        const CidRangeVector& ranges =
+
+               should_use_subclass_ranges ? hi->SubclassRangesForClass(type_class)
+                : hi->SubtypeRangesForClass(type_class);
         if (ranges.length() <= kMaxNumberOfCidRangesToTest) {
-          if (is_non_smi) {
-            __ LoadClassId(scratch_reg, instance_reg);
-          } else {
-            __ LoadClassIdMayBeSmi(scratch_reg, instance_reg);
-          }
+          __ LoadClassId(scratch_reg, instance_reg);
           GenerateCidRangesCheck(assembler(), scratch_reg, ranges, done);
           used_cid_range_check = true;
           check_handled_at_callsite = true;
@@ -2074,7 +2115,7 @@ void FlowGraphCompiler::GenerateAssertAssignableViaTypeTestingStub(
 
       if (!used_cid_range_check && can_use_simple_cid_range_test &&
           IsListClass(type_class)) {
-        __ LoadClassIdMayBeSmi(scratch_reg, instance_reg);
+        __ LoadClassId(scratch_reg, instance_reg);
         GenerateListTypeCheck(scratch_reg, done);
         used_cid_range_check = true;
       }
@@ -2086,7 +2127,17 @@ void FlowGraphCompiler::GenerateAssertAssignableViaTypeTestingStub(
         if (type_usage_info != nullptr)
           type_usage_info->UseTypeInAssertAssignable(dst_type);
       }
+    } else if (!FLAG_precompiled_mode) {
+      const Class& type_class = Class::Handle(zone(), dst_type.type_class());
+      GrowableArray<intptr_t> subclasses_cids;
+      if (thread()->cha()->ConcreteSubclasses(type_class, &subclasses_cids)) {
+        Cids* cids = Cids::Create(zone(), &subclasses_cids);
+        __ LoadClassId(scratch_reg, instance_reg);
+        GenerateCidRangesCheck(assembler(), scratch_reg, *cids, done);
+        thread()->cha()->AddToGuardedClasses(type_class, subclasses_cids.length());
+      }
     }
+    __ Bind(&fallthrough);
     __ LoadObject(dst_type_reg, dst_type);
   }
 }

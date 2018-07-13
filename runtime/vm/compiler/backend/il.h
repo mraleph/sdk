@@ -668,6 +668,7 @@ class Cids : public ZoneAllocated {
   // Creates the off-heap Cids object that reflects the contents
   // of the on-VM-heap IC data.
   static Cids* Create(Zone* zone, const ICData& ic_data, int argument_number);
+  static Cids* Create(Zone* zone, GrowableArray<intptr_t>* cids);
   static Cids* CreateMonomorphic(Zone* zone, intptr_t cid);
 
   bool Equals(const Cids& other) const;
