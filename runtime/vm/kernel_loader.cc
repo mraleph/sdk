@@ -1200,7 +1200,9 @@ void KernelLoader::FinishClassLoading(const Class& klass,
                      field_helper.IsConst(), is_reflectable, script_class, type,
                      field_helper.position_, field_helper.end_position_));
       if (I->strong() && IsPotentialInvariantGeneric(type)) {
+#if defined(TARGET_ARCH_X64)
         field.set_is_invariant_generic(Field::kIsInvariant);
+#endif
       }
       field.set_kernel_offset(field_offset);
       CheckForInitializer(field);

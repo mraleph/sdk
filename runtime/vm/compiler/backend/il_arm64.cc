@@ -1572,6 +1572,17 @@ static void LoadValueCid(FlowGraphCompiler* compiler,
   __ Bind(&done);
 }
 
+LocationSummary* GuardFieldTypeInstr::MakeLocationSummary(Zone* zone,
+                                                            bool opt) const {
+  UNREACHABLE();
+  return nullptr;
+}
+
+void GuardFieldTypeInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
+  UNREACHABLE();
+}
+
+
 LocationSummary* GuardFieldClassInstr::MakeLocationSummary(Zone* zone,
                                                            bool opt) const {
   const intptr_t kNumInputs = 1;
