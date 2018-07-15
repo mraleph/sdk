@@ -6584,6 +6584,127 @@ DART_EXPORT Dart_Handle Dart_SortClasses() {
 #endif  // defined(DART_PRECOMPILED_RUNTIME)
 }
 
+class CacheInfo : public ZoneAllocated {
+ public:
+  CacheInfo(const Code& code, const SubtypeTestCache& cache)
+      : code(code), cache(cache) {}
+
+  const Code& code;
+  const SubtypeTestCache& cache;
+};
+
+#if !defined(DART_PRECOMPILED_RUNTIME)
+class TypeChecksCollector : public ObjectVisitor {
+ public:
+  TypeChecksCollector(Zone* zone, GrowableArray<CacheInfo*>& infos)
+      : zone_(zone),
+        infos_(infos),
+        code_(Code::Handle(zone)),
+        pool_(ObjectPool::Handle(zone)) {}
+
+  void VisitObject(RawObject* obj) {
+    if (obj->GetClassId() != kCodeCid) return;
+
+    code_ ^= obj;
+    pool_ = code_.object_pool();
+    if (pool_.IsNull()) {
+      return;
+    }
+
+    Code* code_handle = nullptr;
+    for (intptr_t i = 0; i < pool_.Length(); i++) {
+      if (pool_.TypeAt(i) != ObjectPool::kTaggedObject) continue;
+
+      if (pool_.ObjectAt(i)->GetClassIdMayBeSmi() != kSubtypeTestCacheCid)
+        continue;
+
+      if (code_handle == nullptr)
+        code_handle = &Code::Handle(zone_, code_.raw());
+
+      SubtypeTestCache& cache = SubtypeTestCache::Handle(zone_);
+      cache ^= pool_.ObjectAt(i);
+      infos_.Add(new CacheInfo(*code_handle, cache));
+    }
+  }
+
+  void Collect(Thread* thread) {
+    thread->isolate()->heap()->VisitObjects(this);
+    Dart::vm_isolate()->heap()->VisitObjects(this);
+  }
+
+ private:
+  Zone* zone_;
+  GrowableArray<CacheInfo*>& infos_;
+
+  Code& code_;
+  ObjectPool& pool_;
+};
+
+static int CompareCacheInfo(CacheInfo* const* a, CacheInfo* const* b) {
+  return (**b).cache.counter() - (**a).cache.counter();
+}
+#endif
+
+DART_EXPORT Dart_Handle Dart_ReportHotTypeChecks() {
+#if !defined(DART_PRECOMPILED_RUNTIME)
+  Thread* thread = Thread::Current();
+
+  DARTSCOPE(thread);
+
+  GrowableArray<CacheInfo*> caches;
+
+  {
+    HeapIterationScope scope(thread);
+    TypeChecksCollector visitor(thread->zone(), caches);
+    visitor.Collect(thread);
+  }
+
+  OS::PrintErr("Collected %" Pd " caches\n", caches.length());
+  caches.Sort(&CompareCacheInfo);
+
+  Function& owner = Function::Handle();
+  String& name = String::Handle();
+  AbstractType& dst_type = AbstractType::Handle();
+  Script& script = Script::Handle();
+  String& url = String::Handle();
+
+  for (intptr_t i = 0; i < caches.length(); i++) {
+    const Code& code = caches[i]->code;
+    const SubtypeTestCache& cache = caches[i]->cache;
+    if (cache.counter() == 0) continue;
+
+    owner ^= code.owner();
+    name = cache.dst_name();
+    dst_type = cache.dst_type();
+    script = owner.script();
+    OS::PrintErr("  (%p) [%" Pd "] %s\n", &cache, cache.counter(),
+                 owner.IsFunction()
+                     ? Function::Cast(owner).ToLibNamePrefixedQualifiedCString()
+                     : owner.ToCString());
+
+    const TokenPosition location = cache.token_pos();
+    intptr_t line = -1;
+    intptr_t column = -1;
+    ASSERT(!script.IsNull());
+    if (location.IsReal()) {
+      if (script.HasSource() || script.kind() == RawScript::kKernelTag) {
+        script.GetTokenLocation(location, &line, &column);
+      } else {
+        script.GetTokenLocation(location, &line, NULL);
+      }
+    }
+    url = script.url();
+
+    OS::PrintErr("            %s as %s at %s:%" Pd ":%" Pd "\n",
+                 name.IsNull() ? "?" : name.ToCString(), dst_type.ToCString(),
+                 url.ToCString(), line, column);
+  }
+
+#endif
+
+  return Api::Success();
+}
+
 DART_EXPORT Dart_Handle
 Dart_Precompile(Dart_QualifiedFunctionName entry_points[]) {
 #if defined(TARGET_ARCH_IA32)

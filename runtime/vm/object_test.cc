@@ -3002,7 +3002,8 @@ ISOLATE_UNIT_TEST_CASE(SubtypeTestCache) {
   Script& script = Script::Handle();
   const Class& empty_class =
       Class::Handle(CreateDummyClass(class_name, script));
-  SubtypeTestCache& cache = SubtypeTestCache::Handle(SubtypeTestCache::New());
+  SubtypeTestCache& cache = SubtypeTestCache::Handle(SubtypeTestCache::New(
+      AbstractType::Handle(), String::Handle(), TokenPosition::kNoSource));
   EXPECT(!cache.IsNull());
   EXPECT_EQ(0, cache.NumberOfChecks());
   const Object& class_id_or_fun = Object::Handle(Smi::New(empty_class.id()));

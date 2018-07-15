@@ -214,6 +214,21 @@ static void WriteDepsFile(Dart_Isolate isolate) {
   delete dependencies;
 }
 
+static void ReportTypeChecksOnExit(int64_t exit_code) {
+  if (Dart_CurrentIsolate() != main_isolate) {
+    Log::PrintErr(
+        "A snapshot was requested, but a secondary isolate "
+        "performed a hard exit (%" Pd64 ").\n",
+        exit_code);
+    Platform::Exit(kErrorExitCode);
+  }
+  if (exit_code == 0 && Dart_CurrentIsolate() == main_isolate) {
+    Dart_ReportHotTypeChecks();
+  } else {
+    Log::PrintErr("Non-zero exit code\n");
+  }
+}
+
 static void SnapshotOnExitHook(int64_t exit_code) {
   if (Dart_CurrentIsolate() != main_isolate) {
     Log::PrintErr(
@@ -1113,6 +1128,8 @@ bool RunMainIsolate(const char* script_name, CommandLineOptions* dart_options) {
         if (!Dart_IsCompilationError(result)) {
           Snapshot::GenerateAppJIT(Options::snapshot_filename());
         }
+      } else {
+        Dart_ReportHotTypeChecks();
       }
       CHECK_RESULT(result);
 
@@ -1282,6 +1299,8 @@ void main(int argc, char** argv) {
 #endif
   if (Options::gen_snapshot_kind() == kAppJIT) {
     Process::SetExitHook(SnapshotOnExitHook);
+  } else {
+    Process::SetExitHook(ReportTypeChecksOnExit);
   }
 
   char* error = Dart_SetVMFlags(vm_options.count(), vm_options.arguments());

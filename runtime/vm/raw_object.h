@@ -727,6 +727,7 @@ class RawObject {
   friend class ObjectGraph::Stack;  // GetClassId
   friend class Precompiler;         // GetClassId
   friend class ObjectOffsetTrait;   // GetClassId
+  friend class TypeChecksCollector;
 
   DISALLOW_ALLOCATION();
   DISALLOW_IMPLICIT_CONSTRUCTORS(RawObject);
@@ -1687,7 +1688,12 @@ class RawSubtypeTestCache : public RawObject {
   RAW_HEAP_OBJECT_IMPLEMENTATION(SubtypeTestCache);
   VISIT_FROM(RawObject*, cache_);
   RawArray* cache_;
+  RawAbstractType* type_;
+  RawString* name_;
   VISIT_TO(RawObject*, cache_);
+
+  intptr_t counter_;
+  TokenPosition token_pos_;
 };
 
 class RawError : public RawObject {

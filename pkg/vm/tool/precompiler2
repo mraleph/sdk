@@ -96,6 +96,7 @@ ENTRY_POINTS="--entry-points ${BIN_DIR}/gen/runtime/bin/precompiler_entry_points
 # Step 1: Generate Kernel binary from the input Dart source.
 "$BIN_DIR"/dart                                                                \
      "${SDK_DIR}/pkg/vm/bin/gen_kernel.dart"                                   \
+     --define dart.vm.product=true                                            \
      --platform "${BIN_DIR}/vm_platform_strong.dill"                           \
      --aot                                                                     \
      "${GEN_KERNEL_OPTIONS[@]}"                                                \

@@ -2030,6 +2030,12 @@ static void GenerateSubtypeNTestCacheStub(Assembler* assembler, int n) {
   const Register kInstantiatorTypeArgumentsReg = RDX;
   const Register kFunctionTypeArgumentsReg = RCX;
 
+  Label no_overflow;
+  __ addq(FieldAddress(kCacheReg, SubtypeTestCache::counter_offset()),
+          Immediate(1));
+  __ j(NO_OVERFLOW, &no_overflow, Assembler::kNearJump);
+  __ int3();
+  __ Bind(&no_overflow);
   __ LoadObject(R8, Object::null_object());
   if (n > 1) {
     __ LoadClass(R10, kInstanceReg);

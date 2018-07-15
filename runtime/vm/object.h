@@ -5403,7 +5403,9 @@ class SubtypeTestCache : public Object {
                 TypeArguments* function_type_arguments,
                 Bool* test_result) const;
 
-  static RawSubtypeTestCache* New();
+  static RawSubtypeTestCache* New(const AbstractType& type,
+                                  const String& dst_name,
+                                  TokenPosition token_pos);
 
   static intptr_t InstanceSize() {
     return RoundedAllocationSize(sizeof(RawSubtypeTestCache));
@@ -5413,10 +5415,23 @@ class SubtypeTestCache : public Object {
     return OFFSET_OF(RawSubtypeTestCache, cache_);
   }
 
+  static intptr_t counter_offset() {
+    return OFFSET_OF(RawSubtypeTestCache, counter_);
+  }
+
+  intptr_t counter() const { return raw_ptr()->counter_; }
+  RawAbstractType* dst_type() const { return raw_ptr()->type_; }
+  RawString* dst_name() const { return raw_ptr()->name_; };
+  TokenPosition token_pos() const { return raw_ptr()->token_pos_; }
+
  private:
   RawArray* cache() const { return raw_ptr()->cache_; }
-
   void set_cache(const Array& value) const;
+
+  void set_counter(intptr_t counter) const;
+  void set_dst_type(const AbstractType& dst_type) const;
+  void set_dst_name(const String& dst_name) const;
+  void set_token_pos(TokenPosition pos) const;
 
   intptr_t TestEntryLength() const;
 

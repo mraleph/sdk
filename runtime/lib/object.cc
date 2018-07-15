@@ -5,6 +5,7 @@
 #include "vm/bootstrap_natives.h"
 
 #include "lib/invocation_mirror.h"
+#include "lib/stacktrace.h"
 #include "vm/code_patcher.h"
 #include "vm/exceptions.h"
 #include "vm/heap/heap.h"
@@ -16,6 +17,17 @@
 namespace dart {
 
 DECLARE_FLAG(bool, trace_type_checks);
+
+static bool ShouldPrintTypeChecks() {
+  if (FLAG_trace_type_checks) {
+    DartFrameIterator frames(Thread::Current(),
+                             StackFrameIterator::kNoCrossThreadIteration);
+    StackFrame* frame = frames.NextFrame();
+    return frame->IsDartFrame() &&
+           Code::Handle(frame->LookupDartCode()).is_optimized();
+  }
+  return false;
+}
 
 DEFINE_NATIVE_ENTRY(DartAsync_fatal, 1) {
   // The dart:async library code entered an unrecoverable state.
@@ -142,7 +154,8 @@ DEFINE_NATIVE_ENTRY(Object_instanceOf, 4) {
   Error& bound_error = Error::Handle(zone, Error::null());
   const bool is_instance_of = instance.IsInstanceOf(
       type, instantiator_type_arguments, function_type_arguments, &bound_error);
-  if (FLAG_trace_type_checks) {
+  const bool should_print = ShouldPrintTypeChecks();
+  if (should_print) {
     const char* result_str = is_instance_of ? "true" : "false";
     OS::PrintErr("Native Object.instanceOf: result %s\n", result_str);
     const AbstractType& instance_type =
@@ -221,7 +234,8 @@ DEFINE_NATIVE_ENTRY(Object_as, 4) {
       instance.IsNull() ||
       instance.IsInstanceOf(type, instantiator_type_arguments,
                             function_type_arguments, &bound_error);
-  if (FLAG_trace_type_checks) {
+  const bool should_print = ShouldPrintTypeChecks();
+  if (should_print) {
     const char* result_str = is_instance_of ? "true" : "false";
     OS::PrintErr("Object.as: result %s\n", result_str);
     const AbstractType& instance_type =
@@ -233,6 +247,8 @@ DEFINE_NATIVE_ENTRY(Object_as, 4) {
     if (!bound_error.IsNull()) {
       OS::PrintErr("  bound error: %s\n", bound_error.ToErrorCString());
     }
+    const StackTrace& stacktrace = GetCurrentStackTrace(0);
+    OS::Print("--- stack ---\n%s\n----------\n\n", stacktrace.ToCString());
   }
   if (!is_instance_of) {
     DartFrameIterator iterator(thread,

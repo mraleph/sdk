@@ -505,6 +505,17 @@ static void PrintTypeCheck(const char* message,
   OS::PrintErr(" -> Function %s\n", function.ToFullyQualifiedCString());
 }
 
+static bool ShouldPrintTypeChecks() {
+  if (FLAG_trace_type_checks) {
+    DartFrameIterator frames(Thread::Current(),
+                             StackFrameIterator::kNoCrossThreadIteration);
+    StackFrame* frame = frames.NextFrame();
+    return frame->IsDartFrame() &&
+           Code::Handle(frame->LookupDartCode()).is_optimized();
+  }
+  return false;
+}
+
 // This updates the type test cache, an array containing 5-value elements
 // (instance class (or function if the instance is a closure), instance type
 // arguments, instantiator type arguments, function type arguments,
@@ -518,18 +529,19 @@ static void UpdateTypeTestCache(
     const TypeArguments& instantiator_type_arguments,
     const TypeArguments& function_type_arguments,
     const Bool& result,
-    const SubtypeTestCache& new_cache) {
+    const SubtypeTestCache& new_cache,
+    const bool should_print) {
   // Since the test is expensive, don't do it unless necessary.
   // The list of disallowed cases will decrease as they are implemented in
   // inlined assembly.
   if (new_cache.IsNull()) {
-    if (FLAG_trace_type_checks) {
+    if (should_print) {
       OS::PrintErr("UpdateTypeTestCache: cache is null\n");
     }
     return;
   }
   if (instance.IsSmi()) {
-    if (FLAG_trace_type_checks) {
+    if (should_print) {
       OS::PrintErr("UpdateTypeTestCache: instance is Smi\n");
     }
     return;
@@ -550,7 +562,7 @@ static void UpdateTypeTestCache(
     // function has no generic parent.
     if (Closure::Cast(instance).function_type_arguments() !=
         TypeArguments::null()) {
-      if (FLAG_trace_type_checks) {
+      if (should_print) {
         OS::PrintErr(
             "UpdateTypeTestCache: closure function_type_arguments is "
             "not null\n");
@@ -605,7 +617,7 @@ static void UpdateTypeTestCache(
   new_cache.AddCheck(instance_class_id_or_function, instance_type_arguments,
                      instantiator_type_arguments, function_type_arguments,
                      result);
-  if (FLAG_trace_type_checks) {
+  if (should_print) {
     AbstractType& test_type = AbstractType::Handle(type.raw());
     if (!test_type.IsInstantiated()) {
       Error& bound_error = Error::Handle();
@@ -669,7 +681,8 @@ DEFINE_RUNTIME_ENTRY(Instanceof, 5) {
   const Bool& result =
       Bool::Get(instance.IsInstanceOf(type, instantiator_type_arguments,
                                       function_type_arguments, &bound_error));
-  if (FLAG_trace_type_checks) {
+  const bool should_print = ShouldPrintTypeChecks();
+  if (should_print) {
     PrintTypeCheck("InstanceOf", instance, type, instantiator_type_arguments,
                    function_type_arguments, result);
   }
@@ -684,7 +697,7 @@ DEFINE_RUNTIME_ENTRY(Instanceof, 5) {
     UNREACHABLE();
   }
   UpdateTypeTestCache(instance, type, instantiator_type_arguments,
-                      function_type_arguments, result, cache);
+                      function_type_arguments, result, cache, should_print);
   arguments.SetReturn(result);
 }
 
@@ -732,7 +745,8 @@ DEFINE_RUNTIME_ENTRY(TypeCheck, 7) {
       src_instance.IsInstanceOf(dst_type, instantiator_type_arguments,
                                 function_type_arguments, &bound_error);
 
-  if (FLAG_trace_type_checks) {
+  const bool should_print = ShouldPrintTypeChecks();
+  if (should_print) {
     PrintTypeCheck("TypeCheck", src_instance, dst_type,
                    instantiator_type_arguments, function_type_arguments,
                    Bool::Get(is_instance_of));
@@ -808,9 +822,34 @@ DEFINE_RUNTIME_ENTRY(TypeCheck, 7) {
       TypeTestingStubCallPattern tts_pattern(caller_frame->pc());
       const intptr_t stc_pool_idx = tts_pattern.GetSubtypeTestCachePoolIndex();
 
+      if (dst_name.IsNull()) {
+#if !defined(TARGET_ARCH_DBC) && !defined(TARGET_ARCH_IA32)
+        // Can only come here from type testing stub.
+        ASSERT(mode != kTypeCheckFromInline);
+
+        // Grab the [dst_name] from the pool.  It's stored at one pool slot after
+        // the subtype-test-cache.
+        DartFrameIterator iterator(thread,
+                                   StackFrameIterator::kNoCrossThreadIteration);
+        StackFrame* caller_frame = iterator.NextFrame();
+        const Code& caller_code =
+            Code::Handle(zone, caller_frame->LookupDartCode());
+        const ObjectPool& pool =
+            ObjectPool::Handle(zone, caller_code.object_pool());
+        TypeTestingStubCallPattern tts_pattern(caller_frame->pc());
+        const intptr_t stc_pool_idx =
+            tts_pattern.GetSubtypeTestCachePoolIndex();
+        const intptr_t dst_name_idx = stc_pool_idx + 1;
+        dst_name ^= pool.ObjectAt(dst_name_idx);
+#else
+        UNREACHABLE();
+#endif
+      }
+
       // The pool entry must be initialized to `null` when we patch it.
       ASSERT(pool.ObjectAt(stc_pool_idx) == Object::null());
-      cache = SubtypeTestCache::New();
+      cache = SubtypeTestCache::New(dst_type, dst_name,
+                                    caller_frame->GetTokenPos());
       pool.SetObjectAt(stc_pool_idx, cache);
 #else
       UNREACHABLE();
@@ -818,7 +857,8 @@ DEFINE_RUNTIME_ENTRY(TypeCheck, 7) {
     }
 
     UpdateTypeTestCache(src_instance, dst_type, instantiator_type_arguments,
-                        function_type_arguments, Bool::True(), cache);
+                        function_type_arguments, Bool::True(), cache,
+                        should_print);
   }
 
   arguments.SetReturn(src_instance);

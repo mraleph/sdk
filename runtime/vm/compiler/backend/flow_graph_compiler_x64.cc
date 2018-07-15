@@ -204,10 +204,13 @@ RawSubtypeTestCache* FlowGraphCompiler::GenerateCallSubtypeTestStub(
     Register function_type_arguments_reg,
     Register temp_reg,
     Label* is_instance_lbl,
-    Label* is_not_instance_lbl) {
+    Label* is_not_instance_lbl,
+    const AbstractType& dst_type,
+    const String& dst_name,
+    TokenPosition pos) {
   ASSERT(temp_reg == kNoRegister);
-  const SubtypeTestCache& type_test_cache =
-      SubtypeTestCache::ZoneHandle(zone(), SubtypeTestCache::New());
+  const SubtypeTestCache& type_test_cache = SubtypeTestCache::ZoneHandle(
+      zone(), SubtypeTestCache::New(dst_type, dst_name, pos));
   __ LoadUniqueObject(R9, type_test_cache);
   if (test_kind == kTestTypeOneArg) {
     ASSERT(instantiator_type_arguments_reg == kNoRegister);
@@ -239,7 +242,8 @@ FlowGraphCompiler::GenerateInstantiatedTypeWithArgumentsTest(
     TokenPosition token_pos,
     const AbstractType& type,
     Label* is_instance_lbl,
-    Label* is_not_instance_lbl) {
+    Label* is_not_instance_lbl,
+    const String& dst_name) {
   __ Comment("InstantiatedTypeWithArgumentsTest");
   ASSERT(type.IsInstantiated());
   const Class& type_class = Class::ZoneHandle(zone(), type.type_class());
@@ -276,8 +280,9 @@ FlowGraphCompiler::GenerateInstantiatedTypeWithArgumentsTest(
       if (IsListClass(type_class)) {
         GenerateListTypeCheck(kClassIdReg, is_instance_lbl);
       }
-      return GenerateSubtype1TestCacheLookup(
-          token_pos, type_class, is_instance_lbl, is_not_instance_lbl);
+      return GenerateSubtype1TestCacheLookup(token_pos, type_class,
+                                             is_instance_lbl,
+                                             is_not_instance_lbl, dst_name);
     }
     // If one type argument only, check if type argument is Object or dynamic.
     if (type_arguments.Length() == 1) {
@@ -290,8 +295,9 @@ FlowGraphCompiler::GenerateInstantiatedTypeWithArgumentsTest(
         const Type& object_type = Type::Handle(zone(), Type::ObjectType());
         if (object_type.IsSubtypeOf(tp_argument, NULL, NULL, Heap::kOld)) {
           // Instance class test only necessary.
-          return GenerateSubtype1TestCacheLookup(
-              token_pos, type_class, is_instance_lbl, is_not_instance_lbl);
+          return GenerateSubtype1TestCacheLookup(token_pos, type_class,
+                                                 is_instance_lbl,
+                                                 is_not_instance_lbl, dst_name);
         }
       }
     }
@@ -300,10 +306,10 @@ FlowGraphCompiler::GenerateInstantiatedTypeWithArgumentsTest(
   const Register kInstantiatorTypeArgumentsReg = kNoRegister;
   const Register kFunctionTypeArgumentsReg = kNoRegister;
   const Register kTempReg = kNoRegister;
-  return GenerateCallSubtypeTestStub(kTestTypeTwoArgs, kInstanceReg,
-                                     kInstantiatorTypeArgumentsReg,
-                                     kFunctionTypeArgumentsReg, kTempReg,
-                                     is_instance_lbl, is_not_instance_lbl);
+  return GenerateCallSubtypeTestStub(
+      kTestTypeTwoArgs, kInstanceReg, kInstantiatorTypeArgumentsReg,
+      kFunctionTypeArgumentsReg, kTempReg, is_instance_lbl, is_not_instance_lbl,
+      type, dst_name, token_pos);
 }
 
 void FlowGraphCompiler::CheckClassIds(Register class_id_reg,
@@ -405,7 +411,8 @@ RawSubtypeTestCache* FlowGraphCompiler::GenerateSubtype1TestCacheLookup(
     TokenPosition token_pos,
     const Class& type_class,
     Label* is_instance_lbl,
-    Label* is_not_instance_lbl) {
+    Label* is_not_instance_lbl,
+    const String& dst_name) {
   __ Comment("Subtype1TestCacheLookup");
   const Register kInstanceReg = RAX;
   __ LoadClass(R10, kInstanceReg);
@@ -419,10 +426,10 @@ RawSubtypeTestCache* FlowGraphCompiler::GenerateSubtype1TestCacheLookup(
   const Register kInstantiatorTypeArgumentsReg = kNoRegister;
   const Register kFunctionTypeArgumentsReg = kNoRegister;
   const Register kTempReg = kNoRegister;
-  return GenerateCallSubtypeTestStub(kTestTypeOneArg, kInstanceReg,
-                                     kInstantiatorTypeArgumentsReg,
-                                     kFunctionTypeArgumentsReg, kTempReg,
-                                     is_instance_lbl, is_not_instance_lbl);
+  return GenerateCallSubtypeTestStub(
+      kTestTypeOneArg, kInstanceReg, kInstantiatorTypeArgumentsReg,
+      kFunctionTypeArgumentsReg, kTempReg, is_instance_lbl, is_not_instance_lbl,
+      AbstractType::Handle(type_class.RareType()), dst_name, token_pos);
 }
 
 // Generates inlined check if 'type' is a type parameter or type itself
@@ -437,7 +444,8 @@ RawSubtypeTestCache* FlowGraphCompiler::GenerateUninstantiatedTypeTest(
     TokenPosition token_pos,
     const AbstractType& type,
     Label* is_instance_lbl,
-    Label* is_not_instance_lbl) {
+    Label* is_not_instance_lbl,
+    const String& dst_name) {
   const Register kInstanceReg = RAX;
   const Register kInstantiatorTypeArgumentsReg = RDX;
   const Register kFunctionTypeArgumentsReg = RCX;
@@ -479,10 +487,11 @@ RawSubtypeTestCache* FlowGraphCompiler::GenerateUninstantiatedTypeTest(
 
     __ Bind(&not_smi);
     const SubtypeTestCache& type_test_cache = SubtypeTestCache::ZoneHandle(
-        zone(), GenerateCallSubtypeTestStub(
-                    kTestTypeFourArgs, kInstanceReg,
-                    kInstantiatorTypeArgumentsReg, kFunctionTypeArgumentsReg,
-                    kTempReg, is_instance_lbl, is_not_instance_lbl));
+        zone(),
+        GenerateCallSubtypeTestStub(
+            kTestTypeFourArgs, kInstanceReg, kInstantiatorTypeArgumentsReg,
+            kFunctionTypeArgumentsReg, kTempReg, is_instance_lbl,
+            is_not_instance_lbl, type, dst_name, token_pos));
     __ Bind(&fall_through);
     return type_test_cache.raw();
   }
@@ -491,10 +500,10 @@ RawSubtypeTestCache* FlowGraphCompiler::GenerateUninstantiatedTypeTest(
     __ j(ZERO, is_not_instance_lbl);
     // Uninstantiated type class is known at compile time, but the type
     // arguments are determined at runtime by the instantiator(s).
-    return GenerateCallSubtypeTestStub(kTestTypeFourArgs, kInstanceReg,
-                                       kInstantiatorTypeArgumentsReg,
-                                       kFunctionTypeArgumentsReg, kTempReg,
-                                       is_instance_lbl, is_not_instance_lbl);
+    return GenerateCallSubtypeTestStub(
+        kTestTypeFourArgs, kInstanceReg, kInstantiatorTypeArgumentsReg,
+        kFunctionTypeArgumentsReg, kTempReg, is_instance_lbl,
+        is_not_instance_lbl, type, dst_name, token_pos);
   }
   return SubtypeTestCache::null();
 }
@@ -513,7 +522,8 @@ RawSubtypeTestCache* FlowGraphCompiler::GenerateInlineInstanceof(
     TokenPosition token_pos,
     const AbstractType& type,
     Label* is_instance_lbl,
-    Label* is_not_instance_lbl) {
+    Label* is_not_instance_lbl,
+    const String& dst_name) {
   __ Comment("InlineInstanceof");
   if (type.IsInstantiated()) {
     const Class& type_class = Class::ZoneHandle(zone(), type.type_class());
@@ -522,7 +532,7 @@ RawSubtypeTestCache* FlowGraphCompiler::GenerateInlineInstanceof(
     // a parameterized class.
     if (type.IsFunctionType() || (type_class.NumTypeArguments() > 0)) {
       return GenerateInstantiatedTypeWithArgumentsTest(
-          token_pos, type, is_instance_lbl, is_not_instance_lbl);
+          token_pos, type, is_instance_lbl, is_not_instance_lbl, dst_name);
       // Fall through to runtime call.
     }
     const bool has_fall_through = GenerateInstantiatedTypeNoArgumentsTest(
@@ -530,14 +540,15 @@ RawSubtypeTestCache* FlowGraphCompiler::GenerateInlineInstanceof(
     if (has_fall_through) {
       // If test non-conclusive so far, try the inlined type-test cache.
       // 'type' is known at compile time.
-      return GenerateSubtype1TestCacheLookup(
-          token_pos, type_class, is_instance_lbl, is_not_instance_lbl);
+      return GenerateSubtype1TestCacheLookup(token_pos, type_class,
+                                             is_instance_lbl,
+                                             is_not_instance_lbl, dst_name);
     } else {
       return SubtypeTestCache::null();
     }
   }
   return GenerateUninstantiatedTypeTest(token_pos, type, is_instance_lbl,
-                                        is_not_instance_lbl);
+                                        is_not_instance_lbl, dst_name);
 }
 
 // If instanceof type test cannot be performed successfully at compile time and
@@ -576,8 +587,8 @@ void FlowGraphCompiler::GenerateInstanceOf(TokenPosition token_pos,
   // Generate inline instanceof test.
   SubtypeTestCache& test_cache = SubtypeTestCache::ZoneHandle(zone());
   // The registers RAX, RCX, RDX are preserved across the call.
-  test_cache =
-      GenerateInlineInstanceof(token_pos, type, &is_instance, &is_not_instance);
+  test_cache = GenerateInlineInstanceof(token_pos, type, &is_instance,
+                                        &is_not_instance, String::Handle());
 
   // test_cache is null if there is no fall-through.
   Label done;
@@ -668,7 +679,7 @@ void FlowGraphCompiler::GenerateAssertAssignable(TokenPosition token_pos,
     SubtypeTestCache& test_cache = SubtypeTestCache::ZoneHandle(zone());
     // The registers RAX, RCX, RDX are preserved across the call.
     test_cache = GenerateInlineInstanceof(token_pos, dst_type, &is_assignable,
-                                          &runtime_call);
+                                          &runtime_call, dst_name);
 
     __ Bind(&runtime_call);
     __ PushObject(Object::null_object());  // Make room for the result.

@@ -3394,6 +3394,8 @@ Dart_LoadCompilationTrace(uint8_t* buffer, intptr_t buffer_length);
 DART_EXPORT Dart_Handle
 Dart_Precompile(Dart_QualifiedFunctionName entry_points[]);
 
+DART_EXPORT Dart_Handle Dart_ReportHotTypeChecks();
+
 typedef void (*Dart_StreamingWriteCallback)(void* callback_data,
                                             const uint8_t* buffer,
                                             intptr_t size);

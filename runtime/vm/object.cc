@@ -15657,7 +15657,9 @@ const char* MegamorphicCache::ToCString() const {
                      name.ToCString());
 }
 
-RawSubtypeTestCache* SubtypeTestCache::New() {
+RawSubtypeTestCache* SubtypeTestCache::New(const AbstractType& type,
+                                           const String& name,
+                                           TokenPosition pos) {
   ASSERT(Object::subtypetestcache_class() != Class::null());
   SubtypeTestCache& result = SubtypeTestCache::Handle();
   {
@@ -15671,7 +15673,27 @@ RawSubtypeTestCache* SubtypeTestCache::New() {
   }
   const Array& cache = Array::Handle(Array::New(kTestEntryLength, Heap::kOld));
   result.set_cache(cache);
+  result.set_counter(0);
+  result.set_dst_type(type);
+  result.set_dst_name(name);
+  result.set_token_pos(pos);
   return result.raw();
+}
+
+void SubtypeTestCache::set_counter(intptr_t value) const {
+  StoreNonPointer(&raw_ptr()->counter_, 0);
+}
+
+void SubtypeTestCache::set_dst_name(const String& name) const {
+  StorePointer(&raw_ptr()->name_, name.raw());
+}
+
+void SubtypeTestCache::set_dst_type(const AbstractType& type) const {
+  StorePointer(&raw_ptr()->type_, type.raw());
+}
+
+void SubtypeTestCache::set_token_pos(TokenPosition pos) const {
+  StoreNonPointer(&raw_ptr()->token_pos_, pos);
 }
 
 void SubtypeTestCache::set_cache(const Array& value) const {

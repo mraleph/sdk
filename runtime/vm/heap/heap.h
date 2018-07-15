@@ -369,6 +369,7 @@ class Heap {
   friend class HeapIterationScope;    // VisitObjects
   friend class ProgramVisitor;        // VisitObjectsImagePages
   friend class Serializer;            // VisitObjectsImagePages
+  friend class TypeChecksCollector;
 
   DISALLOW_COPY_AND_ASSIGN(Heap);
 };

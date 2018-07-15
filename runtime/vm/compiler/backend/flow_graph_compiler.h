@@ -795,13 +795,15 @@ class FlowGraphCompiler : public ValueObject {
   RawSubtypeTestCache* GenerateInlineInstanceof(TokenPosition token_pos,
                                                 const AbstractType& type,
                                                 Label* is_instance_lbl,
-                                                Label* is_not_instance_lbl);
+                                                Label* is_not_instance_lbl,
+                                                const String& dst_name);
 
   RawSubtypeTestCache* GenerateInstantiatedTypeWithArgumentsTest(
       TokenPosition token_pos,
       const AbstractType& dst_type,
       Label* is_instance_lbl,
-      Label* is_not_instance_lbl);
+      Label* is_not_instance_lbl,
+      const String& dst_name);
 
   bool GenerateInstantiatedTypeNoArgumentsTest(TokenPosition token_pos,
                                                const AbstractType& dst_type,
@@ -812,13 +814,15 @@ class FlowGraphCompiler : public ValueObject {
       TokenPosition token_pos,
       const AbstractType& dst_type,
       Label* is_instance_lbl,
-      Label* is_not_instance_label);
+      Label* is_not_instance_label,
+      const String& dst_name);
 
   RawSubtypeTestCache* GenerateSubtype1TestCacheLookup(
       TokenPosition token_pos,
       const Class& type_class,
       Label* is_instance_lbl,
-      Label* is_not_instance_lbl);
+      Label* is_not_instance_lbl,
+      const String& dst_name);
 
   enum TypeTestStubKind {
     kTestTypeOneArg,
@@ -833,7 +837,10 @@ class FlowGraphCompiler : public ValueObject {
       Register function_type_arguments_reg,
       Register temp_reg,
       Label* is_instance_lbl,
-      Label* is_not_instance_lbl);
+      Label* is_not_instance_lbl,
+      const AbstractType& dst_type,
+      const String& dst_name,
+      TokenPosition pos);
 
   void GenerateBoolToJump(Register bool_reg, Label* is_true, Label* is_false);
 #endif  // !defined(TARGET_ARCH_DBC)
