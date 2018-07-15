@@ -460,7 +460,29 @@ void FlowGraphTypePropagator::StrengthenAsserts(BlockEntryInstr* block) {
   collected_asserts_->TruncateTo(0);
 }
 
+static bool IsRawType(const AbstractType& type) {
+  ASSERT(type.IsInstantiated());
+  const Class& type_class = Class::Handle(type.type_class());
+  const intptr_t num_type_args = type_class.NumTypeArguments();
+  const intptr_t num_type_params = type_class.NumTypeParameters();
+  const intptr_t from_index = num_type_args - num_type_params;
+  const TypeArguments& type_arguments =
+      TypeArguments::Handle(type.arguments());
+  return type_arguments.IsNull() ||
+         type_arguments.IsRaw(from_index, num_type_params);
+}
+
 void FlowGraphTypePropagator::StrengthenAssertWith(Instruction* check) {
+  if (CheckClassInstr* check_class = check->AsCheckClass()) {
+    if (check_class->cids().length() != 1) {
+      // TODO(dartbug.com/33755) our type propagation latice does not
+      // handle polymorphic class-checks which means that assert assignable
+      // dominated by polymoprhic class check will never be removed so we
+      // will end up with duplicated check-class code.
+      return;
+    }
+  }
+
   // Marker that is used to mark values that already had type assertion
   // strengthened.
   AssertAssignableInstr* kStrengthenedAssertMarker =
@@ -473,6 +495,10 @@ void FlowGraphTypePropagator::StrengthenAssertWith(Instruction* check) {
     return;
   }
   ASSERT(assert->env() != NULL);
+  if (!assert->dst_type().IsInstantiated() || !IsRawType(assert->dst_type())) {
+    // Do not strengthen uninstantiated AssertAssignables.
+    //return;
+  }
 
   Instruction* check_clone = NULL;
   if (check->IsCheckSmi()) {
