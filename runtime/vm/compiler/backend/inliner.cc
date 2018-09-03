@@ -2628,7 +2628,7 @@ static bool InlineGrowableArraySetter(FlowGraph* flow_graph,
 
   // This is an internal method, no need to check argument types.
   StoreInstanceFieldInstr* store = new (Z) StoreInstanceFieldInstr(
-      offset, new (Z) Value(array), new (Z) Value(value), store_barrier_type,
+      field, new (Z) Value(array), new (Z) Value(value), store_barrier_type,
       call->token_pos());
   flow_graph->AppendTo(*entry, store, call->env(), FlowGraph::kEffect);
   *last = store;
