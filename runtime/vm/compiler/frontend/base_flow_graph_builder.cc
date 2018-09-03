@@ -384,6 +384,19 @@ Fragment BaseFlowGraphBuilder::StoreInstanceField(
 }
 
 Fragment BaseFlowGraphBuilder::StoreInstanceField(
+    TokenPosition position,
+    const NativeFieldDesc& field,
+    StoreBarrierType emit_store_barrier) {
+  Value* value = Pop();
+  if (value->BindsToConstant()) {
+    emit_store_barrier = kNoStoreBarrier;
+  }
+  StoreInstanceFieldInstr* store = new (Z) StoreInstanceFieldInstr(
+      field, Pop(), value, emit_store_barrier, position);
+  return Fragment(store);
+}
+
+Fragment BaseFlowGraphBuilder::StoreInstanceField(
     const Field& field,
     bool is_initialization_store,
     StoreBarrierType emit_store_barrier) {

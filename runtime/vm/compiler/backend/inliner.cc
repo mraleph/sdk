@@ -2330,8 +2330,8 @@ static intptr_t PrepareInlineIndexedOp(FlowGraph* flow_graph,
   if (array_cid == kGrowableObjectArrayCid) {
     // Insert data elements load.
     LoadFieldInstr* elements = new (Z) LoadFieldInstr(
-        new (Z) Value(*array), GrowableObjectArray::data_offset(),
-        Object::dynamic_type(), call->token_pos());
+        new (Z) Value(*array), NativeFieldDesc::GrowableObjectArray_data(),
+        call->token_pos());
     elements->set_result_cid(kArrayCid);
     *cursor = flow_graph->AppendTo(*cursor, elements, NULL, FlowGraph::kValue);
     // Load from the data from backing store which is a fixed-length array.
@@ -2612,7 +2612,7 @@ static bool InlineSmiBitAndFromSmi(FlowGraph* flow_graph,
 }
 
 static bool InlineGrowableArraySetter(FlowGraph* flow_graph,
-                                      intptr_t offset,
+                                      const NativeFieldDesc& field,
                                       StoreBarrierType store_barrier_type,
                                       Instruction* call,
                                       Definition* receiver,
@@ -3772,7 +3772,7 @@ bool FlowGraphInliner::TryInlineRecognizedMethod(
       ASSERT(call->IsStaticCall() ||
              (ic_data == NULL || ic_data->NumberOfChecksIs(1)));
       return InlineGrowableArraySetter(
-          flow_graph, GrowableObjectArray::data_offset(), kEmitStoreBarrier,
+          flow_graph, *NativeFieldDesc::GrowableObjectArray_data(), kEmitStoreBarrier,
           call, receiver, entry, last);
     case MethodRecognizer::kGrowableArraySetLength:
       ASSERT((receiver_cid == kGrowableObjectArrayCid) ||
@@ -3780,7 +3780,7 @@ bool FlowGraphInliner::TryInlineRecognizedMethod(
       ASSERT(call->IsStaticCall() ||
              (ic_data == NULL || ic_data->NumberOfChecksIs(1)));
       return InlineGrowableArraySetter(
-          flow_graph, GrowableObjectArray::length_offset(), kNoStoreBarrier,
+          flow_graph, *NativeFieldDesc::GrowableObjectArray_length(), kNoStoreBarrier,
           call, receiver, entry, last);
     case MethodRecognizer::kSmi_bitAndFromSmi:
       return InlineSmiBitAndFromSmi(flow_graph, call, receiver, entry, last);

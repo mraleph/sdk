@@ -105,11 +105,19 @@ class Place : public ValueObject {
     // Field location. For instance fields is represented as a pair of a Field
     // object and an instance (SSA definition) that is being accessed.
     // For static fields instance is NULL.
+    // Field locations have Field objects associated with them.
     kField,
 
-    // VMField location. Represented as a pair of an instance (SSA definition)
-    // being accessed and offset to the field.
-    kVMField,
+    // Native field location (e.g. type arguments field). They don't
+    // have Field object associated with them, but have a unique
+    // NativeFieldDesc associated instead.
+    kNativeField,
+
+    // LegacyVMField location. Represented as a pair of an instance
+    // (SSA definition) being accessed and offset to the field.
+    // TODO(vegorov) ensure that all native fields have NativeFieldDesc
+    // assigned.
+    kLegacyVMField,
 
     // Indexed location with a non-constant index.
     kIndexed,
@@ -157,17 +165,20 @@ class Place : public ValueObject {
   // Construct a place from instruction if instruction accesses any place.
   // Otherwise constructs kNone place.
   Place(Instruction* instr, bool* is_load, bool* is_store)
-      : flags_(0), instance_(NULL), raw_selector_(0), id_(0) {
+      : flags_(0), instance_(nullptr), raw_selector_(0), id_(0) {
     switch (instr->tag()) {
       case Instruction::kLoadField: {
         LoadFieldInstr* load_field = instr->AsLoadField();
         set_representation(load_field->representation());
         instance_ = load_field->instance()->definition()->OriginalDefinition();
-        if (load_field->field() != NULL) {
+        if (load_field->field() != nullptr) {
           set_kind(kField);
           field_ = load_field->field();
+        } else if (load_field->native_field() != nullptr) {
+          set_kind(kNativeField);
+          native_field_ = load_field->native_field();
         } else {
-          set_kind(kVMField);
+          set_kind(kLegacyVMField);
           offset_in_bytes_ = load_field->offset_in_bytes();
         }
         *is_load = true;
@@ -182,8 +193,11 @@ class Place : public ValueObject {
         if (!store->field().IsNull()) {
           set_kind(kField);
           field_ = &store->field();
+        } else if (store->native_field() != nullptr) {
+          set_kind(kNativeField);
+          native_field_ = store->native_field();
         } else {
-          set_kind(kVMField);
+          set_kind(kLegacyVMField);
           offset_in_bytes_ = store->offset_in_bytes();
         }
         *is_store = true;
@@ -232,6 +246,22 @@ class Place : public ValueObject {
     }
   }
 
+  bool IsConstant(Object* value) const {
+    switch (kind()) {
+      case kField:
+        return (instance() != nullptr) && instance()->IsConstant() &&
+               LoadFieldInstr::TryEvaluateLoad(
+                   instance()->AsConstant()->constant_value(), field(), value);
+      case kNativeField:
+        return (instance() != nullptr) && instance()->IsConstant() &&
+               LoadFieldInstr::TryEvaluateLoad(
+                   instance()->AsConstant()->constant_value(), native_field(),
+                   value);
+      default:
+        return false;
+    }
+  }
+
   // Create object representing *[*] alias.
   static Place* CreateAnyInstanceAnyIndexAlias(Zone* zone, intptr_t id) {
     return Wrap(
@@ -264,7 +294,8 @@ class Place : public ValueObject {
   bool DependsOnInstance() const {
     switch (kind()) {
       case kField:
-      case kVMField:
+      case kNativeField:
+      case kLegacyVMField:
       case kIndexed:
       case kConstantIndexed:
         return true;
@@ -329,8 +360,13 @@ class Place : public ValueObject {
     return *field_;
   }
 
+  const NativeFieldDesc& native_field() const {
+    ASSERT(kind() == kNativeField);
+    return *native_field_;
+  }
+
   intptr_t offset_in_bytes() const {
-    ASSERT(kind() == kVMField);
+    ASSERT(kind() == kLegacyVMField);
     return offset_in_bytes_;
   }
 
@@ -370,7 +406,11 @@ class Place : public ValueObject {
         }
       }
 
-      case kVMField:
+      case kNativeField:
+        return Thread::Current()->zone()->PrintToString(
+            "<%s.%s>", DefinitionName(instance()), native_field().name());
+
+      case kLegacyVMField:
         return Thread::Current()->zone()->PrintToString(
             "<%s.@%" Pd ">", DefinitionName(instance()), offset_in_bytes());
 
@@ -549,6 +589,7 @@ class Place : public ValueObject {
   union {
     intptr_t raw_selector_;
     const Field* field_;
+    const NativeFieldDesc* native_field_;
     intptr_t offset_in_bytes_;
     intptr_t index_constant_;
     Definition* index_;
@@ -907,7 +948,8 @@ class AliasedSet : public ZoneAllocated {
         break;
 
       case Place::kField:
-      case Place::kVMField:
+      case Place::kNativeField:
+      case Place::kLegacyVMField:
         if (CanBeAliased(alias->instance())) {
           // X.f or X.@offs alias with *.f and *.@offs respectively.
           CrossAlias(alias, alias->CopyWithoutInstance());
@@ -940,14 +982,16 @@ class AliasedSet : public ZoneAllocated {
     }
 
     return ((place->kind() == Place::kField) ||
-            (place->kind() == Place::kVMField)) &&
+            (place->kind() == Place::kLegacyVMField) ||
+            (place->kind() == Place::kNativeField)) &&
            !CanBeAliased(place->instance());
   }
 
   // Returns true if there are direct loads from the given place.
   bool HasLoadsFromPlace(Definition* defn, const Place* place) {
     ASSERT((place->kind() == Place::kField) ||
-           (place->kind() == Place::kVMField));
+           (place->kind() == Place::kNativeField) ||
+           (place->kind() == Place::kLegacyVMField));
 
     for (Value* use = defn->input_use_list(); use != NULL;
          use = use->next_use()) {
@@ -1127,7 +1171,8 @@ static Definition* GetStoredValue(Instruction* instr) {
 
 static bool IsPhiDependentPlace(Place* place) {
   return ((place->kind() == Place::kField) ||
-          (place->kind() == Place::kVMField)) &&
+          (place->kind() == Place::kLegacyVMField) ||
+          (place->kind() == Place::kNativeField)) &&
          (place->instance() != NULL) && place->instance()->IsPhi();
 }
 
@@ -1496,6 +1541,20 @@ class LoadOptimizer : public ValueObject {
 
       ZoneGrowableArray<Definition*>* exposed_values = NULL;
       ZoneGrowableArray<Definition*>* out_values = NULL;
+
+      if (block->IsGraphEntry()) {
+        // If we have any places that can be evaluated at compile time then
+        // mark those as outgoing from the graph entry.
+        Object& value = Object::Handle(graph_->zone());
+        for (auto place : aliased_set_->places()) {
+          if (place->IsConstant(&value) && (value.IsSmi() || value.IsOld())) {
+            gen->Add(place->id());
+
+            if (out_values == NULL) out_values = CreateBlockOutValues();
+            (*out_values)[place->id()] = graph_->GetConstant(value);
+          }
+        }
+      }
 
       for (ForwardInstructionIterator instr_it(block); !instr_it.Done();
            instr_it.Advance()) {

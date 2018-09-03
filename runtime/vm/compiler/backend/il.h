@@ -4167,6 +4167,79 @@ class DebugStepCheckInstr : public TemplateInstruction<0, NoThrow> {
   DISALLOW_COPY_AND_ASSIGN(DebugStepCheckInstr);
 };
 
+#define NATIVE_FIELDS_LIST(V)                                                  \
+  V(Array, length, Smi, IMMUTABLE)                                             \
+  V(GrowableObjectArray, length, Smi, MUTABLE)                                 \
+  V(GrowableObjectArray, data, Array, MUTABLE)                                 \
+  V(TypedData, length, Smi, IMMUTABLE)                                         \
+  V(String, length, Smi, IMMUTABLE)                                            \
+  V(LinkedHashMap, index, TypedDataUint32Array, MUTABLE)                       \
+  V(LinkedHashMap, data, Array, MUTABLE)                                       \
+  V(LinkedHashMap, hash_mask, Smi, MUTABLE)                                    \
+  V(LinkedHashMap, used_data, Smi, MUTABLE)                                    \
+  V(LinkedHashMap, deleted_keys, Smi, MUTABLE)                                 \
+  V(ArgumentsDescriptor, type_args_len, Smi, IMMUTABLE)
+
+class NativeFieldDesc : public ZoneAllocated {
+ public:
+  // clang-format off
+  enum Kind {
+#define DECLARE_KIND(ClassName, FieldName, cid, mutability)                    \
+  k##ClassName##_##FieldName,
+    NATIVE_FIELDS_LIST(DECLARE_KIND)
+#undef DECLARE_KIND
+    kTypeArguments,
+  };
+  // clang-format on
+
+#define DEFINE_GETTER(ClassName, FieldName, cid, mutability)                   \
+  static const NativeFieldDesc* ClassName##_##FieldName() {                    \
+    return Get(k##ClassName##_##FieldName);                                    \
+  }
+
+  NATIVE_FIELDS_LIST(DEFINE_GETTER)
+#undef DEFINE_GETTER
+
+  static const NativeFieldDesc* Get(Kind kind);
+  static const NativeFieldDesc* GetLengthFieldForArrayCid(intptr_t array_cid);
+  static const NativeFieldDesc* GetTypeArgumentsFieldFor(Zone* zone,
+                                                         const Class& cls);
+
+  const char* name() const;
+
+  Kind kind() const { return kind_; }
+
+  intptr_t offset_in_bytes() const { return offset_in_bytes_; }
+
+  bool is_immutable() const { return immutable_; }
+
+  intptr_t cid() const { return cid_; }
+
+  RawAbstractType* type() const;
+
+ private:
+  NativeFieldDesc(Kind kind,
+                  intptr_t offset_in_bytes,
+                  intptr_t cid,
+                  bool immutable)
+      : kind_(kind),
+        offset_in_bytes_(offset_in_bytes),
+        immutable_(immutable),
+        cid_(cid) {}
+
+  NativeFieldDesc(const NativeFieldDesc& other)
+      : NativeFieldDesc(other.kind_,
+                        other.offset_in_bytes_,
+                        other.immutable_,
+                        other.cid_) {}
+
+  const Kind kind_;
+  const intptr_t offset_in_bytes_;
+  const bool immutable_;
+
+  const intptr_t cid_;
+};
+
 enum StoreBarrierType { kNoStoreBarrier, kEmitStoreBarrier };
 
 class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
@@ -4186,13 +4259,26 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
     CheckField(field);
   }
 
+  StoreInstanceFieldInstr(const NativeFieldDesc& field,
+                          Value* instance,
+                          Value* value,
+                          StoreBarrierType emit_store_barrier,
+                          TokenPosition token_pos)
+      : native_field_(&field),
+        offset_in_bytes_(field.offset_in_bytes()),
+        emit_store_barrier_(emit_store_barrier),
+        token_pos_(token_pos),
+        is_initialization_(false) {
+    SetInputAt(kInstancePos, instance);
+    SetInputAt(kValuePos, value);
+  }
+
   StoreInstanceFieldInstr(intptr_t offset_in_bytes,
                           Value* instance,
                           Value* value,
                           StoreBarrierType emit_store_barrier,
                           TokenPosition token_pos)
-      : field_(Field::ZoneHandle()),
-        offset_in_bytes_(offset_in_bytes),
+      : offset_in_bytes_(offset_in_bytes),
         emit_store_barrier_(emit_store_barrier),
         token_pos_(token_pos),
         is_initialization_(false) {
@@ -4213,6 +4299,7 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
   virtual TokenPosition token_pos() const { return token_pos_; }
 
   const Field& field() const { return field_; }
+  const NativeFieldDesc* native_field() const { return native_field_; }
   intptr_t offset_in_bytes() const { return offset_in_bytes_; }
 
   bool ShouldEmitStoreBarrier() const {
@@ -4264,7 +4351,8 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
                               : Assembler::kValueIsNotSmi;
   }
 
-  const Field& field_;
+  const Field& field_ = Field::ZoneHandle();
+  const NativeFieldDesc* native_field_ = nullptr;
   intptr_t offset_in_bytes_;
   StoreBarrierType emit_store_barrier_;
   const TokenPosition token_pos_;
@@ -5081,78 +5169,6 @@ class LoadClassIdInstr : public TemplateDefinition<1, NoThrow, Pure> {
   DISALLOW_COPY_AND_ASSIGN(LoadClassIdInstr);
 };
 
-#define NATIVE_FIELDS_LIST(V)                                                  \
-  V(Array, length, Smi, IMMUTABLE)                                             \
-  V(GrowableObjectArray, length, Smi, MUTABLE)                                 \
-  V(TypedData, length, Smi, IMMUTABLE)                                         \
-  V(String, length, Smi, IMMUTABLE)                                            \
-  V(LinkedHashMap, index, TypedDataUint32Array, MUTABLE)                       \
-  V(LinkedHashMap, data, Array, MUTABLE)                                       \
-  V(LinkedHashMap, hash_mask, Smi, MUTABLE)                                    \
-  V(LinkedHashMap, used_data, Smi, MUTABLE)                                    \
-  V(LinkedHashMap, deleted_keys, Smi, MUTABLE)                                 \
-  V(ArgumentsDescriptor, type_args_len, Smi, IMMUTABLE)
-
-class NativeFieldDesc : public ZoneAllocated {
- public:
-  // clang-format off
-  enum Kind {
-#define DECLARE_KIND(ClassName, FieldName, cid, mutability)                    \
-  k##ClassName##_##FieldName,
-    NATIVE_FIELDS_LIST(DECLARE_KIND)
-#undef DECLARE_KIND
-    kTypeArguments,
-  };
-  // clang-format on
-
-#define DEFINE_GETTER(ClassName, FieldName, cid, mutability)                   \
-  static const NativeFieldDesc* ClassName##_##FieldName() {                    \
-    return Get(k##ClassName##_##FieldName);                                    \
-  }
-
-  NATIVE_FIELDS_LIST(DEFINE_GETTER)
-#undef DEFINE_GETTER
-
-  static const NativeFieldDesc* Get(Kind kind);
-  static const NativeFieldDesc* GetLengthFieldForArrayCid(intptr_t array_cid);
-  static const NativeFieldDesc* GetTypeArgumentsFieldFor(Zone* zone,
-                                                         const Class& cls);
-
-  const char* name() const;
-
-  Kind kind() const { return kind_; }
-
-  intptr_t offset_in_bytes() const { return offset_in_bytes_; }
-
-  bool is_immutable() const { return immutable_; }
-
-  intptr_t cid() const { return cid_; }
-
-  RawAbstractType* type() const;
-
- private:
-  NativeFieldDesc(Kind kind,
-                  intptr_t offset_in_bytes,
-                  intptr_t cid,
-                  bool immutable)
-      : kind_(kind),
-        offset_in_bytes_(offset_in_bytes),
-        immutable_(immutable),
-        cid_(cid) {}
-
-  NativeFieldDesc(const NativeFieldDesc& other)
-      : NativeFieldDesc(other.kind_,
-                        other.offset_in_bytes_,
-                        other.immutable_,
-                        other.cid_) {}
-
-  const Kind kind_;
-  const intptr_t offset_in_bytes_;
-  const bool immutable_;
-
-  const intptr_t cid_;
-};
-
 class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
  public:
   LoadFieldInstr(Value* instance,
@@ -5248,6 +5264,14 @@ class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
   // Note: we only evaluate loads when we can ensure that
   // instance has the field.
   bool Evaluate(const Object& instance_value, Object* result);
+
+  static bool TryEvaluateLoad(const Object& instance,
+                              const Field& field,
+                              Object* result);
+
+  static bool TryEvaluateLoad(const Object& instance,
+                              const NativeFieldDesc& field,
+                              Object* result);
 
   virtual Definition* Canonicalize(FlowGraph* flow_graph);
 

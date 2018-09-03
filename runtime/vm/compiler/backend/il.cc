@@ -2550,6 +2550,7 @@ bool LoadFieldInstr::IsImmutableLengthLoad() const {
       case NativeFieldDesc::kLinkedHashMap_deleted_keys:
       case NativeFieldDesc::kArgumentsDescriptor_type_args_len:
       case NativeFieldDesc::kTypeArguments:
+      case NativeFieldDesc::kGrowableObjectArray_data:
         return false;
     }
   }
@@ -2582,40 +2583,57 @@ Definition* MathUnaryInstr::Canonicalize(FlowGraph* flow_graph) {
   return this;
 }
 
-bool LoadFieldInstr::Evaluate(const Object& instance, Object* result) {
-  if (native_field() != nullptr) {
-    switch (native_field()->kind()) {
-      case NativeFieldDesc::kArgumentsDescriptor_type_args_len:
-        if (instance.IsArray() && Array::Cast(instance).IsImmutable()) {
-          ArgumentsDescriptor desc(Array::Cast(instance));
-          *result = Smi::New(desc.TypeArgsLen());
-          return true;
-        }
-        return false;
+bool LoadFieldInstr::TryEvaluateLoad(const Object& instance,
+                                     const NativeFieldDesc& field,
+                                     Object* result) {
+  switch (field.kind()) {
+    case NativeFieldDesc::kArgumentsDescriptor_type_args_len:
+      if (instance.IsArray() && Array::Cast(instance).IsImmutable()) {
+        ArgumentsDescriptor desc(Array::Cast(instance));
+        *result = Smi::New(desc.TypeArgsLen());
+        return true;
+      }
+      return false;
 
-      default:
-        break;
-    }
+    default:
+      break;
   }
+  return false;
+}
 
-  if (field() == nullptr || !field()->is_final() || !instance.IsInstance()) {
+bool LoadFieldInstr::TryEvaluateLoad(const Object& instance,
+                                     const Field& field,
+                                     Object* result) {
+  if (!field.is_final() || !instance.IsInstance()) {
     return false;
   }
 
   // Check that instance really has the field which we
   // are trying to load from.
   Class& cls = Class::Handle(instance.clazz());
-  while (cls.raw() != Class::null() && cls.raw() != field()->Owner()) {
+  while (cls.raw() != Class::null() && cls.raw() != field.Owner()) {
     cls = cls.SuperClass();
   }
-  if (cls.raw() != field()->Owner()) {
+  if (cls.raw() != field.Owner()) {
     // Failed to find the field in class or its superclasses.
     return false;
   }
 
   // Object has the field: execute the load.
-  *result = Instance::Cast(instance).GetField(*field());
+  *result = Instance::Cast(instance).GetField(field);
   return true;
+}
+
+bool LoadFieldInstr::Evaluate(const Object& instance, Object* result) {
+  if (native_field() != nullptr) {
+    return TryEvaluateLoad(instance, *native_field(), result);
+  }
+
+  if (field() != nullptr) {
+    return TryEvaluateLoad(instance, *field(), result);
+  }
+
+  return false;
 }
 
 Definition* LoadFieldInstr::Canonicalize(FlowGraph* flow_graph) {

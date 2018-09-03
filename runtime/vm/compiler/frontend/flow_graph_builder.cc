@@ -3162,14 +3162,14 @@ LoadFieldInstr* EffectGraphVisitor::BuildNativeGetter(
 
 ConstantInstr* EffectGraphVisitor::DoNativeSetterStoreValue(
     NativeBodyNode* node,
-    intptr_t offset,
+    const NativeFieldDesc& field,
     StoreBarrierType emit_store_barrier) {
   Value* receiver = Bind(BuildLoadThisVar(node->scope(), node->token_pos()));
   LocalVariable* value_var =
       node->scope()->LookupVariable(Symbols::Value(), true);
   Value* value = Bind(new (Z) LoadLocalInstr(*value_var, node->token_pos()));
   StoreInstanceFieldInstr* store = new (Z) StoreInstanceFieldInstr(
-      offset, receiver, value, emit_store_barrier, node->token_pos());
+      field, receiver, value, emit_store_barrier, node->token_pos());
   Do(store);
   return new (Z) ConstantInstr(Object::ZoneHandle(Z, Object::null()));
 }
@@ -3335,7 +3335,7 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
       }
       case MethodRecognizer::kLinkedHashMap_setIndex: {
         return ReturnDefinition(DoNativeSetterStoreValue(
-            node, LinkedHashMap::index_offset(), kEmitStoreBarrier));
+            node, *NativeFieldDesc::LinkedHashMap_index(), kEmitStoreBarrier));
       }
       case MethodRecognizer::kLinkedHashMap_getData: {
         return ReturnDefinition(
@@ -3343,7 +3343,7 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
       }
       case MethodRecognizer::kLinkedHashMap_setData: {
         return ReturnDefinition(DoNativeSetterStoreValue(
-            node, LinkedHashMap::data_offset(), kEmitStoreBarrier));
+            node, *NativeFieldDesc::LinkedHashMap_data(), kEmitStoreBarrier));
       }
       case MethodRecognizer::kLinkedHashMap_getHashMask: {
         return ReturnDefinition(BuildNativeGetter(
@@ -3352,7 +3352,7 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
       case MethodRecognizer::kLinkedHashMap_setHashMask: {
         // Smi field; no barrier needed.
         return ReturnDefinition(DoNativeSetterStoreValue(
-            node, LinkedHashMap::hash_mask_offset(), kNoStoreBarrier));
+            node, *NativeFieldDesc::LinkedHashMap_hash_mask(), kNoStoreBarrier));
       }
       case MethodRecognizer::kLinkedHashMap_getUsedData: {
         return ReturnDefinition(BuildNativeGetter(
@@ -3361,7 +3361,7 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
       case MethodRecognizer::kLinkedHashMap_setUsedData: {
         // Smi field; no barrier needed.
         return ReturnDefinition(DoNativeSetterStoreValue(
-            node, LinkedHashMap::used_data_offset(), kNoStoreBarrier));
+            node, *NativeFieldDesc::LinkedHashMap_used_data(), kNoStoreBarrier));
       }
       case MethodRecognizer::kLinkedHashMap_getDeletedKeys: {
         return ReturnDefinition(BuildNativeGetter(
@@ -3371,7 +3371,7 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
       case MethodRecognizer::kLinkedHashMap_setDeletedKeys: {
         // Smi field; no barrier needed.
         return ReturnDefinition(DoNativeSetterStoreValue(
-            node, LinkedHashMap::deleted_keys_offset(), kNoStoreBarrier));
+            node, *NativeFieldDesc::LinkedHashMap_deleted_keys(), kNoStoreBarrier));
       }
       default:
         break;

@@ -149,6 +149,10 @@ class BaseFlowGraphBuilder {
       intptr_t offset,
       StoreBarrierType emit_store_barrier = kEmitStoreBarrier);
   Fragment StoreInstanceField(
+      TokenPosition position,
+      const NativeFieldDesc& field,
+      StoreBarrierType emit_store_barrier = kEmitStoreBarrier);
+  Fragment StoreInstanceField(
       const Field& field,
       bool is_initialization_store,
       StoreBarrierType emit_store_barrier = kEmitStoreBarrier);
