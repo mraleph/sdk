@@ -239,13 +239,13 @@ void JitCallSpecializer::VisitStoreInstanceField(
 // If context_value is not NULL then newly allocated context is a populated
 // with values copied from it, otherwise it is initialized with null.
 void JitCallSpecializer::LowerContextAllocation(Definition* alloc,
-                                                intptr_t num_context_variables,
+                                                const LocalScope* context_scope,
                                                 Value* context_value) {
   ASSERT(alloc->IsAllocateContext() || alloc->IsCloneContext());
 
   AllocateUninitializedContextInstr* replacement =
       new AllocateUninitializedContextInstr(alloc->token_pos(),
-                                            num_context_variables);
+                                            context_scope->num_context_variables());
   alloc->ReplaceWith(replacement, current_iterator());
 
   Definition* cursor = replacement;
@@ -262,20 +262,22 @@ void JitCallSpecializer::LowerContextAllocation(Definition* alloc,
     initial_value = new (Z) Value(flow_graph()->constant_null());
   }
   StoreInstanceFieldInstr* store = new (Z) StoreInstanceFieldInstr(
-      Context::parent_offset(), new (Z) Value(replacement), initial_value,
+      NativeFieldDesc::Context_parent(), new (Z) Value(replacement), initial_value,
       kNoStoreBarrier, alloc->token_pos());
   // Storing into uninitialized memory; remember to prevent dead store
   // elimination and ensure proper GC barrier.
   store->set_is_initialization(true);
-  flow_graph()->InsertAfter(cursor, store, NULL, FlowGraph::kEffect);
+  flow_graph()->InsertAfter(cursor, store, nullptr, FlowGraph::kEffect);
   cursor = replacement;
 
-  for (intptr_t i = 0; i < num_context_variables; ++i) {
-    if (context_value != NULL) {
+  for (auto variable : context_scope->context_variables()) {
+    const auto& field = NativeFieldDesc::GetContextVariableFieldFor(variable);
+    if (context_value != nullptr) {
       LoadFieldInstr* load = new (Z) LoadFieldInstr(
-          context_value->CopyWithType(Z), Context::variable_offset(i),
-          AbstractType::ZoneHandle(Z), alloc->token_pos());
-      flow_graph()->InsertAfter(cursor, load, NULL, FlowGraph::kValue);
+          context_value->CopyWithType(Z),
+          field,
+          alloc->token_pos());
+      flow_graph()->InsertAfter(cursor, load, nullptr, FlowGraph::kValue);
       cursor = load;
       initial_value = new (Z) Value(load);
     } else {
@@ -283,27 +285,22 @@ void JitCallSpecializer::LowerContextAllocation(Definition* alloc,
     }
 
     store = new (Z) StoreInstanceFieldInstr(
-        Context::variable_offset(i), new (Z) Value(replacement), initial_value,
+        field, new (Z) Value(replacement), initial_value,
         kNoStoreBarrier, alloc->token_pos());
     // Storing into uninitialized memory; remember to prevent dead store
     // elimination and ensure proper GC barrier.
     store->set_is_initialization(true);
-    flow_graph()->InsertAfter(cursor, store, NULL, FlowGraph::kEffect);
+    flow_graph()->InsertAfter(cursor, store, nullptr, FlowGraph::kEffect);
     cursor = store;
   }
 }
 
 void JitCallSpecializer::VisitAllocateContext(AllocateContextInstr* instr) {
-  LowerContextAllocation(instr, instr->num_context_variables(), NULL);
+  LowerContextAllocation(instr, instr->context_scope(), nullptr);
 }
 
 void JitCallSpecializer::VisitCloneContext(CloneContextInstr* instr) {
-  if (instr->num_context_variables() ==
-      CloneContextInstr::kUnknownContextSize) {
-    return;
-  }
-
-  LowerContextAllocation(instr, instr->num_context_variables(),
+  LowerContextAllocation(instr, instr->context_scope(),
                          instr->context_value());
 }
 

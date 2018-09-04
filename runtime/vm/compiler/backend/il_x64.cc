@@ -2582,7 +2582,7 @@ void AllocateContextInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   ASSERT(locs()->temp(0).reg() == R10);
   ASSERT(locs()->out(0).reg() == RAX);
 
-  __ LoadImmediate(R10, Immediate(num_context_variables()));
+  __ LoadImmediate(R10, Immediate(context_scope()->num_context_variables()));
   compiler->GenerateCall(token_pos(), *StubCode::AllocateContext_entry(),
                          RawPcDescriptors::kOther, locs());
 }

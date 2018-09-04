@@ -827,13 +827,12 @@ Definition* EffectGraphVisitor::BuildStoreLocal(const LocalVariable& local,
     ASSERT(delta >= 0);
     Value* context = Bind(BuildCurrentContext(token_pos));
     while (delta-- > 0) {
-      context = Bind(new (Z) LoadFieldInstr(context, Context::parent_offset(),
-                                            Type::ZoneHandle(Z, Type::null()),
+      context = Bind(new (Z) LoadFieldInstr(context, NativeFieldDesc::Context_parent(),
                                             token_pos));
     }
     Value* tmp_val = Bind(new (Z) LoadLocalInstr(*tmp_var, token_pos));
     StoreInstanceFieldInstr* store = new (Z)
-        StoreInstanceFieldInstr(Context::variable_offset(local.index().value()),
+        StoreInstanceFieldInstr(NativeFieldDesc::GetContextVariableFieldFor(&local),
                                 context, tmp_val, kEmitStoreBarrier, token_pos);
     Do(store);
     return ExitTempLocalScope(value);
@@ -851,8 +850,7 @@ Definition* EffectGraphVisitor::BuildLoadLocal(const LocalVariable& local,
     ASSERT(delta >= 0);
     Value* context = Bind(BuildCurrentContext(token_pos));
     while (delta-- > 0) {
-      context = Bind(new (Z) LoadFieldInstr(context, Context::parent_offset(),
-                                            Type::ZoneHandle(Z, Type::null()),
+      context = Bind(new (Z) LoadFieldInstr(context, NativeFieldDesc::Context_parent(),
                                             token_pos));
     }
     LoadFieldInstr* load = new (Z)
@@ -2300,7 +2298,7 @@ void EffectGraphVisitor::VisitClosureNode(ClosureNode* node) {
           Bind(new (Z) LoadLocalInstr(*closure_tmp_var, node->token_pos()));
       Value* type_arguments = BuildInstantiatorTypeArguments(node->token_pos());
       Do(new (Z) StoreInstanceFieldInstr(
-          Closure::instantiator_type_arguments_offset(), closure_tmp_val,
+          NativeFieldDesc::Closure_instantiator_type_arguments(), closure_tmp_val,
           type_arguments, kEmitStoreBarrier, node->token_pos()));
     }
 
@@ -2310,7 +2308,7 @@ void EffectGraphVisitor::VisitClosureNode(ClosureNode* node) {
           Bind(new (Z) LoadLocalInstr(*closure_tmp_var, node->token_pos()));
       Value* type_arguments = BuildFunctionTypeArguments(node->token_pos());
       Do(new (Z) StoreInstanceFieldInstr(
-          Closure::function_type_arguments_offset(), closure_tmp_val,
+          NativeFieldDesc::Closure_function_type_arguments(), closure_tmp_val,
           type_arguments, kEmitStoreBarrier, node->token_pos()));
     }
 
@@ -2321,7 +2319,7 @@ void EffectGraphVisitor::VisitClosureNode(ClosureNode* node) {
       Value* type_arguments =
           Bind(new (Z) ConstantInstr(Object::empty_type_arguments()));
       Do(new (Z) StoreInstanceFieldInstr(
-          Closure::delayed_type_arguments_offset(), closure_tmp_val,
+          NativeFieldDesc::Closure_delayed_type_arguments(), closure_tmp_val,
           type_arguments, kEmitStoreBarrier, node->token_pos()));
     }
 
@@ -2330,14 +2328,15 @@ void EffectGraphVisitor::VisitClosureNode(ClosureNode* node) {
         Bind(new (Z) LoadLocalInstr(*closure_tmp_var, node->token_pos()));
     Value* func_val =
         Bind(new (Z) ConstantInstr(Function::ZoneHandle(Z, function.raw())));
-    Do(new (Z) StoreInstanceFieldInstr(Closure::function_offset(),
+    Do(new (Z) StoreInstanceFieldInstr(NativeFieldDesc::Closure_function(),
                                        closure_tmp_val, func_val,
                                        kEmitStoreBarrier, node->token_pos()));
     if (is_implicit) {
       // Create new context containing the receiver.
-      const intptr_t kNumContextVariables = 1;  // The receiver.
+      const LocalScope* implicit_scope = nullptr;
+      UNREACHABLE();
       Value* allocated_context = Bind(new (Z) AllocateContextInstr(
-          node->token_pos(), kNumContextVariables));
+          node->token_pos(), implicit_scope));
       {
         LocalVariable* context_tmp_var = EnterTempLocalScope(allocated_context);
         // Store receiver in context.
@@ -2348,7 +2347,7 @@ void EffectGraphVisitor::VisitClosureNode(ClosureNode* node) {
         Append(for_receiver);
         Value* receiver = for_receiver.value();
         Do(new (Z) StoreInstanceFieldInstr(
-            Context::variable_offset(0), context_tmp_val, receiver,
+            NativeFieldDesc::GetContextVariableFieldFor(implicit_scope->context_variables()[0]), context_tmp_val, receiver,
             kEmitStoreBarrier, node->token_pos()));
         // Store new context in closure.
         closure_tmp_val =
@@ -2356,7 +2355,7 @@ void EffectGraphVisitor::VisitClosureNode(ClosureNode* node) {
         context_tmp_val =
             Bind(new (Z) LoadLocalInstr(*context_tmp_var, node->token_pos()));
         Do(new (Z) StoreInstanceFieldInstr(
-            Closure::context_offset(), closure_tmp_val, context_tmp_val,
+            NativeFieldDesc::Closure_context(), closure_tmp_val, context_tmp_val,
             kEmitStoreBarrier, node->token_pos()));
         Do(ExitTempLocalScope(allocated_context));
       }
@@ -2365,7 +2364,7 @@ void EffectGraphVisitor::VisitClosureNode(ClosureNode* node) {
       closure_tmp_val =
           Bind(new (Z) LoadLocalInstr(*closure_tmp_var, node->token_pos()));
       Value* context = Bind(BuildCurrentContext(node->token_pos()));
-      Do(new (Z) StoreInstanceFieldInstr(Closure::context_offset(),
+      Do(new (Z) StoreInstanceFieldInstr(NativeFieldDesc::Closure_context(),
                                          closure_tmp_val, context,
                                          kEmitStoreBarrier, node->token_pos()));
     }
@@ -2579,7 +2578,7 @@ void EffectGraphVisitor::VisitInitStaticFieldNode(InitStaticFieldNode* node) {
 void EffectGraphVisitor::VisitCloneContextNode(CloneContextNode* node) {
   Value* context = Bind(BuildCurrentContext(node->token_pos()));
   Value* clone = Bind(new (Z) CloneContextInstr(
-      node->token_pos(), context, node->scope()->num_context_variables(),
+      node->token_pos(), context, node->scope(),
       owner()->GetNextDeoptId()));
   Do(BuildStoreContext(clone, node->token_pos()));
 }
@@ -3122,7 +3121,7 @@ void ValueGraphVisitor::VisitStaticSetterNode(StaticSetterNode* node) {
   BuildStaticSetter(node, true);  // Result needed.
 }
 
-static const NativeFieldDesc* NativeFieldForLengthGetter(
+static const NativeFieldDesc& NativeFieldForLengthGetter(
     MethodRecognizer::Kind kind) {
   switch (kind) {
     case MethodRecognizer::kObjectArrayLength:
@@ -3140,7 +3139,7 @@ static const NativeFieldDesc* NativeFieldForLengthGetter(
 
     default:
       UNREACHABLE();
-      return 0;
+      return NativeFieldDesc::Array_length();
   }
 }
 
@@ -3153,7 +3152,7 @@ LoadLocalInstr* EffectGraphVisitor::BuildLoadThisVar(LocalScope* scope,
 
 LoadFieldInstr* EffectGraphVisitor::BuildNativeGetter(
     NativeBodyNode* node,
-    const NativeFieldDesc* native_field) {
+    const NativeFieldDesc& native_field) {
   Value* receiver = Bind(BuildLoadThisVar(node->scope(), node->token_pos()));
   LoadFieldInstr* load =
       new (Z) LoadFieldInstr(receiver, native_field, node->token_pos());
@@ -3335,7 +3334,7 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
       }
       case MethodRecognizer::kLinkedHashMap_setIndex: {
         return ReturnDefinition(DoNativeSetterStoreValue(
-            node, *NativeFieldDesc::LinkedHashMap_index(), kEmitStoreBarrier));
+            node, NativeFieldDesc::LinkedHashMap_index(), kEmitStoreBarrier));
       }
       case MethodRecognizer::kLinkedHashMap_getData: {
         return ReturnDefinition(
@@ -3343,7 +3342,7 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
       }
       case MethodRecognizer::kLinkedHashMap_setData: {
         return ReturnDefinition(DoNativeSetterStoreValue(
-            node, *NativeFieldDesc::LinkedHashMap_data(), kEmitStoreBarrier));
+            node, NativeFieldDesc::LinkedHashMap_data(), kEmitStoreBarrier));
       }
       case MethodRecognizer::kLinkedHashMap_getHashMask: {
         return ReturnDefinition(BuildNativeGetter(
@@ -3352,7 +3351,7 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
       case MethodRecognizer::kLinkedHashMap_setHashMask: {
         // Smi field; no barrier needed.
         return ReturnDefinition(DoNativeSetterStoreValue(
-            node, *NativeFieldDesc::LinkedHashMap_hash_mask(), kNoStoreBarrier));
+            node, NativeFieldDesc::LinkedHashMap_hash_mask(), kNoStoreBarrier));
       }
       case MethodRecognizer::kLinkedHashMap_getUsedData: {
         return ReturnDefinition(BuildNativeGetter(
@@ -3361,7 +3360,7 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
       case MethodRecognizer::kLinkedHashMap_setUsedData: {
         // Smi field; no barrier needed.
         return ReturnDefinition(DoNativeSetterStoreValue(
-            node, *NativeFieldDesc::LinkedHashMap_used_data(), kNoStoreBarrier));
+            node, NativeFieldDesc::LinkedHashMap_used_data(), kNoStoreBarrier));
       }
       case MethodRecognizer::kLinkedHashMap_getDeletedKeys: {
         return ReturnDefinition(BuildNativeGetter(
@@ -3371,7 +3370,7 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
       case MethodRecognizer::kLinkedHashMap_setDeletedKeys: {
         // Smi field; no barrier needed.
         return ReturnDefinition(DoNativeSetterStoreValue(
-            node, *NativeFieldDesc::LinkedHashMap_deleted_keys(), kNoStoreBarrier));
+            node, NativeFieldDesc::LinkedHashMap_deleted_keys(), kNoStoreBarrier));
       }
       default:
         break;
@@ -3728,7 +3727,7 @@ void EffectGraphVisitor::UnchainContexts(intptr_t n) {
   if (n > 0) {
     Value* context = Bind(BuildCurrentContext(token_pos));
     while (n-- > 0) {
-      context = Bind(new (Z) LoadFieldInstr(context, Context::parent_offset(),
+      context = Bind(new (Z) LoadFieldInstr(context, NativeFieldDesc::Context_parent(),
                                             // Not an instance, no type.
                                             Type::ZoneHandle(Z, Type::null()),
                                             token_pos));
@@ -3782,7 +3781,7 @@ void EffectGraphVisitor::VisitSequenceNode(SequenceNode* node) {
     // Allocate and chain a new context (Except don't chain when at the function
     // entry if the function does not capture any variables from outer scopes).
     Value* allocated_context = Bind(
-        new (Z) AllocateContextInstr(node->token_pos(), num_context_variables));
+        new (Z) AllocateContextInstr(node->token_pos(), scope));
     {
       LocalVariable* tmp_var = EnterTempLocalScope(allocated_context);
       if (!is_top_level_sequence || HasContextScope()) {
@@ -3792,7 +3791,7 @@ void EffectGraphVisitor::VisitSequenceNode(SequenceNode* node) {
         Value* tmp_val =
             Bind(new (Z) LoadLocalInstr(*tmp_var, node->token_pos()));
         Value* parent_context = Bind(BuildCurrentContext(node->token_pos()));
-        Do(new (Z) StoreInstanceFieldInstr(Context::parent_offset(), tmp_val,
+        Do(new (Z) StoreInstanceFieldInstr(NativeFieldDesc::Context_parent(), tmp_val,
                                            parent_context, kEmitStoreBarrier,
                                            node->token_pos()));
       }

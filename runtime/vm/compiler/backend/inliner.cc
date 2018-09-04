@@ -3772,7 +3772,7 @@ bool FlowGraphInliner::TryInlineRecognizedMethod(
       ASSERT(call->IsStaticCall() ||
              (ic_data == NULL || ic_data->NumberOfChecksIs(1)));
       return InlineGrowableArraySetter(
-          flow_graph, *NativeFieldDesc::GrowableObjectArray_data(), kEmitStoreBarrier,
+          flow_graph, NativeFieldDesc::GrowableObjectArray_data(), kEmitStoreBarrier,
           call, receiver, entry, last);
     case MethodRecognizer::kGrowableArraySetLength:
       ASSERT((receiver_cid == kGrowableObjectArrayCid) ||
@@ -3780,7 +3780,7 @@ bool FlowGraphInliner::TryInlineRecognizedMethod(
       ASSERT(call->IsStaticCall() ||
              (ic_data == NULL || ic_data->NumberOfChecksIs(1)));
       return InlineGrowableArraySetter(
-          flow_graph, *NativeFieldDesc::GrowableObjectArray_length(), kNoStoreBarrier,
+          flow_graph, NativeFieldDesc::GrowableObjectArray_length(), kNoStoreBarrier,
           call, receiver, entry, last);
     case MethodRecognizer::kSmi_bitAndFromSmi:
       return InlineSmiBitAndFromSmi(flow_graph, call, receiver, entry, last);

@@ -1,4 +1,4 @@
-// Copyright (c) 2016, the Dart project authors.  Please see the AUTHORS file
+// Copyright (c) 2016, the Dart project authors.  Please see the AUTHORp file
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
@@ -67,16 +67,15 @@ FlowGraphBuilder::FlowGraphBuilder(
 FlowGraphBuilder::~FlowGraphBuilder() {}
 
 Fragment FlowGraphBuilder::EnterScope(intptr_t kernel_offset,
-                                      intptr_t* num_context_variables) {
+                                      const LocalScope** context_scope /* = nullptr */) {
   Fragment instructions;
-  const intptr_t context_size =
-      scopes_->scopes.Lookup(kernel_offset)->num_context_variables();
-  if (context_size > 0) {
-    instructions += PushContext(context_size);
+  const LocalScope* scope = scopes_->scopes.Lookup(kernel_offset);
+  if (scope->num_context_variables() > 0) {
+    instructions += PushContext(scope);
     instructions += Drop();
   }
-  if (num_context_variables != NULL) {
-    *num_context_variables = context_size;
+  if (context_scope != nullptr) {
+    *context_scope = scope;
   }
   return instructions;
 }
@@ -104,14 +103,14 @@ Fragment FlowGraphBuilder::AdjustContextTo(int depth) {
   return instructions;
 }
 
-Fragment FlowGraphBuilder::PushContext(int size) {
-  ASSERT(size > 0);
-  Fragment instructions = AllocateContext(size);
+Fragment FlowGraphBuilder::PushContext(const LocalScope* scope) {
+  ASSERT(scope->num_context_variables() > 0);
+  Fragment instructions = AllocateContext(scope);
   LocalVariable* context = MakeTemporary();
   instructions += LoadLocal(context);
   instructions += LoadLocal(parsed_function_->current_context_var());
   instructions +=
-      StoreInstanceField(TokenPosition::kNoSource, Context::parent_offset());
+      StoreInstanceField(TokenPosition::kNoSource, NativeFieldDesc::Context_parent());
   instructions += StoreLocal(TokenPosition::kNoSource,
                              parsed_function_->current_context_var());
   ++context_depth_;
@@ -274,14 +273,14 @@ Fragment FlowGraphBuilder::CatchBlockEntry(const Array& handler_types,
     instructions += LoadLocal(raw_exception_var);
     instructions += StoreInstanceField(
         TokenPosition::kNoSource,
-        Context::variable_offset(exception_var->index().value()));
+        NativeFieldDesc::GetContextVariableFieldFor(exception_var));
   }
   if (stacktrace_var->is_captured()) {
     instructions += LoadLocal(context_variable);
     instructions += LoadLocal(raw_stacktrace_var);
     instructions += StoreInstanceField(
         TokenPosition::kNoSource,
-        Context::variable_offset(stacktrace_var->index().value()));
+        NativeFieldDesc::GetContextVariableFieldFor(stacktrace_var));
   }
 
   // :saved_try_context_var can be captured in the context of
@@ -329,13 +328,13 @@ Fragment FlowGraphBuilder::CheckStackOverflowInPrologue(
   return CheckStackOverflow(position);
 }
 
-Fragment FlowGraphBuilder::CloneContext(intptr_t num_context_variables) {
+Fragment FlowGraphBuilder::CloneContext(const LocalScope* scope) {
   LocalVariable* context_variable = parsed_function_->current_context_var();
 
   Fragment instructions = LoadLocal(context_variable);
 
   CloneContextInstr* clone_instruction = new (Z) CloneContextInstr(
-      TokenPosition::kNoSource, Pop(), num_context_variables, GetNextDeoptId());
+      TokenPosition::kNoSource, Pop(), scope, GetNextDeoptId());
   instructions <<= clone_instruction;
   Push(clone_instruction);
 
@@ -874,7 +873,7 @@ Fragment FlowGraphBuilder::NativeFunctionBody(const Function& function,
       body += LoadLocal(scopes_->this_variable);
       body += LoadLocal(first_parameter);
       body += StoreInstanceField(TokenPosition::kNoSource,
-                                 *NativeFieldDesc::LinkedHashMap_index());
+                                 NativeFieldDesc::LinkedHashMap_index());
       body += NullConstant();
       break;
     case MethodRecognizer::kLinkedHashMap_getData:
@@ -885,7 +884,7 @@ Fragment FlowGraphBuilder::NativeFunctionBody(const Function& function,
       body += LoadLocal(scopes_->this_variable);
       body += LoadLocal(first_parameter);
       body += StoreInstanceField(TokenPosition::kNoSource,
-                                 *NativeFieldDesc::LinkedHashMap_data());
+                                 NativeFieldDesc::LinkedHashMap_data());
       body += NullConstant();
       break;
     case MethodRecognizer::kLinkedHashMap_getHashMask:
@@ -896,7 +895,7 @@ Fragment FlowGraphBuilder::NativeFunctionBody(const Function& function,
       body += LoadLocal(scopes_->this_variable);
       body += LoadLocal(first_parameter);
       body += StoreInstanceField(TokenPosition::kNoSource,
-                                 *NativeFieldDesc::LinkedHashMap_hash_mask(),
+                                 NativeFieldDesc::LinkedHashMap_hash_mask(),
                                  kNoStoreBarrier);
       body += NullConstant();
       break;
@@ -908,7 +907,7 @@ Fragment FlowGraphBuilder::NativeFunctionBody(const Function& function,
       body += LoadLocal(scopes_->this_variable);
       body += LoadLocal(first_parameter);
       body += StoreInstanceField(TokenPosition::kNoSource,
-                                 *NativeFieldDesc::LinkedHashMap_used_data(),
+                                 NativeFieldDesc::LinkedHashMap_used_data(),
                                  kNoStoreBarrier);
       body += NullConstant();
       break;
@@ -920,7 +919,7 @@ Fragment FlowGraphBuilder::NativeFunctionBody(const Function& function,
       body += LoadLocal(scopes_->this_variable);
       body += LoadLocal(first_parameter);
       body += StoreInstanceField(TokenPosition::kNoSource,
-                                 *NativeFieldDesc::LinkedHashMap_deleted_keys(),
+                                 NativeFieldDesc::LinkedHashMap_deleted_keys(),
                                  kNoStoreBarrier);
       body += NullConstant();
       break;
@@ -943,6 +942,23 @@ Fragment FlowGraphBuilder::NativeFunctionBody(const Function& function,
   return body + Return(TokenPosition::kNoSource, omit_result_type_check);
 }
 
+static const LocalScope* MakeImplicitClosureScope() {
+#if 0
+  Class& klass = Class::Handle(Z, function.Owner());
+  Type& klass_type = H.GetCanonicalType(klass);
+  result_->this_variable =
+      MakeVariable(TokenPosition::kNoSource, TokenPosition::kNoSource,
+                   Symbols::This(), klass_type);
+  result_->this_variable->set_is_captured();
+  enclosing_scope = new (Z) LocalScope(NULL, 0, 0);
+  enclosing_scope->set_context_level(0);
+  enclosing_scope->AddVariable(result_->this_variable);
+  enclosing_scope->AddContextVariable(result_->this_variable);
+#endif
+  UNREACHABLE();
+  return nullptr;
+}
+
 Fragment FlowGraphBuilder::BuildImplicitClosureCreation(
     const Function& target) {
   Fragment fragment;
@@ -957,7 +973,7 @@ Fragment FlowGraphBuilder::BuildImplicitClosureCreation(
     fragment += LoadInstantiatorTypeArguments();
     fragment +=
         StoreInstanceField(TokenPosition::kNoSource,
-                           Closure::instantiator_type_arguments_offset());
+                           NativeFieldDesc::Closure_instantiator_type_arguments());
   }
 
   // The function signature cannot have uninstantiated function type parameters,
@@ -965,31 +981,33 @@ Fragment FlowGraphBuilder::BuildImplicitClosureCreation(
   ASSERT(target.HasInstantiatedSignature(kFunctions));
 
   // Allocate a context that closes over `this`.
-  fragment += AllocateContext(1);
+  // Note: this must be kept in sync with ScopeBuilder::BuildScopes.
+  const LocalScope* implicit_closure_scope = MakeImplicitClosureScope();
+  fragment += AllocateContext(implicit_closure_scope);
   LocalVariable* context = MakeTemporary();
 
   // Store the function and the context in the closure.
   fragment += LoadLocal(closure);
   fragment += Constant(target);
   fragment +=
-      StoreInstanceField(TokenPosition::kNoSource, Closure::function_offset());
+      StoreInstanceField(TokenPosition::kNoSource, NativeFieldDesc::Closure_function());
 
   fragment += LoadLocal(closure);
   fragment += LoadLocal(context);
   fragment +=
-      StoreInstanceField(TokenPosition::kNoSource, Closure::context_offset());
+      StoreInstanceField(TokenPosition::kNoSource, NativeFieldDesc::Closure_context());
 
   fragment += LoadLocal(closure);
   fragment += Constant(Object::empty_type_arguments());
   fragment += StoreInstanceField(TokenPosition::kNoSource,
-                                 Closure::delayed_type_arguments_offset());
+                                 NativeFieldDesc::Closure_delayed_type_arguments());
 
   // The context is on top of the operand stack.  Store `this`.  The context
   // doesn't need a parent pointer because it doesn't close over anything
   // else.
   fragment += LoadLocal(scopes_->this_variable);
   fragment +=
-      StoreInstanceField(TokenPosition::kNoSource, Context::variable_offset(0));
+      StoreInstanceField(TokenPosition::kNoSource, NativeFieldDesc::GetContextVariableFieldFor(implicit_closure_scope->context_variables()[0]));
 
   return fragment;
 }

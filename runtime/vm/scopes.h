@@ -305,7 +305,13 @@ class LocalScope : public ZoneAllocated {
 
   // The number of variables allocated in the context and belonging to this
   // scope and to its children at the same loop level.
-  int num_context_variables() const { return num_context_variables_; }
+  int num_context_variables() const { return context_variables_.length(); }
+
+  const GrowableArray<LocalVariable*>& context_variables() const {
+    return context_variables_;
+  }
+
+  void AddContextVariable(LocalVariable* var);
 
   // Add a variable to the scope. Returns false if a variable with the
   // same name is already present.
@@ -437,11 +443,13 @@ class LocalScope : public ZoneAllocated {
   int function_level_;         // Reflects the nesting level of local functions.
   int loop_level_;             // Reflects the loop nesting level.
   int context_level_;          // Reflects the level of the runtime context.
-  int num_context_variables_;  // Only set if this scope is a context owner.
   TokenPosition begin_token_pos_;  // Token index of beginning of scope.
   TokenPosition end_token_pos_;    // Token index of end of scope.
   GrowableArray<LocalVariable*> variables_;
   GrowableArray<SourceLabel*> labels_;
+
+  // Only set if this scope is a context owner.
+  GrowableArray<LocalVariable*> context_variables_;
 
   // List of names referenced in this scope and its children that
   // are not resolved to local variables.

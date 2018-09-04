@@ -4169,6 +4169,12 @@ class DebugStepCheckInstr : public TemplateInstruction<0, NoThrow> {
 
 #define NATIVE_FIELDS_LIST(V)                                                  \
   V(Array, length, Smi, IMMUTABLE)                                             \
+  V(Context, parent, Context, IMMUTABLE)                                       \
+  V(Closure, instantiator_type_arguments, TypeArguments, IMMUTABLE)            \
+  V(Closure, delayed_type_arguments, TypeArguments, IMMUTABLE)            \
+  V(Closure, function_type_arguments, TypeArguments, IMMUTABLE)            \
+  V(Closure, function, Function, IMMUTABLE)                                    \
+  V(Closure, context, Context, IMMUTABLE) \
   V(GrowableObjectArray, length, Smi, MUTABLE)                                 \
   V(GrowableObjectArray, data, Array, MUTABLE)                                 \
   V(TypedData, length, Smi, IMMUTABLE)                                         \
@@ -4193,17 +4199,19 @@ class NativeFieldDesc : public ZoneAllocated {
   // clang-format on
 
 #define DEFINE_GETTER(ClassName, FieldName, cid, mutability)                   \
-  static const NativeFieldDesc* ClassName##_##FieldName() {                    \
-    return Get(k##ClassName##_##FieldName);                                    \
+  static const NativeFieldDesc& ClassName##_##FieldName() {                    \
+    return Get(k##ClassName##_##FieldName);                                   \
   }
 
   NATIVE_FIELDS_LIST(DEFINE_GETTER)
 #undef DEFINE_GETTER
 
-  static const NativeFieldDesc* Get(Kind kind);
-  static const NativeFieldDesc* GetLengthFieldForArrayCid(intptr_t array_cid);
-  static const NativeFieldDesc* GetTypeArgumentsFieldFor(Zone* zone,
+  static const NativeFieldDesc& Get(Kind kind);
+  static const NativeFieldDesc& GetLengthFieldForArrayCid(intptr_t array_cid);
+  static const NativeFieldDesc& GetTypeArgumentsFieldFor(Zone* zone,
                                                          const Class& cls);
+
+  static const NativeFieldDesc& GetContextVariableFieldFor(const LocalVariable* var);
 
   const char* name() const;
 
@@ -4266,19 +4274,6 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
                           TokenPosition token_pos)
       : native_field_(&field),
         offset_in_bytes_(field.offset_in_bytes()),
-        emit_store_barrier_(emit_store_barrier),
-        token_pos_(token_pos),
-        is_initialization_(false) {
-    SetInputAt(kInstancePos, instance);
-    SetInputAt(kValuePos, value);
-  }
-
-  StoreInstanceFieldInstr(intptr_t offset_in_bytes,
-                          Value* instance,
-                          Value* value,
-                          StoreBarrierType emit_store_barrier,
-                          TokenPosition token_pos)
-      : offset_in_bytes_(offset_in_bytes),
         emit_store_barrier_(emit_store_barrier),
         token_pos_(token_pos),
         is_initialization_(false) {
@@ -5189,13 +5184,13 @@ class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
   }
 
   LoadFieldInstr(Value* instance,
-                 const NativeFieldDesc* native_field,
+                 const NativeFieldDesc& native_field,
                  TokenPosition token_pos)
-      : offset_in_bytes_(native_field->offset_in_bytes()),
-        type_(AbstractType::ZoneHandle(native_field->type())),
-        result_cid_(native_field->cid()),
-        immutable_(native_field->is_immutable()),
-        native_field_(native_field),
+      : offset_in_bytes_(native_field.offset_in_bytes()),
+        type_(AbstractType::ZoneHandle(native_field.type())),
+        result_cid_(native_field.cid()),
+        immutable_(native_field.is_immutable()),
+        native_field_(&native_field),
         field_(nullptr),
         token_pos_(token_pos) {
     ASSERT(offset_in_bytes_ >= 0);
@@ -5373,14 +5368,14 @@ class InstantiateTypeArgumentsInstr : public TemplateDefinition<2, Throws> {
 
 class AllocateContextInstr : public TemplateAllocation<0, NoThrow> {
  public:
-  AllocateContextInstr(TokenPosition token_pos, intptr_t num_context_variables)
-      : token_pos_(token_pos), num_context_variables_(num_context_variables) {}
+  AllocateContextInstr(TokenPosition token_pos, const LocalScope* context_scope)
+      : token_pos_(token_pos), context_scope_(context_scope) {}
 
   DECLARE_INSTRUCTION(AllocateContext)
   virtual CompileType ComputeType() const;
 
   virtual TokenPosition token_pos() const { return token_pos_; }
-  intptr_t num_context_variables() const { return num_context_variables_; }
+  const LocalScope* context_scope() const { return context_scope_; }
 
   virtual bool ComputeCanDeoptimize() const { return false; }
 
@@ -5388,14 +5383,14 @@ class AllocateContextInstr : public TemplateAllocation<0, NoThrow> {
 
   virtual bool WillAllocateNewOrRemembered() const {
     return Heap::IsAllocatableInNewSpace(
-        Context::InstanceSize(num_context_variables_));
+        Context::InstanceSize(context_scope()->num_context_variables()));
   }
 
   PRINT_OPERANDS_TO_SUPPORT
 
  private:
   const TokenPosition token_pos_;
-  const intptr_t num_context_variables_;
+  const LocalScope* context_scope_;
 
   DISALLOW_COPY_AND_ASSIGN(AllocateContextInstr);
 };
@@ -5427,19 +5422,18 @@ class CloneContextInstr : public TemplateDefinition<1, NoThrow> {
  public:
   CloneContextInstr(TokenPosition token_pos,
                     Value* context_value,
-                    intptr_t num_context_variables,
+                    const LocalScope* context_scope,
                     intptr_t deopt_id)
       : TemplateDefinition(deopt_id),
         token_pos_(token_pos),
-        num_context_variables_(num_context_variables) {
+        context_scope_(context_scope) {
     SetInputAt(0, context_value);
   }
 
-  static const intptr_t kUnknownContextSize = -1;
-
   virtual TokenPosition token_pos() const { return token_pos_; }
   Value* context_value() const { return inputs_[0]; }
-  intptr_t num_context_variables() const { return num_context_variables_; }
+
+  const LocalScope* context_scope() const { return context_scope_; }
 
   DECLARE_INSTRUCTION(CloneContext)
   virtual CompileType ComputeType() const;
@@ -5450,7 +5444,7 @@ class CloneContextInstr : public TemplateDefinition<1, NoThrow> {
 
  private:
   const TokenPosition token_pos_;
-  const intptr_t num_context_variables_;
+  const LocalScope* context_scope_;
 
   DISALLOW_COPY_AND_ASSIGN(CloneContextInstr);
 };

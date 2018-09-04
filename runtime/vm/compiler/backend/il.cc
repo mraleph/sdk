@@ -734,7 +734,7 @@ intptr_t CheckClassInstr::ComputeCidMask() const {
   return mask;
 }
 
-const NativeFieldDesc* NativeFieldDesc::Get(Kind kind) {
+const NativeFieldDesc& NativeFieldDesc::Get(Kind kind) {
   static const NativeFieldDesc fields[] = {
 #define IMMUTABLE true
 #define MUTABLE false
@@ -749,10 +749,10 @@ const NativeFieldDesc* NativeFieldDesc::Get(Kind kind) {
 #undef IMMUTABLE
   };
 
-  return &fields[kind];
+  return fields[kind];
 }
 
-const NativeFieldDesc* NativeFieldDesc::GetLengthFieldForArrayCid(
+const NativeFieldDesc& NativeFieldDesc::GetLengthFieldForArrayCid(
     intptr_t array_cid) {
   if (RawObject::IsExternalTypedDataClassId(array_cid) ||
       RawObject::IsTypedDataClassId(array_cid)) {
@@ -775,18 +775,18 @@ const NativeFieldDesc* NativeFieldDesc::GetLengthFieldForArrayCid(
 
     default:
       UNREACHABLE();
-      return nullptr;
+      return Get(kArray_length);
   }
 }
 
-const NativeFieldDesc* NativeFieldDesc::GetTypeArgumentsFieldFor(
+const NativeFieldDesc& NativeFieldDesc::GetTypeArgumentsFieldFor(
     Zone* zone,
     const Class& cls) {
   // TODO(vegorov) consider caching type arguments fields for specific classes
   // in some sort of a flow-graph specific cache.
   const intptr_t offset = cls.type_arguments_field_offset();
   ASSERT(offset != Class::kNoTypeArguments);
-  return new (zone) NativeFieldDesc(kTypeArguments, offset, kDynamicCid,
+  return *new (zone) NativeFieldDesc(kTypeArguments, offset, kDynamicCid,
                                     /*immutable=*/true);
 }
 
@@ -2551,6 +2551,12 @@ bool LoadFieldInstr::IsImmutableLengthLoad() const {
       case NativeFieldDesc::kArgumentsDescriptor_type_args_len:
       case NativeFieldDesc::kTypeArguments:
       case NativeFieldDesc::kGrowableObjectArray_data:
+      case NativeFieldDesc::kContext_parent:
+      case NativeFieldDesc::kClosure_context:
+      case NativeFieldDesc::kClosure_delayed_type_arguments:
+      case NativeFieldDesc::kClosure_function:
+      case NativeFieldDesc::kClosure_function_type_arguments:
+      case NativeFieldDesc::kClosure_instantiator_type_arguments:
         return false;
     }
   }
@@ -2650,7 +2656,7 @@ Definition* LoadFieldInstr::Canonicalize(FlowGraph* flow_graph) {
         return call->ArgumentAt(1);
       }
     } else if (CreateArrayInstr* create_array = array->AsCreateArray()) {
-      if (native_field() == NativeFieldDesc::Array_length()) {
+      if (native_field()->kind() == NativeFieldDesc::kArray_length) {
         return create_array->num_elements()->definition();
       }
     } else if (LoadFieldInstr* load_array = array->AsLoadField()) {
@@ -2685,7 +2691,7 @@ Definition* LoadFieldInstr::Canonicalize(FlowGraph* flow_graph) {
             AbstractType::Handle(field->type()).arguments()));
       } else if (const NativeFieldDesc* native_field =
                      load_array->native_field()) {
-        if (native_field == NativeFieldDesc::LinkedHashMap_data()) {
+        if (native_field->kind() == NativeFieldDesc::kLinkedHashMap_data) {
           return flow_graph->constant_null();
         }
       }

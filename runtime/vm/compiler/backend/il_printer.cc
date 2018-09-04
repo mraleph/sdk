@@ -711,7 +711,7 @@ void InstantiateTypeArgumentsInstr::PrintOperandsTo(BufferFormatter* f) const {
 }
 
 void AllocateContextInstr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("%" Pd "", num_context_variables());
+  f->Print("%d", context_scope()->num_context_variables());
 }
 
 void AllocateUninitializedContextInstr::PrintOperandsTo(

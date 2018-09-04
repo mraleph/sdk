@@ -2703,7 +2703,13 @@ void LoadFieldInstr::InferRange(RangeAnalysis* analysis, Range* range) {
       case NativeFieldDesc::kLinkedHashMap_index:
       case NativeFieldDesc::kLinkedHashMap_data:
       case NativeFieldDesc::kGrowableObjectArray_data:
+      case NativeFieldDesc::kContext_parent:
       case NativeFieldDesc::kTypeArguments:
+      case NativeFieldDesc::kClosure_context:
+      case NativeFieldDesc::kClosure_delayed_type_arguments:
+      case NativeFieldDesc::kClosure_function:
+      case NativeFieldDesc::kClosure_function_type_arguments:
+      case NativeFieldDesc::kClosure_instantiator_type_arguments:
         // Not an integer valued field.
         UNREACHABLE();
         break;

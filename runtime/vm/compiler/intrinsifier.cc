@@ -1017,7 +1017,7 @@ bool Intrinsifier::Build_GrowableArraySetData(FlowGraph* flow_graph) {
                                              *value_check, builder.TokenPos()));
 
   builder.AddInstruction(new StoreInstanceFieldInstr(
-      *NativeFieldDesc::GrowableObjectArray_data(), new Value(growable_array),
+      NativeFieldDesc::GrowableObjectArray_data(), new Value(growable_array),
       new Value(data), kEmitStoreBarrier, builder.TokenPos()));
   // Return null.
   Definition* null_def = builder.AddNullDefinition();
@@ -1036,7 +1036,7 @@ bool Intrinsifier::Build_GrowableArraySetLength(FlowGraph* flow_graph) {
   builder.AddInstruction(
       new CheckSmiInstr(new Value(length), DeoptId::kNone, builder.TokenPos()));
   builder.AddInstruction(new StoreInstanceFieldInstr(
-      *NativeFieldDesc::GrowableObjectArray_length(), new Value(growable_array),
+      NativeFieldDesc::GrowableObjectArray_length(), new Value(growable_array),
       new Value(length), kNoStoreBarrier, builder.TokenPos()));
   Definition* null_def = builder.AddNullDefinition();
   builder.AddIntrinsicReturn(new Value(null_def));

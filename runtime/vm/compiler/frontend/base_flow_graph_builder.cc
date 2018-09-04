@@ -321,7 +321,7 @@ Fragment BaseFlowGraphBuilder::LoadIndexed(intptr_t index_scale) {
 }
 
 Fragment BaseFlowGraphBuilder::LoadNativeField(
-    const NativeFieldDesc* native_field) {
+    const NativeFieldDesc& native_field) {
   LoadFieldInstr* load =
       new (Z) LoadFieldInstr(Pop(), native_field, TokenPosition::kNoSource);
   Push(load);
@@ -368,19 +368,6 @@ const Field& BaseFlowGraphBuilder::MayCloneField(const Field& field) {
     ASSERT(field.IsZoneHandle());
     return field;
   }
-}
-
-Fragment BaseFlowGraphBuilder::StoreInstanceField(
-    TokenPosition position,
-    intptr_t offset,
-    StoreBarrierType emit_store_barrier) {
-  Value* value = Pop();
-  if (value->BindsToConstant()) {
-    emit_store_barrier = kNoStoreBarrier;
-  }
-  StoreInstanceFieldInstr* store = new (Z) StoreInstanceFieldInstr(
-      offset, Pop(), value, emit_store_barrier, position);
-  return Fragment(store);
 }
 
 Fragment BaseFlowGraphBuilder::StoreInstanceField(
@@ -471,7 +458,7 @@ Fragment BaseFlowGraphBuilder::StoreLocal(TokenPosition position,
     instructions += LoadContextAt(variable->owner()->context_level());
     instructions += LoadLocal(value);
     instructions += StoreInstanceField(
-        position, Context::variable_offset(variable->index().value()));
+        position, NativeFieldDesc::GetContextVariableFieldFor(variable));
     return instructions;
   }
   return StoreLocalRaw(position, variable);
@@ -674,9 +661,9 @@ Fragment BaseFlowGraphBuilder::BooleanNegate() {
   return Fragment(negate);
 }
 
-Fragment BaseFlowGraphBuilder::AllocateContext(intptr_t size) {
+Fragment BaseFlowGraphBuilder::AllocateContext(const LocalScope* scope) {
   AllocateContextInstr* allocate =
-      new (Z) AllocateContextInstr(TokenPosition::kNoSource, size);
+      new (Z) AllocateContextInstr(TokenPosition::kNoSource, scope);
   Push(allocate);
   return Fragment(allocate);
 }

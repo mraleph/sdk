@@ -1439,10 +1439,9 @@ Fragment StreamingFlowGraphBuilder::CheckStackOverflowInPrologue(
 Fragment StreamingFlowGraphBuilder::SetupCapturedParameters(
     const Function& dart_function) {
   Fragment body;
-  intptr_t context_size =
-      parsed_function()->node_sequence()->scope()->num_context_variables();
-  if (context_size > 0) {
-    body += flow_graph_builder_->PushContext(context_size);
+  const LocalScope* scope = parsed_function()->node_sequence()->scope();
+  if (scope->num_context_variables() > 0) {
+    body += flow_graph_builder_->PushContext(scope);
     LocalVariable* context = MakeTemporary();
 
     // Copy captured parameters from the stack into the context.
@@ -1468,7 +1467,7 @@ Fragment StreamingFlowGraphBuilder::SetupCapturedParameters(
         body += LoadLocal(&raw_parameter);
         body += flow_graph_builder_->StoreInstanceField(
             TokenPosition::kNoSource,
-            Context::variable_offset(variable->index().value()));
+            NativeFieldDesc::GetContextVariableFieldFor(variable));
         body += NullConstant();
         body += StoreLocal(TokenPosition::kNoSource, &raw_parameter);
         body += Drop();
@@ -2507,8 +2506,8 @@ Fragment StreamingFlowGraphBuilder::AllocateObject(
   return flow_graph_builder_->AllocateObject(klass, closure_function);
 }
 
-Fragment StreamingFlowGraphBuilder::AllocateContext(intptr_t size) {
-  return flow_graph_builder_->AllocateContext(size);
+Fragment StreamingFlowGraphBuilder::AllocateContext(const LocalScope* scope) {
+  return flow_graph_builder_->AllocateContext(scope);
 }
 
 Fragment StreamingFlowGraphBuilder::LoadField(intptr_t offset) {
@@ -2523,11 +2522,6 @@ Fragment StreamingFlowGraphBuilder::StoreLocal(TokenPosition position,
 Fragment StreamingFlowGraphBuilder::StoreStaticField(TokenPosition position,
                                                      const Field& field) {
   return flow_graph_builder_->StoreStaticField(position, field);
-}
-
-Fragment StreamingFlowGraphBuilder::StoreInstanceField(TokenPosition position,
-                                                       intptr_t offset) {
-  return flow_graph_builder_->StoreInstanceField(position, offset);
 }
 
 Fragment StreamingFlowGraphBuilder::StringInterpolate(TokenPosition position) {
@@ -2568,8 +2562,8 @@ Fragment StreamingFlowGraphBuilder::CheckStackOverflow(TokenPosition position) {
 }
 
 Fragment StreamingFlowGraphBuilder::CloneContext(
-    intptr_t num_context_variables) {
-  return flow_graph_builder_->CloneContext(num_context_variables);
+    const LocalScope* scope) {
+  return flow_graph_builder_->CloneContext(scope);
 }
 
 Fragment StreamingFlowGraphBuilder::TranslateFinallyFinalizers(
@@ -2750,8 +2744,8 @@ Fragment StreamingFlowGraphBuilder::CheckVariableTypeInCheckedMode(
 
 Fragment StreamingFlowGraphBuilder::EnterScope(
     intptr_t kernel_offset,
-    intptr_t* num_context_variables) {
-  return flow_graph_builder_->EnterScope(kernel_offset, num_context_variables);
+    const LocalScope** scope /* = nullptr */) {
+  return flow_graph_builder_->EnterScope(kernel_offset, scope);
 }
 
 Fragment StreamingFlowGraphBuilder::ExitScope(intptr_t kernel_offset) {
@@ -4806,37 +4800,37 @@ Fragment StreamingFlowGraphBuilder::BuildPartialTearoffInstantiation(
   instructions += LoadLocal(new_closure);
   instructions += LoadLocal(type_args_vec);
   instructions += StoreInstanceField(TokenPosition::kNoSource,
-                                     Closure::delayed_type_arguments_offset());
+                                     NativeFieldDesc::Closure_delayed_type_arguments());
 
   instructions += Drop();  // Drop type args.
 
   // Copy over the target function.
   instructions += LoadLocal(new_closure);
   instructions += LoadLocal(original_closure);
-  instructions += LoadField(Closure::function_offset());
+  instructions += LoadNativeField(NativeFieldDesc::Closure_function());
   instructions +=
-      StoreInstanceField(TokenPosition::kNoSource, Closure::function_offset());
+      StoreInstanceField(TokenPosition::kNoSource, NativeFieldDesc::Closure_function());
 
   // Copy over the instantiator type arguments.
   instructions += LoadLocal(new_closure);
   instructions += LoadLocal(original_closure);
-  instructions += LoadField(Closure::instantiator_type_arguments_offset());
+  instructions += LoadNativeField(NativeFieldDesc::Closure_instantiator_type_arguments());
   instructions += StoreInstanceField(
-      TokenPosition::kNoSource, Closure::instantiator_type_arguments_offset());
+      TokenPosition::kNoSource, NativeFieldDesc::Closure_instantiator_type_arguments());
 
   // Copy over the function type arguments.
   instructions += LoadLocal(new_closure);
   instructions += LoadLocal(original_closure);
-  instructions += LoadField(Closure::function_type_arguments_offset());
+  instructions += LoadNativeField(NativeFieldDesc::Closure_function_type_arguments());
   instructions += StoreInstanceField(TokenPosition::kNoSource,
-                                     Closure::function_type_arguments_offset());
+                                     NativeFieldDesc::Closure_function_type_arguments());
 
   // Copy over the context.
   instructions += LoadLocal(new_closure);
   instructions += LoadLocal(original_closure);
-  instructions += LoadField(Closure::context_offset());
+  instructions += LoadNativeField(NativeFieldDesc::Closure_context());
   instructions +=
-      StoreInstanceField(TokenPosition::kNoSource, Closure::context_offset());
+      StoreInstanceField(TokenPosition::kNoSource, NativeFieldDesc::Closure_context());
 
   instructions += DropTempsPreserveTop(1);  // Drop old closure.
 
