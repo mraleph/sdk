@@ -609,9 +609,10 @@ void GuardFieldInstr::PrintOperandsTo(BufferFormatter* f) const {
 
 void StoreInstanceFieldInstr::PrintOperandsTo(BufferFormatter* f) const {
   if (field().IsNull()) {
-    f->Print("{%" Pd "}, ", offset_in_bytes());
+    ASSERT(native_field() != nullptr);
+    f->Print("%s @%" Pd ", ", native_field()->name(), native_field()->offset_in_bytes());
   } else {
-    f->Print("%s {%" Pd "}, ", String::Handle(field().name()).ToCString(),
+    f->Print("%s @%" Pd ", ", String::Handle(field().name()).ToCString(),
              field().Offset());
   }
   instance()->PrintTo(f);

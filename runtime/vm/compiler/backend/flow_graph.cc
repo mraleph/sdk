@@ -543,7 +543,7 @@ void FlowGraph::AddExactnessGuard(InstanceCallInstr* call,
 
   Definition* load_type_args = new (zone())
       LoadFieldInstr(call->Receiver()->CopyWithType(),
-                     NativeFieldDesc::GetTypeArgumentsFieldFor(zone(), cls),
+                     NativeFieldDesc::GetTypeArgumentsFieldFor(thread(), cls),
                      call->token_pos());
   InsertBefore(call, load_type_args, call->env(), FlowGraph::kValue);
 

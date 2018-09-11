@@ -4171,10 +4171,10 @@ class DebugStepCheckInstr : public TemplateInstruction<0, NoThrow> {
   V(Array, length, Smi, IMMUTABLE)                                             \
   V(Context, parent, Context, IMMUTABLE)                                       \
   V(Closure, instantiator_type_arguments, TypeArguments, IMMUTABLE)            \
-  V(Closure, delayed_type_arguments, TypeArguments, IMMUTABLE)            \
-  V(Closure, function_type_arguments, TypeArguments, IMMUTABLE)            \
+  V(Closure, delayed_type_arguments, TypeArguments, IMMUTABLE)                 \
+  V(Closure, function_type_arguments, TypeArguments, IMMUTABLE)                \
   V(Closure, function, Function, IMMUTABLE)                                    \
-  V(Closure, context, Context, IMMUTABLE) \
+  V(Closure, context, Context, IMMUTABLE)                                      \
   V(GrowableObjectArray, length, Smi, MUTABLE)                                 \
   V(GrowableObjectArray, data, Array, MUTABLE)                                 \
   V(TypedData, length, Smi, IMMUTABLE)                                         \
@@ -4184,23 +4184,26 @@ class DebugStepCheckInstr : public TemplateInstruction<0, NoThrow> {
   V(LinkedHashMap, hash_mask, Smi, MUTABLE)                                    \
   V(LinkedHashMap, used_data, Smi, MUTABLE)                                    \
   V(LinkedHashMap, deleted_keys, Smi, MUTABLE)                                 \
-  V(ArgumentsDescriptor, type_args_len, Smi, IMMUTABLE)
+  V(ArgumentsDescriptor, type_args_len, Smi, IMMUTABLE)                        \
+  V(ArgumentsDescriptor, positional_count, Smi, IMMUTABLE)                     \
+  V(ArgumentsDescriptor, count, Smi, IMMUTABLE)                                \
 
 class NativeFieldDesc : public ZoneAllocated {
  public:
   // clang-format off
-  enum Kind {
+  enum class Kind : uint8_t {
 #define DECLARE_KIND(ClassName, FieldName, cid, mutability)                    \
   k##ClassName##_##FieldName,
     NATIVE_FIELDS_LIST(DECLARE_KIND)
 #undef DECLARE_KIND
     kTypeArguments,
+    kLocalVariable,
   };
   // clang-format on
 
 #define DEFINE_GETTER(ClassName, FieldName, cid, mutability)                   \
   static const NativeFieldDesc& ClassName##_##FieldName() {                    \
-    return Get(k##ClassName##_##FieldName);                                   \
+    return Get(Kind::k##ClassName##_##FieldName);                              \
   }
 
   NATIVE_FIELDS_LIST(DEFINE_GETTER)
@@ -4208,10 +4211,12 @@ class NativeFieldDesc : public ZoneAllocated {
 
   static const NativeFieldDesc& Get(Kind kind);
   static const NativeFieldDesc& GetLengthFieldForArrayCid(intptr_t array_cid);
-  static const NativeFieldDesc& GetTypeArgumentsFieldFor(Zone* zone,
+  static const NativeFieldDesc& GetTypeArgumentsFieldFor(Thread* thread,
                                                          const Class& cls);
 
-  static const NativeFieldDesc& GetContextVariableFieldFor(const LocalVariable* var);
+  static const NativeFieldDesc& GetContextVariableFieldFor(
+      Thread* thread,
+      const LocalVariable* var);
 
   const char* name() const;
 
@@ -4219,33 +4224,50 @@ class NativeFieldDesc : public ZoneAllocated {
 
   intptr_t offset_in_bytes() const { return offset_in_bytes_; }
 
-  bool is_immutable() const { return immutable_; }
+  bool is_immutable() const { return (bits_ & kIsImmutableBit) != 0; }
 
   intptr_t cid() const { return cid_; }
 
   RawAbstractType* type() const;
 
+  bool Equals(const NativeFieldDesc* other) const;
+  intptr_t Hashcode() const;
+
  private:
   NativeFieldDesc(Kind kind,
+                  int8_t bits,
+                  int16_t cid,
                   intptr_t offset_in_bytes,
-                  intptr_t cid,
-                  bool immutable)
+                  const void* name)
       : kind_(kind),
+        bits_(bits),
+        cid_(cid),
         offset_in_bytes_(offset_in_bytes),
-        immutable_(immutable),
-        cid_(cid) {}
+        name_(name) {}
 
   NativeFieldDesc(const NativeFieldDesc& other)
       : NativeFieldDesc(other.kind_,
+                        other.bits_,
+                        other.cid_,
                         other.offset_in_bytes_,
-                        other.immutable_,
-                        other.cid_) {}
+                        other.name_) {}
+
+  enum {
+    kIsImmutableBit = 1 << 0,
+    kNameIsCStringBit = 1 << 1,
+  };
+
+  bool is_name_cstring() const { return (bits_ & kNameIsCStringBit) != 0; }
+  bool IsEqualName(const void* other_name) const;
 
   const Kind kind_;
-  const intptr_t offset_in_bytes_;
-  const bool immutable_;
+  const int8_t bits_;
+  const int16_t cid_;
 
-  const intptr_t cid_;
+  const intptr_t offset_in_bytes_;
+  const void* name_;  // Either const String* or const char*
+
+  friend class NativeFieldDescCache;
 };
 
 enum StoreBarrierType { kNoStoreBarrier, kEmitStoreBarrier };
@@ -5166,23 +5188,6 @@ class LoadClassIdInstr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
  public:
-  LoadFieldInstr(Value* instance,
-                 intptr_t offset_in_bytes,
-                 const AbstractType& type,
-                 TokenPosition token_pos)
-      : offset_in_bytes_(offset_in_bytes),
-        type_(type),
-        result_cid_(kDynamicCid),
-        immutable_(false),
-        native_field_(nullptr),
-        field_(nullptr),
-        token_pos_(token_pos) {
-    ASSERT(offset_in_bytes >= 0);
-    // May be null if field is not an instance.
-    ASSERT(type_.IsZoneHandle() || type_.IsReadOnlyHandle());
-    SetInputAt(0, instance);
-  }
-
   LoadFieldInstr(Value* instance,
                  const NativeFieldDesc& native_field,
                  TokenPosition token_pos)

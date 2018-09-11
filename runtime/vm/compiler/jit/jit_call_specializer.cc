@@ -244,8 +244,8 @@ void JitCallSpecializer::LowerContextAllocation(Definition* alloc,
   ASSERT(alloc->IsAllocateContext() || alloc->IsCloneContext());
 
   AllocateUninitializedContextInstr* replacement =
-      new AllocateUninitializedContextInstr(alloc->token_pos(),
-                                            context_scope->num_context_variables());
+      new AllocateUninitializedContextInstr(
+          alloc->token_pos(), context_scope->num_context_variables());
   alloc->ReplaceWith(replacement, current_iterator());
 
   Definition* cursor = replacement;
@@ -253,8 +253,7 @@ void JitCallSpecializer::LowerContextAllocation(Definition* alloc,
   Value* initial_value;
   if (context_value != NULL) {
     LoadFieldInstr* load = new (Z)
-        LoadFieldInstr(context_value->CopyWithType(Z), Context::parent_offset(),
-                       AbstractType::ZoneHandle(Z), alloc->token_pos());
+        LoadFieldInstr(context_value->CopyWithType(Z), NativeFieldDesc::Context_parent(), alloc->token_pos());
     flow_graph()->InsertAfter(cursor, load, NULL, FlowGraph::kValue);
     cursor = load;
     initial_value = new (Z) Value(load);
@@ -262,8 +261,8 @@ void JitCallSpecializer::LowerContextAllocation(Definition* alloc,
     initial_value = new (Z) Value(flow_graph()->constant_null());
   }
   StoreInstanceFieldInstr* store = new (Z) StoreInstanceFieldInstr(
-      NativeFieldDesc::Context_parent(), new (Z) Value(replacement), initial_value,
-      kNoStoreBarrier, alloc->token_pos());
+      NativeFieldDesc::Context_parent(), new (Z) Value(replacement),
+      initial_value, kNoStoreBarrier, alloc->token_pos());
   // Storing into uninitialized memory; remember to prevent dead store
   // elimination and ensure proper GC barrier.
   store->set_is_initialization(true);
@@ -271,12 +270,10 @@ void JitCallSpecializer::LowerContextAllocation(Definition* alloc,
   cursor = replacement;
 
   for (auto variable : context_scope->context_variables()) {
-    const auto& field = NativeFieldDesc::GetContextVariableFieldFor(variable);
+    const auto& field = NativeFieldDesc::GetContextVariableFieldFor(thread(), variable);
     if (context_value != nullptr) {
       LoadFieldInstr* load = new (Z) LoadFieldInstr(
-          context_value->CopyWithType(Z),
-          field,
-          alloc->token_pos());
+          context_value->CopyWithType(Z), field, alloc->token_pos());
       flow_graph()->InsertAfter(cursor, load, nullptr, FlowGraph::kValue);
       cursor = load;
       initial_value = new (Z) Value(load);
@@ -284,9 +281,9 @@ void JitCallSpecializer::LowerContextAllocation(Definition* alloc,
       initial_value = new (Z) Value(flow_graph()->constant_null());
     }
 
-    store = new (Z) StoreInstanceFieldInstr(
-        field, new (Z) Value(replacement), initial_value,
-        kNoStoreBarrier, alloc->token_pos());
+    store = new (Z) StoreInstanceFieldInstr(field, new (Z) Value(replacement),
+                                            initial_value, kNoStoreBarrier,
+                                            alloc->token_pos());
     // Storing into uninitialized memory; remember to prevent dead store
     // elimination and ensure proper GC barrier.
     store->set_is_initialization(true);
@@ -300,8 +297,7 @@ void JitCallSpecializer::VisitAllocateContext(AllocateContextInstr* instr) {
 }
 
 void JitCallSpecializer::VisitCloneContext(CloneContextInstr* instr) {
-  LowerContextAllocation(instr, instr->context_scope(),
-                         instr->context_value());
+  LowerContextAllocation(instr, instr->context_scope(), instr->context_value());
 }
 
 }  // namespace dart

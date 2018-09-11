@@ -3059,6 +3059,9 @@ void AllocationSinking::CreateMaterializationAt(
 
   // Insert load instruction for every field.
   for (intptr_t i = 0; i < slots.length(); i++) {
+    USE(load_point);
+    UNREACHABLE();
+#if 0
     LoadFieldInstr* load =
         slots[i]->IsField()
             ? new (Z) LoadFieldInstr(
@@ -3069,6 +3072,7 @@ void AllocationSinking::CreateMaterializationAt(
                   AbstractType::ZoneHandle(Z), alloc->token_pos());
     flow_graph_->InsertBefore(load_point, load, NULL, FlowGraph::kValue);
     values->Add(new (Z) Value(load));
+#endif
   }
 
   MaterializeObjectInstr* mat = NULL;

@@ -1038,7 +1038,7 @@ bool CallSpecializer::TryInlineInstanceSetter(InstanceCallInstr* instr,
         if (owner.NumTypeArguments() > 0) {
           instantiator_type_args = new (Z) LoadFieldInstr(
               new (Z) Value(instr->ArgumentAt(0)),
-              NativeFieldDesc::GetTypeArgumentsFieldFor(zone(), owner),
+              NativeFieldDesc::GetTypeArgumentsFieldFor(thread(), owner),
               instr->token_pos());
           InsertBefore(instr, instantiator_type_args, instr->env(),
                        FlowGraph::kValue);

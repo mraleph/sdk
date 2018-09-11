@@ -131,7 +131,6 @@ class BaseFlowGraphBuilder {
         exit_collector_(exit_collector),
         inlining_unchecked_entry_(inlining_unchecked_entry) {}
 
-  Fragment LoadField(intptr_t offset, intptr_t class_id = kDynamicCid);
   Fragment LoadNativeField(const NativeFieldDesc& native_field);
   Fragment LoadIndexed(intptr_t index_scale);
 

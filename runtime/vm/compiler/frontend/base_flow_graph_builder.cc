@@ -114,7 +114,7 @@ Fragment BaseFlowGraphBuilder::LoadContextAt(int depth) {
   ASSERT(delta >= 0);
   Fragment instructions = LoadLocal(parsed_function_->current_context_var());
   while (delta-- > 0) {
-    instructions += LoadField(Context::parent_offset());
+    instructions += LoadNativeField(NativeFieldDesc::Context_parent());
   }
   return instructions;
 }
@@ -266,7 +266,7 @@ Fragment BaseFlowGraphBuilder::TestDelayedTypeArgs(LocalVariable* closure,
   TargetEntryInstr* present_entry;
 
   test += LoadLocal(closure);
-  test += LoadField(Closure::delayed_type_arguments_offset());
+  test += LoadNativeField(NativeFieldDesc::Closure_delayed_type_arguments());
   test += Constant(Object::empty_type_arguments());
   test += BranchIfEqual(&absent_entry, &present_entry);
 
@@ -300,14 +300,6 @@ Fragment BaseFlowGraphBuilder::TestAnyTypeArgs(Fragment present,
   } else {
     return TestTypeArgsLen(absent, present, 0);
   }
-}
-
-Fragment BaseFlowGraphBuilder::LoadField(intptr_t offset, intptr_t class_id) {
-  LoadFieldInstr* load = new (Z) LoadFieldInstr(
-      Pop(), offset, AbstractType::ZoneHandle(Z), TokenPosition::kNoSource);
-  load->set_result_cid(class_id);
-  Push(load);
-  return Fragment(load);
 }
 
 Fragment BaseFlowGraphBuilder::LoadIndexed(intptr_t index_scale) {
@@ -458,7 +450,7 @@ Fragment BaseFlowGraphBuilder::StoreLocal(TokenPosition position,
     instructions += LoadContextAt(variable->owner()->context_level());
     instructions += LoadLocal(value);
     instructions += StoreInstanceField(
-        position, NativeFieldDesc::GetContextVariableFieldFor(variable));
+        position, NativeFieldDesc::GetContextVariableFieldFor(thread_, variable));
     return instructions;
   }
   return StoreLocalRaw(position, variable);

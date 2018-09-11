@@ -781,7 +781,7 @@ void ConstantPropagator::VisitLoadClassId(LoadClassIdInstr* instr) {
 void ConstantPropagator::VisitLoadField(LoadFieldInstr* instr) {
   Value* instance = instr->instance();
   if ((instr->native_field() != nullptr) &&
-      (instr->native_field()->kind() == NativeFieldDesc::kArray_length) &&
+      (instr->native_field()->kind() == NativeFieldDesc::Kind::kArray_length) &&
       instance->definition()->OriginalDefinition()->IsCreateArray()) {
     Value* num_elements = instance->definition()
                               ->OriginalDefinition()

@@ -66,8 +66,9 @@ FlowGraphBuilder::FlowGraphBuilder(
 
 FlowGraphBuilder::~FlowGraphBuilder() {}
 
-Fragment FlowGraphBuilder::EnterScope(intptr_t kernel_offset,
-                                      const LocalScope** context_scope /* = nullptr */) {
+Fragment FlowGraphBuilder::EnterScope(
+    intptr_t kernel_offset,
+    const LocalScope** context_scope /* = nullptr */) {
   Fragment instructions;
   const LocalScope* scope = scopes_->scopes.Lookup(kernel_offset);
   if (scope->num_context_variables() > 0) {
@@ -109,8 +110,8 @@ Fragment FlowGraphBuilder::PushContext(const LocalScope* scope) {
   LocalVariable* context = MakeTemporary();
   instructions += LoadLocal(context);
   instructions += LoadLocal(parsed_function_->current_context_var());
-  instructions +=
-      StoreInstanceField(TokenPosition::kNoSource, NativeFieldDesc::Context_parent());
+  instructions += StoreInstanceField(TokenPosition::kNoSource,
+                                     NativeFieldDesc::Context_parent());
   instructions += StoreLocal(TokenPosition::kNoSource,
                              parsed_function_->current_context_var());
   ++context_depth_;
@@ -139,7 +140,7 @@ Fragment FlowGraphBuilder::LoadInstantiatorTypeArguments() {
     ASSERT(!parsed_function_->function().IsFactory());
     instructions += LoadLocal(scopes_->this_variable);
     instructions += LoadNativeField(
-        NativeFieldDesc::GetTypeArgumentsFieldFor(Z, *active_class_.klass));
+        NativeFieldDesc::GetTypeArgumentsFieldFor(thread_, *active_class_.klass));
   } else {
     instructions += NullConstant();
   }
@@ -263,7 +264,7 @@ Fragment FlowGraphBuilder::CatchBlockEntry(const Array& handler_types,
     LocalVariable* closure_parameter = scope->VariableAt(0);
     ASSERT(!closure_parameter->is_captured());
     instructions += LoadLocal(closure_parameter);
-    instructions += LoadField(Closure::context_offset());
+    instructions += LoadNativeField(NativeFieldDesc::Closure_context());
     instructions += StoreLocal(TokenPosition::kNoSource, context_variable);
     instructions += Drop();
   }
@@ -273,14 +274,14 @@ Fragment FlowGraphBuilder::CatchBlockEntry(const Array& handler_types,
     instructions += LoadLocal(raw_exception_var);
     instructions += StoreInstanceField(
         TokenPosition::kNoSource,
-        NativeFieldDesc::GetContextVariableFieldFor(exception_var));
+        NativeFieldDesc::GetContextVariableFieldFor(thread_, exception_var));
   }
   if (stacktrace_var->is_captured()) {
     instructions += LoadLocal(context_variable);
     instructions += LoadLocal(raw_stacktrace_var);
     instructions += StoreInstanceField(
         TokenPosition::kNoSource,
-        NativeFieldDesc::GetContextVariableFieldFor(stacktrace_var));
+        NativeFieldDesc::GetContextVariableFieldFor(thread_, stacktrace_var));
   }
 
   // :saved_try_context_var can be captured in the context of
@@ -423,16 +424,12 @@ Fragment FlowGraphBuilder::LoadField(const Field& field) {
   return Fragment(load);
 }
 
-Fragment FlowGraphBuilder::LoadField(intptr_t offset, intptr_t class_id) {
-  return BaseFlowGraphBuilder::LoadField(offset, class_id);
-}
-
 Fragment FlowGraphBuilder::LoadLocal(LocalVariable* variable) {
   if (variable->is_captured()) {
     Fragment instructions;
     instructions += LoadContextAt(variable->owner()->context_level());
     instructions +=
-        LoadField(Context::variable_offset(variable->index().value()));
+        LoadNativeField(NativeFieldDesc::GetContextVariableFieldFor(thread_, variable));
     return instructions;
   } else {
     return BaseFlowGraphBuilder::LoadLocal(variable);
@@ -806,7 +803,7 @@ Fragment FlowGraphBuilder::NativeFunctionBody(const Function& function,
 
       body += LoadArgDescriptor();
       body +=
-          LoadField(ArgumentsDescriptor::positional_count_offset(), kSmiCid);
+          LoadNativeField(NativeFieldDesc::ArgumentsDescriptor_positional_count());
       body += IntConstant(2);
       body += BranchIfStrictEqual(&allocate_non_growable, &allocate_growable);
 
@@ -942,21 +939,48 @@ Fragment FlowGraphBuilder::NativeFunctionBody(const Function& function,
   return body + Return(TokenPosition::kNoSource, omit_result_type_check);
 }
 
-static const LocalScope* MakeImplicitClosureScope() {
-#if 0
+static LocalVariable* MakeVariable(
+    Zone* Z,
+    TokenPosition declaration_pos,
+    TokenPosition token_pos,
+    const String& name,
+    const AbstractType& type) {
+  CompileType* param_type = nullptr;
+  return new (Z)
+      LocalVariable(declaration_pos, token_pos, name, type, param_type);
+}
+
+
+static Type& GetCanonicalType(Zone* Z, const Class& klass) {
+  ASSERT(!klass.IsNull());
+  // Note that if cls is _Closure, the returned type will be _Closure,
+  // and not the signature type.
+  Type& type = Type::ZoneHandle(Z, klass.CanonicalType());
+  if (!type.IsNull()) {
+    return type;
+  }
+  type = Type::New(klass, TypeArguments::Handle(Z, klass.type_parameters()),
+                   klass.token_pos());
+  if (klass.is_type_finalized()) {
+    type ^= ClassFinalizer::FinalizeType(klass, type);
+    // Note that the receiver type may now be a malbounded type.
+    klass.SetCanonicalType(type);
+  }
+  return type;
+}
+
+static const LocalScope* MakeImplicitClosureScope(Zone* Z, const Function& function) {
   Class& klass = Class::Handle(Z, function.Owner());
-  Type& klass_type = H.GetCanonicalType(klass);
-  result_->this_variable =
-      MakeVariable(TokenPosition::kNoSource, TokenPosition::kNoSource,
+  Type& klass_type = GetCanonicalType(Z, klass);
+  LocalVariable* this_variable =
+      MakeVariable(Z, TokenPosition::kNoSource, TokenPosition::kNoSource,
                    Symbols::This(), klass_type);
-  result_->this_variable->set_is_captured();
-  enclosing_scope = new (Z) LocalScope(NULL, 0, 0);
-  enclosing_scope->set_context_level(0);
-  enclosing_scope->AddVariable(result_->this_variable);
-  enclosing_scope->AddContextVariable(result_->this_variable);
-#endif
-  UNREACHABLE();
-  return nullptr;
+  this_variable->set_is_captured();
+  LocalScope* scope = new (Z) LocalScope(NULL, 0, 0);
+  scope->set_context_level(0);
+  scope->AddVariable(this_variable);
+  scope->AddContextVariable(this_variable);
+  return scope;
 }
 
 Fragment FlowGraphBuilder::BuildImplicitClosureCreation(
@@ -971,9 +995,9 @@ Fragment FlowGraphBuilder::BuildImplicitClosureCreation(
   if (!target.HasInstantiatedSignature(kCurrentClass)) {
     fragment += LoadLocal(closure);
     fragment += LoadInstantiatorTypeArguments();
-    fragment +=
-        StoreInstanceField(TokenPosition::kNoSource,
-                           NativeFieldDesc::Closure_instantiator_type_arguments());
+    fragment += StoreInstanceField(
+        TokenPosition::kNoSource,
+        NativeFieldDesc::Closure_instantiator_type_arguments());
   }
 
   // The function signature cannot have uninstantiated function type parameters,
@@ -982,32 +1006,35 @@ Fragment FlowGraphBuilder::BuildImplicitClosureCreation(
 
   // Allocate a context that closes over `this`.
   // Note: this must be kept in sync with ScopeBuilder::BuildScopes.
-  const LocalScope* implicit_closure_scope = MakeImplicitClosureScope();
+  const LocalScope* implicit_closure_scope = MakeImplicitClosureScope(Z, target);
   fragment += AllocateContext(implicit_closure_scope);
   LocalVariable* context = MakeTemporary();
 
   // Store the function and the context in the closure.
   fragment += LoadLocal(closure);
   fragment += Constant(target);
-  fragment +=
-      StoreInstanceField(TokenPosition::kNoSource, NativeFieldDesc::Closure_function());
+  fragment += StoreInstanceField(TokenPosition::kNoSource,
+                                 NativeFieldDesc::Closure_function());
 
   fragment += LoadLocal(closure);
   fragment += LoadLocal(context);
-  fragment +=
-      StoreInstanceField(TokenPosition::kNoSource, NativeFieldDesc::Closure_context());
+  fragment += StoreInstanceField(TokenPosition::kNoSource,
+                                 NativeFieldDesc::Closure_context());
 
   fragment += LoadLocal(closure);
   fragment += Constant(Object::empty_type_arguments());
-  fragment += StoreInstanceField(TokenPosition::kNoSource,
-                                 NativeFieldDesc::Closure_delayed_type_arguments());
+  fragment +=
+      StoreInstanceField(TokenPosition::kNoSource,
+                         NativeFieldDesc::Closure_delayed_type_arguments());
 
   // The context is on top of the operand stack.  Store `this`.  The context
   // doesn't need a parent pointer because it doesn't close over anything
   // else.
   fragment += LoadLocal(scopes_->this_variable);
   fragment +=
-      StoreInstanceField(TokenPosition::kNoSource, NativeFieldDesc::GetContextVariableFieldFor(implicit_closure_scope->context_variables()[0]));
+      StoreInstanceField(TokenPosition::kNoSource,
+                         NativeFieldDesc::GetContextVariableFieldFor(thread_,
+                             implicit_closure_scope->context_variables()[0]));
 
   return fragment;
 }
@@ -1381,7 +1408,7 @@ FlowGraph* FlowGraphBuilder::BuildGraphOfInvokeFieldDispatcher(
   if (is_closure_call) {
     // Lookup the function in the closure.
     body += LoadLocal(closure);
-    body += LoadField(Closure::function_offset());
+    body += LoadNativeField(NativeFieldDesc::Closure_function());
 
     body += ClosureCall(TokenPosition::kNoSource, descriptor.TypeArgsLen(),
                         descriptor.Count(), argument_names);

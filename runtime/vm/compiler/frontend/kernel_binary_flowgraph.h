@@ -57,6 +57,8 @@ class StreamingFlowGraphBuilder : public KernelReaderHelper {
  private:
   bool optimizing();
 
+  Thread* thread() const { return flow_graph_builder_->thread_; }
+
   FlowGraph* BuildGraphOfFieldInitializer();
   FlowGraph* BuildGraphOfFieldAccessor(LocalVariable* setter_value);
   void SetupDefaultParameterValues();
@@ -270,7 +272,7 @@ class StreamingFlowGraphBuilder : public KernelReaderHelper {
                           intptr_t argument_count);
   Fragment AllocateObject(const Class& klass, const Function& closure_function);
   Fragment AllocateContext(const LocalScope* scope);
-  Fragment LoadField(intptr_t offset);
+  Fragment LoadNativeField(const NativeFieldDesc& field);
   Fragment StoreLocal(TokenPosition position, LocalVariable* variable);
   Fragment StoreStaticField(TokenPosition position, const Field& field);
   Fragment StringInterpolate(TokenPosition position);

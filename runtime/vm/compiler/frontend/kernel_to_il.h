@@ -114,7 +114,6 @@ class FlowGraphBuilder : public BaseFlowGraphBuilder {
 
   Fragment RethrowException(TokenPosition position, int catch_try_index);
   Fragment LoadClassId();
-  Fragment LoadField(intptr_t offset, intptr_t class_id = kDynamicCid);
   Fragment LoadField(const Field& field);
   Fragment LoadLocal(LocalVariable* variable);
   Fragment InitStaticField(const Field& field);

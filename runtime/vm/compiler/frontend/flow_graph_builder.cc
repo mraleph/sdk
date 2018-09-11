@@ -827,13 +827,13 @@ Definition* EffectGraphVisitor::BuildStoreLocal(const LocalVariable& local,
     ASSERT(delta >= 0);
     Value* context = Bind(BuildCurrentContext(token_pos));
     while (delta-- > 0) {
-      context = Bind(new (Z) LoadFieldInstr(context, NativeFieldDesc::Context_parent(),
-                                            token_pos));
+      context = Bind(new (Z) LoadFieldInstr(
+          context, NativeFieldDesc::Context_parent(), token_pos));
     }
     Value* tmp_val = Bind(new (Z) LoadLocalInstr(*tmp_var, token_pos));
-    StoreInstanceFieldInstr* store = new (Z)
-        StoreInstanceFieldInstr(NativeFieldDesc::GetContextVariableFieldFor(&local),
-                                context, tmp_val, kEmitStoreBarrier, token_pos);
+    StoreInstanceFieldInstr* store = new (Z) StoreInstanceFieldInstr(
+        NativeFieldDesc::GetContextVariableFieldFor(thread(), &local), context, tmp_val,
+        kEmitStoreBarrier, token_pos);
     Do(store);
     return ExitTempLocalScope(value);
   } else {
@@ -850,12 +850,12 @@ Definition* EffectGraphVisitor::BuildLoadLocal(const LocalVariable& local,
     ASSERT(delta >= 0);
     Value* context = Bind(BuildCurrentContext(token_pos));
     while (delta-- > 0) {
-      context = Bind(new (Z) LoadFieldInstr(context, NativeFieldDesc::Context_parent(),
-                                            token_pos));
+      context = Bind(new (Z) LoadFieldInstr(
+          context, NativeFieldDesc::Context_parent(), token_pos));
     }
     LoadFieldInstr* load = new (Z)
-        LoadFieldInstr(context, Context::variable_offset(local.index().value()),
-                       local.type(), token_pos);
+        LoadFieldInstr(context, NativeFieldDesc::GetContextVariableFieldFor(thread(), &local),
+                       token_pos);
     load->set_is_immutable(local.is_final());
     return load;
   } else {
@@ -2242,6 +2242,50 @@ void EffectGraphVisitor::VisitStringInterpolateNode(
   ReturnDefinition(instr);
 }
 
+static LocalVariable* MakeVariable(
+    Zone* zone,
+    TokenPosition declaration_pos,
+    TokenPosition token_pos,
+    const String& name,
+    const AbstractType& type) {
+  CompileType* param_type = nullptr;
+  return new (zone)
+      LocalVariable(declaration_pos, token_pos, name, type, param_type);
+}
+
+
+static Type& GetCanonicalType(Zone* zone, const Class& klass) {
+  ASSERT(!klass.IsNull());
+  // Note that if cls is _Closure, the returned type will be _Closure,
+  // and not the signature type.
+  Type& type = Type::ZoneHandle(zone, klass.CanonicalType());
+  if (!type.IsNull()) {
+    return type;
+  }
+  type = Type::New(klass, TypeArguments::Handle(zone, klass.type_parameters()),
+                   klass.token_pos());
+  if (klass.is_type_finalized()) {
+    type ^= ClassFinalizer::FinalizeType(klass, type);
+    // Note that the receiver type may now be a malbounded type.
+    klass.SetCanonicalType(type);
+  }
+  return type;
+}
+
+static const LocalScope* MakeImplicitClosureScope(Zone* zone, const Function& function) {
+  Class& klass = Class::Handle(zone, function.Owner());
+  Type& klass_type = GetCanonicalType(zone, klass);
+  LocalVariable* this_variable =
+      MakeVariable(zone, TokenPosition::kNoSource, TokenPosition::kNoSource,
+                   Symbols::This(), klass_type);
+  this_variable->set_is_captured();
+  LocalScope* scope = new (zone) LocalScope(NULL, 0, 0);
+  scope->set_context_level(0);
+  scope->AddVariable(this_variable);
+  scope->AddContextVariable(this_variable);
+  return scope;
+}
+
 void EffectGraphVisitor::VisitClosureNode(ClosureNode* node) {
   const Function& function = node->function();
   if (function.IsImplicitStaticClosureFunction()) {
@@ -2298,8 +2342,9 @@ void EffectGraphVisitor::VisitClosureNode(ClosureNode* node) {
           Bind(new (Z) LoadLocalInstr(*closure_tmp_var, node->token_pos()));
       Value* type_arguments = BuildInstantiatorTypeArguments(node->token_pos());
       Do(new (Z) StoreInstanceFieldInstr(
-          NativeFieldDesc::Closure_instantiator_type_arguments(), closure_tmp_val,
-          type_arguments, kEmitStoreBarrier, node->token_pos()));
+          NativeFieldDesc::Closure_instantiator_type_arguments(),
+          closure_tmp_val, type_arguments, kEmitStoreBarrier,
+          node->token_pos()));
     }
 
     // Store function type arguments if signature is function-uninstantiated.
@@ -2333,10 +2378,9 @@ void EffectGraphVisitor::VisitClosureNode(ClosureNode* node) {
                                        kEmitStoreBarrier, node->token_pos()));
     if (is_implicit) {
       // Create new context containing the receiver.
-      const LocalScope* implicit_scope = nullptr;
-      UNREACHABLE();
-      Value* allocated_context = Bind(new (Z) AllocateContextInstr(
-          node->token_pos(), implicit_scope));
+      const LocalScope* implicit_scope = MakeImplicitClosureScope(Z, function);
+      Value* allocated_context =
+          Bind(new (Z) AllocateContextInstr(node->token_pos(), implicit_scope));
       {
         LocalVariable* context_tmp_var = EnterTempLocalScope(allocated_context);
         // Store receiver in context.
@@ -2347,16 +2391,17 @@ void EffectGraphVisitor::VisitClosureNode(ClosureNode* node) {
         Append(for_receiver);
         Value* receiver = for_receiver.value();
         Do(new (Z) StoreInstanceFieldInstr(
-            NativeFieldDesc::GetContextVariableFieldFor(implicit_scope->context_variables()[0]), context_tmp_val, receiver,
-            kEmitStoreBarrier, node->token_pos()));
+            NativeFieldDesc::GetContextVariableFieldFor(thread(),
+                implicit_scope->context_variables()[0]),
+            context_tmp_val, receiver, kEmitStoreBarrier, node->token_pos()));
         // Store new context in closure.
         closure_tmp_val =
             Bind(new (Z) LoadLocalInstr(*closure_tmp_var, node->token_pos()));
         context_tmp_val =
             Bind(new (Z) LoadLocalInstr(*context_tmp_var, node->token_pos()));
         Do(new (Z) StoreInstanceFieldInstr(
-            NativeFieldDesc::Closure_context(), closure_tmp_val, context_tmp_val,
-            kEmitStoreBarrier, node->token_pos()));
+            NativeFieldDesc::Closure_context(), closure_tmp_val,
+            context_tmp_val, kEmitStoreBarrier, node->token_pos()));
         Do(ExitTempLocalScope(allocated_context));
       }
     } else {
@@ -2544,8 +2589,7 @@ void EffectGraphVisitor::BuildClosureCall(ClosureCallNode* node,
 
   closure_val = Bind(new (Z) LoadLocalInstr(*tmp_var, node->token_pos()));
   LoadFieldInstr* function_load = new (Z) LoadFieldInstr(
-      closure_val, Closure::function_offset(),
-      AbstractType::ZoneHandle(Z, AbstractType::null()), node->token_pos());
+      closure_val, NativeFieldDesc::Closure_function(), node->token_pos());
   function_load->set_is_immutable(true);
   Value* function_val = Bind(function_load);
 
@@ -2578,8 +2622,7 @@ void EffectGraphVisitor::VisitInitStaticFieldNode(InitStaticFieldNode* node) {
 void EffectGraphVisitor::VisitCloneContextNode(CloneContextNode* node) {
   Value* context = Bind(BuildCurrentContext(node->token_pos()));
   Value* clone = Bind(new (Z) CloneContextInstr(
-      node->token_pos(), context, node->scope(),
-      owner()->GetNextDeoptId()));
+      node->token_pos(), context, node->scope(), owner()->GetNextDeoptId()));
   Do(BuildStoreContext(clone, node->token_pos()));
 }
 
@@ -2729,13 +2772,9 @@ Value* EffectGraphVisitor::BuildInstantiatorTypeArguments(
   // The instantiator is the receiver of the caller, which is not a factory.
   // The receiver cannot be null; extract its TypeArguments object.
   Value* instantiator = BuildInstantiator(token_pos);
-  intptr_t type_arguments_field_offset =
-      instantiator_class.type_arguments_field_offset();
-  ASSERT(type_arguments_field_offset != Class::kNoTypeArguments);
 
   return Bind(new (Z) LoadFieldInstr(
-      instantiator, type_arguments_field_offset,
-      Type::ZoneHandle(Z, Type::null()),  // Not an instance, no type.
+      instantiator, NativeFieldDesc::GetTypeArgumentsFieldFor(thread(), instantiator_class),
       token_pos));
 }
 
@@ -3226,9 +3265,7 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
       case MethodRecognizer::kGrowableArrayCapacity: {
         Value* receiver = Bind(BuildLoadThisVar(node->scope(), token_pos));
         LoadFieldInstr* data_load =
-            new (Z) LoadFieldInstr(receiver, Array::data_offset(),
-                                   Object::dynamic_type(), node->token_pos());
-        data_load->set_result_cid(kArrayCid);
+            new (Z) LoadFieldInstr(receiver, NativeFieldDesc::GrowableObjectArray_data(), node->token_pos());
         Value* data = Bind(data_load);
         LoadFieldInstr* length_load = new (Z) LoadFieldInstr(
             data, NativeFieldDesc::Array_length(), node->token_pos());
@@ -3251,8 +3288,7 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
         auto arg_descriptor = comparison.Bind(new (Z) LoadLocalInstr(
             *owner_->parsed_function().arg_desc_var(), token_pos));
         auto positional_count = comparison.Bind(new (Z) LoadFieldInstr(
-            arg_descriptor, ArgumentsDescriptor::positional_count_offset(),
-            AbstractType::ZoneHandle(Z, Type::SmiType()), token_pos));
+            arg_descriptor, NativeFieldDesc::ArgumentsDescriptor_positional_count(), token_pos));
         auto constant_1 = comparison.Bind(
             new (Z) ConstantInstr(Smi::ZoneHandle(Z, Smi::New(2))));
         comparison.ReturnDefinition(new (Z) StrictCompareInstr(
@@ -3364,13 +3400,13 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
       }
       case MethodRecognizer::kLinkedHashMap_getDeletedKeys: {
         return ReturnDefinition(BuildNativeGetter(
-            node, NativeFieldDesc::Get(
-                      NativeFieldDesc::kLinkedHashMap_deleted_keys)));
+            node, NativeFieldDesc::LinkedHashMap_deleted_keys()));
       }
       case MethodRecognizer::kLinkedHashMap_setDeletedKeys: {
         // Smi field; no barrier needed.
         return ReturnDefinition(DoNativeSetterStoreValue(
-            node, NativeFieldDesc::LinkedHashMap_deleted_keys(), kNoStoreBarrier));
+            node, NativeFieldDesc::LinkedHashMap_deleted_keys(),
+            kNoStoreBarrier));
       }
       default:
         break;
@@ -3722,15 +3758,12 @@ bool EffectGraphVisitor::HasContextScope() const {
 }
 
 void EffectGraphVisitor::UnchainContexts(intptr_t n) {
-  // TODO(johnmccutchan): Pass this in.
   const TokenPosition token_pos = TokenPosition::kContext;
   if (n > 0) {
     Value* context = Bind(BuildCurrentContext(token_pos));
     while (n-- > 0) {
-      context = Bind(new (Z) LoadFieldInstr(context, NativeFieldDesc::Context_parent(),
-                                            // Not an instance, no type.
-                                            Type::ZoneHandle(Z, Type::null()),
-                                            token_pos));
+      context = Bind(new (Z) LoadFieldInstr(
+          context, NativeFieldDesc::Context_parent(), token_pos));
     }
     Do(BuildStoreContext(context, token_pos));
   }
@@ -3780,8 +3813,8 @@ void EffectGraphVisitor::VisitSequenceNode(SequenceNode* node) {
     // The local scope declares variables that are captured.
     // Allocate and chain a new context (Except don't chain when at the function
     // entry if the function does not capture any variables from outer scopes).
-    Value* allocated_context = Bind(
-        new (Z) AllocateContextInstr(node->token_pos(), scope));
+    Value* allocated_context =
+        Bind(new (Z) AllocateContextInstr(node->token_pos(), scope));
     {
       LocalVariable* tmp_var = EnterTempLocalScope(allocated_context);
       if (!is_top_level_sequence || HasContextScope()) {
@@ -3791,9 +3824,9 @@ void EffectGraphVisitor::VisitSequenceNode(SequenceNode* node) {
         Value* tmp_val =
             Bind(new (Z) LoadLocalInstr(*tmp_var, node->token_pos()));
         Value* parent_context = Bind(BuildCurrentContext(node->token_pos()));
-        Do(new (Z) StoreInstanceFieldInstr(NativeFieldDesc::Context_parent(), tmp_val,
-                                           parent_context, kEmitStoreBarrier,
-                                           node->token_pos()));
+        Do(new (Z) StoreInstanceFieldInstr(
+            NativeFieldDesc::Context_parent(), tmp_val, parent_context,
+            kEmitStoreBarrier, node->token_pos()));
       }
       Do(BuildStoreContext(Bind(ExitTempLocalScope(allocated_context)),
                            node->token_pos()));

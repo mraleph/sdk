@@ -2685,42 +2685,50 @@ void ConstraintInstr::InferRange(RangeAnalysis* analysis, Range* range) {
 void LoadFieldInstr::InferRange(RangeAnalysis* analysis, Range* range) {
   if (native_field() != nullptr) {
     switch (native_field()->kind()) {
-      case NativeFieldDesc::kArray_length:
-      case NativeFieldDesc::kGrowableObjectArray_length:
+      case NativeFieldDesc::Kind::kArray_length:
+      case NativeFieldDesc::Kind::kGrowableObjectArray_length:
         *range = Range(RangeBoundary::FromConstant(0),
                        RangeBoundary::FromConstant(Array::kMaxElements));
         break;
 
-      case NativeFieldDesc::kTypedData_length:
+      case NativeFieldDesc::Kind::kTypedData_length:
         *range = Range(RangeBoundary::FromConstant(0), RangeBoundary::MaxSmi());
         break;
 
-      case NativeFieldDesc::kString_length:
+      case NativeFieldDesc::Kind::kString_length:
         *range = Range(RangeBoundary::FromConstant(0),
                        RangeBoundary::FromConstant(String::kMaxElements));
         break;
 
-      case NativeFieldDesc::kLinkedHashMap_index:
-      case NativeFieldDesc::kLinkedHashMap_data:
-      case NativeFieldDesc::kGrowableObjectArray_data:
-      case NativeFieldDesc::kContext_parent:
-      case NativeFieldDesc::kTypeArguments:
-      case NativeFieldDesc::kClosure_context:
-      case NativeFieldDesc::kClosure_delayed_type_arguments:
-      case NativeFieldDesc::kClosure_function:
-      case NativeFieldDesc::kClosure_function_type_arguments:
-      case NativeFieldDesc::kClosure_instantiator_type_arguments:
+      case NativeFieldDesc::Kind::kLocalVariable:
+        // Use default value.
+        Definition::InferRange(analysis, range);
+        break;
+
+      case NativeFieldDesc::Kind::kLinkedHashMap_index:
+      case NativeFieldDesc::Kind::kLinkedHashMap_data:
+      case NativeFieldDesc::Kind::kGrowableObjectArray_data:
+      case NativeFieldDesc::Kind::kContext_parent:
+      case NativeFieldDesc::Kind::kTypeArguments:
+      case NativeFieldDesc::Kind::kClosure_context:
+      case NativeFieldDesc::Kind::kClosure_delayed_type_arguments:
+      case NativeFieldDesc::Kind::kClosure_function:
+      case NativeFieldDesc::Kind::kClosure_function_type_arguments:
+      case NativeFieldDesc::Kind::kClosure_instantiator_type_arguments:
         // Not an integer valued field.
         UNREACHABLE();
         break;
 
-      case NativeFieldDesc::kLinkedHashMap_hash_mask:
-      case NativeFieldDesc::kLinkedHashMap_used_data:
-      case NativeFieldDesc::kLinkedHashMap_deleted_keys:
+      case NativeFieldDesc::Kind::kLinkedHashMap_hash_mask:
+      case NativeFieldDesc::Kind::kLinkedHashMap_used_data:
+      case NativeFieldDesc::Kind::kLinkedHashMap_deleted_keys:
         *range = Range(RangeBoundary::FromConstant(0), RangeBoundary::MaxSmi());
         break;
 
-      case NativeFieldDesc::kArgumentsDescriptor_type_args_len:
+      // TODO(vegorov) more precise bounds for this?
+      case NativeFieldDesc::Kind::kArgumentsDescriptor_type_args_len:
+      case NativeFieldDesc::Kind::kArgumentsDescriptor_positional_count:
+      case NativeFieldDesc::Kind::kArgumentsDescriptor_count:
         *range = Range(RangeBoundary::FromConstant(0), RangeBoundary::MaxSmi());
         break;
     }

@@ -10,6 +10,8 @@
 
 namespace dart {
 
+class NativeFieldDescCache;
+
 // Deoptimization Id logic.
 //
 // Deoptimization ids are used to refer to deoptimization points, at which
@@ -79,9 +81,17 @@ class CompilerState : public StackResource {
     return Thread::Current()->compiler_state();
   }
 
+  NativeFieldDescCache* native_field_desc_cache() const {
+    return native_field_desc_cache_;
+  }
+  void set_native_field_desc_cache(NativeFieldDescCache* cache) {
+    native_field_desc_cache_ = cache;
+  }
+
  private:
   CHA cha_;
   intptr_t deopt_id_ = 0;
+  NativeFieldDescCache* native_field_desc_cache_ = nullptr;
 
   CompilerState* previous_;
 };
