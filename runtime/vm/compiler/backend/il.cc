@@ -831,6 +831,14 @@ const NativeFieldDesc& NativeFieldDesc::GetContextVariableFieldFor(
       Context::variable_offset(variable->index().value()), &variable->name()));
 }
 
+const NativeFieldDesc& NativeFieldDesc::Get(const Field& field) {
+  Thread* thread = Thread::Current();
+  return NativeFieldDescCache::Get(thread).Canonicalize(NativeFieldDesc(
+        Kind::kDartField, field.is_final() || field.is_const() ? kIsImmutableBit : 0,
+        kIllegalCid,  // TODO(vegorov) assign the proper type
+        field.Offset(), &Field::ZoneHandle(thread->zone(), field.raw())));
+}
+
 RawAbstractType* NativeFieldDesc::type() const {
   if (cid() == kSmiCid) {
     return Type::SmiType();
@@ -840,31 +848,39 @@ RawAbstractType* NativeFieldDesc::type() const {
 }
 
 const char* NativeFieldDesc::name() const {
-  return is_name_cstring() ? static_cast<const char*>(name_)
-                           : static_cast<const String*>(name_)->ToCString();
+  if (is_name_cstring()) {
+    return data_as<const char>();
+  } else if (IsDartField()) {
+    return String::Handle(field().name()).ToCString();
+  } else {
+    return data_as<const String>()->ToCString();
+  }
 }
 
-bool NativeFieldDesc::IsEqualName(const void* other_name) const {
+bool NativeFieldDesc::IsEqualData(const NativeFieldDesc* other) const {
   if (kind_ == Kind::kLocalVariable) {
-    ASSERT(!is_name_cstring());
     // Local variable names are symbols.
-    return static_cast<const String*>(other_name)->raw() ==
-           static_cast<const String*>(name_)->raw();
+    return other->data_as<const String>()->raw() == data_as<const String>()->raw();
+  } else if (kind_ == Kind::kDartField) {
+    return other->data_as<const Field>()->Original() == data_as<const Field>()->Original();
+  } else {
+    return true;
   }
-  return true;
 }
 
 bool NativeFieldDesc::Equals(const NativeFieldDesc* other) const {
   return (kind_ == other->kind_) && (bits_ == other->bits_) &&
          (cid_ == other->cid_) &&
          (offset_in_bytes_ == other->offset_in_bytes_) &&
-         IsEqualName(other->name_);
+         IsEqualData(other);
 }
 
 intptr_t NativeFieldDesc::Hashcode() const {
   intptr_t result = (static_cast<int8_t>(kind_) * 63 + offset_in_bytes_) * 31;
-  if (!is_name_cstring()) {
-    result += static_cast<const String*>(name_)->Hash();
+  if (IsDartField()) {
+    result += String::Handle(data_as<const Field>()->name()).Hash();
+  } else if (!is_name_cstring()) {
+    result += data_as<const String>()->Hash();
   }
   return result;
 }
@@ -897,20 +913,20 @@ Representation LoadFieldInstr::representation() const {
 }
 
 bool StoreInstanceFieldInstr::IsUnboxedStore() const {
-  return FLAG_unbox_numeric_fields && !field().IsNull() &&
-         FlowGraphCompiler::IsUnboxedField(field());
+  return FLAG_unbox_numeric_fields && field().IsDartField() &&
+         FlowGraphCompiler::IsUnboxedField(field().field());
 }
 
 bool StoreInstanceFieldInstr::IsPotentialUnboxedStore() const {
-  return FLAG_unbox_numeric_fields && !field().IsNull() &&
-         FlowGraphCompiler::IsPotentialUnboxedField(field());
+  return FLAG_unbox_numeric_fields && field().IsDartField() &&
+         FlowGraphCompiler::IsPotentialUnboxedField(field().field());
 }
 
 Representation StoreInstanceFieldInstr::RequiredInputRepresentation(
     intptr_t index) const {
   ASSERT((index == 0) || (index == 1));
   if ((index == 1) && IsUnboxedStore()) {
-    const intptr_t cid = field().UnboxedFieldCid();
+    const intptr_t cid = field().field().UnboxedFieldCid();
     switch (cid) {
       case kDoubleCid:
         return kUnboxedDouble;
@@ -2615,6 +2631,7 @@ bool LoadFieldInstr::IsImmutableLengthLoad() const {
       case NativeFieldDesc::Kind::kClosure_function_type_arguments:
       case NativeFieldDesc::Kind::kClosure_instantiator_type_arguments:
       case NativeFieldDesc::Kind::kLocalVariable:
+      case NativeFieldDesc::Kind::kDartField:
         return false;
     }
   }

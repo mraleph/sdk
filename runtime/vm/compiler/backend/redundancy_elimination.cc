@@ -184,16 +184,8 @@ class Place : public ValueObject {
         set_representation(store->RequiredInputRepresentation(
             StoreInstanceFieldInstr::kValuePos));
         instance_ = store->instance()->definition()->OriginalDefinition();
-        if (!store->field().IsNull()) {
-          set_kind(kField);
-          field_ = &store->field();
-        } else if (store->native_field() != nullptr) {
-          set_kind(kNativeField);
-          native_field_ = store->native_field();
-        } else {
-          // Either field or native_field must be present.
-          UNREACHABLE();
-        }
+        set_kind(kNativeField);
+        native_field_ = &store->field();
         *is_store = true;
         break;
       }
@@ -450,10 +442,9 @@ class Place : public ValueObject {
       : flags_(flags), instance_(instance), raw_selector_(selector), id_(0) {}
 
   bool SameField(const Place* other) const {
-    ASSERT(kind() == kField || kind() == kNativeField);
     return (kind() == kField)
                ? (field().Original() == other->field().Original())
-               : (native_field_ == other->native_field_);
+               : (raw_selector_ == other->raw_selector_);
   }
 
   intptr_t FieldHashcode() const {
@@ -3151,12 +3142,7 @@ void AllocationSinking::InsertMaterializations(Definition* alloc) {
        use = use->next_use()) {
     StoreInstanceFieldInstr* store = use->instruction()->AsStoreInstanceField();
     if ((store != NULL) && (store->instance()->definition() == alloc)) {
-      if (!store->field().IsNull()) {
-        AddSlot(slots,
-                SlotDesc(Field::ZoneHandle(Z, store->field().Original())));
-      } else {
-        AddSlot(slots, SlotDesc(*store->native_field()));
-      }
+      AddSlot(slots, SlotDesc(store->field()));
     }
   }
 

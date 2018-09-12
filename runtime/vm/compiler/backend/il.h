@@ -4198,6 +4198,7 @@ class NativeFieldDesc : public ZoneAllocated {
 #undef DECLARE_KIND
     kTypeArguments,
     kLocalVariable,
+    kDartField,
   };
   // clang-format on
 
@@ -4218,6 +4219,8 @@ class NativeFieldDesc : public ZoneAllocated {
       Thread* thread,
       const LocalVariable* var);
 
+  static const NativeFieldDesc& Get(const Field& field);
+
   const char* name() const;
 
   Kind kind() const { return kind_; }
@@ -4226,9 +4229,21 @@ class NativeFieldDesc : public ZoneAllocated {
 
   bool is_immutable() const { return (bits_ & kIsImmutableBit) != 0; }
 
-  intptr_t cid() const { return cid_; }
+  intptr_t cid() const {
+    if (kind() == Kind::kDartField) {
+      return field().is_nullable() ? field().guarded_cid() : kDynamicCid;
+    }
+    return cid_;
+  }
 
   RawAbstractType* type() const;
+
+  bool IsDartField() const { return kind() == Kind::kDartField; }
+  const Field& field() const {
+    ASSERT(IsDartField());
+    ASSERT(data_ != nullptr);
+    return *data_as<const Field>();
+  }
 
   bool Equals(const NativeFieldDesc* other) const;
   intptr_t Hashcode() const;
@@ -4238,34 +4253,38 @@ class NativeFieldDesc : public ZoneAllocated {
                   int8_t bits,
                   int16_t cid,
                   intptr_t offset_in_bytes,
-                  const void* name)
+                  const void* data)
       : kind_(kind),
         bits_(bits),
         cid_(cid),
         offset_in_bytes_(offset_in_bytes),
-        name_(name) {}
+        data_(data) {}
 
   NativeFieldDesc(const NativeFieldDesc& other)
       : NativeFieldDesc(other.kind_,
                         other.bits_,
                         other.cid_,
                         other.offset_in_bytes_,
-                        other.name_) {}
+                        other.data_) {}
 
   enum {
     kIsImmutableBit = 1 << 0,
     kNameIsCStringBit = 1 << 1,
   };
 
+  template<typename T>
+  const T* data_as() const { return static_cast<const T*>(data_); }
+
   bool is_name_cstring() const { return (bits_ & kNameIsCStringBit) != 0; }
-  bool IsEqualName(const void* other_name) const;
+  bool IsEqualData(const NativeFieldDesc* other) const;
+
 
   const Kind kind_;
   const int8_t bits_;
   const int16_t cid_;
 
   const intptr_t offset_in_bytes_;
-  const void* name_;  // Either const String* or const char*
+  const void* data_;
 
   friend class NativeFieldDescCache;
 };
@@ -4279,7 +4298,7 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
                           Value* value,
                           StoreBarrierType emit_store_barrier,
                           TokenPosition token_pos)
-      : field_(field),
+      : field_(NativeFieldDesc::Get(field)),
         emit_store_barrier_(emit_store_barrier),
         token_pos_(token_pos) {
     SetInputAt(kInstancePos, instance);
@@ -4292,7 +4311,7 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
                           Value* value,
                           StoreBarrierType emit_store_barrier,
                           TokenPosition token_pos)
-      : native_field_(&field),
+      : field_(field),
         emit_store_barrier_(emit_store_barrier),
         token_pos_(token_pos) {
     SetInputAt(kInstancePos, instance);
@@ -4309,8 +4328,7 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
   Value* value() const { return inputs_[kValuePos]; }
   bool is_initialization() const { return is_initialization_; }
 
-  const Field& field() const { return field_; }
-  const NativeFieldDesc* native_field() const { return native_field_; }
+  const NativeFieldDesc& field() const { return field_; }
 
   virtual TokenPosition token_pos() const { return token_pos_; }
 
@@ -4349,7 +4367,7 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
   friend class JitCallSpecializer;  // For ASSERT(initialization_).
 
   intptr_t OffsetInBytes() const {
-    return !field().IsNull() ? field().Offset() : native_field()->offset_in_bytes();
+    return field().offset_in_bytes();
   }
 
   Assembler::CanBeSmi CanValueBeSmi() const {
@@ -4367,8 +4385,7 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
                               : Assembler::kValueIsNotSmi;
   }
 
-  const Field& field_ = Field::ZoneHandle();
-  const NativeFieldDesc* native_field_ = nullptr;
+  const NativeFieldDesc& field_;
   StoreBarrierType emit_store_barrier_;
   const TokenPosition token_pos_;
   // Marks initializing stores. E.g. in the constructor.

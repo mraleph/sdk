@@ -4808,7 +4808,6 @@ Fragment StreamingFlowGraphBuilder::BuildPartialTearoffInstantiation(
   instructions += flow_graph_builder_->StoreInstanceField(
       TokenPosition::kNoSource,
       NativeFieldDesc::Closure_delayed_type_arguments());
-
   instructions += Drop();  // Drop type args.
 
   // Copy over the target function.

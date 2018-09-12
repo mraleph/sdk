@@ -2700,6 +2700,7 @@ void LoadFieldInstr::InferRange(RangeAnalysis* analysis, Range* range) {
                        RangeBoundary::FromConstant(String::kMaxElements));
         break;
 
+      case NativeFieldDesc::Kind::kDartField:
       case NativeFieldDesc::Kind::kLocalVariable:
         // Use default value.
         Definition::InferRange(analysis, range);

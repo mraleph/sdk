@@ -104,18 +104,19 @@ class DartPrecompilationPipeline : public DartCompilationPipeline {
         for (; !it.Done(); it.Advance()) {
           StoreInstanceFieldInstr* store = it.Current()->AsStoreInstanceField();
           if (store != NULL) {
-            if (!store->field().IsNull() && store->field().is_final()) {
+            if (store->field().IsDartField() && store->field().field().is_final()) {
+              const Field& field = store->field().field();
 #ifndef PRODUCT
               if (FLAG_trace_precompiler && FLAG_support_il_printer) {
                 THR_Print("Found store to %s <- %s\n",
-                          store->field().ToCString(),
+                          field.ToCString(),
                           store->value()->Type()->ToCString());
               }
 #endif  // !PRODUCT
-              FieldTypePair* entry = field_map_->Lookup(&store->field());
+              FieldTypePair* entry = field_map_->Lookup(&field);
               if (entry == NULL) {
                 field_map_->Insert(FieldTypePair(
-                    &Field::Handle(zone_, store->field().raw()),  // Re-wrap.
+                    &Field::Handle(zone_, field.raw()),  // Re-wrap.
                     store->value()->Type()->ToCid()));
 #ifndef PRODUCT
                 if (FLAG_trace_precompiler && FLAG_support_il_printer) {

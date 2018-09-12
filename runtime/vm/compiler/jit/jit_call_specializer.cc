@@ -190,7 +190,7 @@ void JitCallSpecializer::VisitStoreInstanceField(
     // usage count of at least 1/kGetterSetterRatio of the getter usage count.
     // This is to avoid unboxing fields where the setter is never or rarely
     // executed.
-    const Field& field = instr->field();
+    const Field& field = instr->field().field();
     const String& field_name = String::Handle(Z, field.name());
     const Class& owner = Class::Handle(Z, field.Owner());
     const Function& getter =
