@@ -1940,6 +1940,7 @@ void StoreInstanceFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   Label skip_store;
 
   const Register instance_reg = locs()->in(0).reg();
+  const intptr_t offset_in_bytes = OffsetInBytes();
 
   if (IsUnboxedStore() && compiler->is_optimizing()) {
     const VRegister value = locs()->in(1).fpu_reg();
@@ -1965,9 +1966,9 @@ void StoreInstanceFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
 
       BoxAllocationSlowPath::Allocate(compiler, this, *cls, temp, temp2);
       __ MoveRegister(temp2, temp);
-      __ StoreIntoObjectOffset(instance_reg, offset_in_bytes_, temp2);
+      __ StoreIntoObjectOffset(instance_reg, offset_in_bytes, temp2);
     } else {
-      __ LoadFieldFromOffset(temp, instance_reg, offset_in_bytes_);
+      __ LoadFieldFromOffset(temp, instance_reg, offset_in_bytes);
     }
     switch (cid) {
       case kDoubleCid:
@@ -2043,7 +2044,7 @@ void StoreInstanceFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     {
       __ Bind(&store_double);
       EnsureMutableBox(compiler, this, temp, compiler->double_class(),
-                       instance_reg, offset_in_bytes_, temp2);
+                       instance_reg, offset_in_bytes, temp2);
       __ LoadDFieldFromOffset(VTMP, value_reg, Double::value_offset());
       __ StoreDFieldToOffset(VTMP, temp, Double::value_offset());
       __ b(&skip_store);
@@ -2052,7 +2053,7 @@ void StoreInstanceFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     {
       __ Bind(&store_float32x4);
       EnsureMutableBox(compiler, this, temp, compiler->float32x4_class(),
-                       instance_reg, offset_in_bytes_, temp2);
+                       instance_reg, offset_in_bytes, temp2);
       __ LoadQFieldFromOffset(VTMP, value_reg, Float32x4::value_offset());
       __ StoreQFieldToOffset(VTMP, temp, Float32x4::value_offset());
       __ b(&skip_store);
@@ -2061,7 +2062,7 @@ void StoreInstanceFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     {
       __ Bind(&store_float64x2);
       EnsureMutableBox(compiler, this, temp, compiler->float64x2_class(),
-                       instance_reg, offset_in_bytes_, temp2);
+                       instance_reg, offset_in_bytes, temp2);
       __ LoadQFieldFromOffset(VTMP, value_reg, Float64x2::value_offset());
       __ StoreQFieldToOffset(VTMP, temp, Float64x2::value_offset());
       __ b(&skip_store);
@@ -2076,16 +2077,16 @@ void StoreInstanceFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     // by executing 'ret LR' directly. Therefore we cannot overwrite LR. (see
     // ReturnInstr::EmitNativeCode).
     ASSERT((kDartAvailableCpuRegs & (1 << LR)) == 0);
-    __ StoreIntoObjectOffset(instance_reg, offset_in_bytes_, value_reg,
+    __ StoreIntoObjectOffset(instance_reg, offset_in_bytes, value_reg,
                              CanValueBeSmi(),
                              /*lr_reserved=*/!compiler->intrinsic_mode());
   } else {
     if (locs()->in(1).IsConstant()) {
-      __ StoreIntoObjectOffsetNoBarrier(instance_reg, offset_in_bytes_,
+      __ StoreIntoObjectOffsetNoBarrier(instance_reg, offset_in_bytes,
                                         locs()->in(1).constant());
     } else {
       const Register value_reg = locs()->in(1).reg();
-      __ StoreIntoObjectOffsetNoBarrier(instance_reg, offset_in_bytes_,
+      __ StoreIntoObjectOffsetNoBarrier(instance_reg, offset_in_bytes,
                                         value_reg);
     }
   }

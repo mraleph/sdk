@@ -4280,10 +4280,8 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
                           StoreBarrierType emit_store_barrier,
                           TokenPosition token_pos)
       : field_(field),
-        offset_in_bytes_(field.Offset()),
         emit_store_barrier_(emit_store_barrier),
-        token_pos_(token_pos),
-        is_initialization_(false) {
+        token_pos_(token_pos) {
     SetInputAt(kInstancePos, instance);
     SetInputAt(kValuePos, value);
     CheckField(field);
@@ -4295,10 +4293,8 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
                           StoreBarrierType emit_store_barrier,
                           TokenPosition token_pos)
       : native_field_(&field),
-        offset_in_bytes_(field.offset_in_bytes()),
         emit_store_barrier_(emit_store_barrier),
-        token_pos_(token_pos),
-        is_initialization_(false) {
+        token_pos_(token_pos) {
     SetInputAt(kInstancePos, instance);
     SetInputAt(kValuePos, value);
   }
@@ -4313,11 +4309,10 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
   Value* value() const { return inputs_[kValuePos]; }
   bool is_initialization() const { return is_initialization_; }
 
-  virtual TokenPosition token_pos() const { return token_pos_; }
-
   const Field& field() const { return field_; }
   const NativeFieldDesc* native_field() const { return native_field_; }
-  intptr_t offset_in_bytes() const { return offset_in_bytes_; }
+
+  virtual TokenPosition token_pos() const { return token_pos_; }
 
   bool ShouldEmitStoreBarrier() const {
     return value()->NeedsStoreBuffer() &&
@@ -4353,6 +4348,10 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
  private:
   friend class JitCallSpecializer;  // For ASSERT(initialization_).
 
+  intptr_t OffsetInBytes() const {
+    return !field().IsNull() ? field().Offset() : native_field()->offset_in_bytes();
+  }
+
   Assembler::CanBeSmi CanValueBeSmi() const {
     Isolate* isolate = Isolate::Current();
     if (isolate->type_checks() && !FLAG_strong) {
@@ -4370,11 +4369,10 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
 
   const Field& field_ = Field::ZoneHandle();
   const NativeFieldDesc* native_field_ = nullptr;
-  intptr_t offset_in_bytes_;
   StoreBarrierType emit_store_barrier_;
   const TokenPosition token_pos_;
   // Marks initializing stores. E.g. in the constructor.
-  bool is_initialization_;
+  bool is_initialization_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(StoreInstanceFieldInstr);
 };
@@ -5298,14 +5296,13 @@ class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
   virtual TokenPosition token_pos() const { return token_pos_; }
 
   const Field* field() const { return field_; }
+  const NativeFieldDesc* native_field() const { return native_field_; }
 
   virtual Representation representation() const;
 
   bool IsUnboxedLoad() const;
 
   bool IsPotentialUnboxedLoad() const;
-
-  const NativeFieldDesc* native_field() const { return native_field_; }
 
   DECLARE_INSTRUCTION(LoadField)
   virtual CompileType ComputeType() const;
