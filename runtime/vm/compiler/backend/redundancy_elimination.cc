@@ -113,12 +113,6 @@ class Place : public ValueObject {
     // NativeFieldDesc associated instead.
     kNativeField,
 
-    // LegacyVMField location. Represented as a pair of an instance
-    // (SSA definition) being accessed and offset to the field.
-    // TODO(vegorov) ensure that all native fields have NativeFieldDesc
-    // assigned.
-    kLegacyVMField,
-
     // Indexed location with a non-constant index.
     kIndexed,
 
@@ -178,8 +172,8 @@ class Place : public ValueObject {
           set_kind(kNativeField);
           native_field_ = load_field->native_field();
         } else {
-          set_kind(kLegacyVMField);
-          offset_in_bytes_ = load_field->offset_in_bytes();
+          // Either field() or native_field() must be present.
+          UNREACHABLE();
         }
         *is_load = true;
         break;
@@ -197,8 +191,8 @@ class Place : public ValueObject {
           set_kind(kNativeField);
           native_field_ = store->native_field();
         } else {
-          set_kind(kLegacyVMField);
-          offset_in_bytes_ = store->offset_in_bytes();
+          // Either field or native_field must be present.
+          UNREACHABLE();
         }
         *is_store = true;
         break;
@@ -295,7 +289,6 @@ class Place : public ValueObject {
     switch (kind()) {
       case kField:
       case kNativeField:
-      case kLegacyVMField:
       case kIndexed:
       case kConstantIndexed:
         return true;
@@ -365,11 +358,6 @@ class Place : public ValueObject {
     return *native_field_;
   }
 
-  intptr_t offset_in_bytes() const {
-    ASSERT(kind() == kLegacyVMField);
-    return offset_in_bytes_;
-  }
-
   Definition* index() const {
     ASSERT(kind() == kIndexed);
     return index_;
@@ -409,10 +397,6 @@ class Place : public ValueObject {
       case kNativeField:
         return Thread::Current()->zone()->PrintToString(
             "<%s.%s>", DefinitionName(instance()), native_field().name());
-
-      case kLegacyVMField:
-        return Thread::Current()->zone()->PrintToString(
-            "<%s.@%" Pd ">", DefinitionName(instance()), offset_in_bytes());
 
       case kIndexed:
         return Thread::Current()->zone()->PrintToString(
@@ -466,9 +450,10 @@ class Place : public ValueObject {
       : flags_(flags), instance_(instance), raw_selector_(selector), id_(0) {}
 
   bool SameField(const Place* other) const {
+    ASSERT(kind() == kField || kind() == kNativeField);
     return (kind() == kField)
                ? (field().Original() == other->field().Original())
-               : (offset_in_bytes_ == other->offset_in_bytes_);
+               : (native_field_ == other->native_field_);
   }
 
   intptr_t FieldHashcode() const {
@@ -949,9 +934,8 @@ class AliasedSet : public ZoneAllocated {
 
       case Place::kField:
       case Place::kNativeField:
-      case Place::kLegacyVMField:
         if (CanBeAliased(alias->instance())) {
-          // X.f or X.@offs alias with *.f and *.@offs respectively.
+          // X.f alias with *.f.
           CrossAlias(alias, alias->CopyWithoutInstance());
         }
         break;
@@ -982,7 +966,6 @@ class AliasedSet : public ZoneAllocated {
     }
 
     return ((place->kind() == Place::kField) ||
-            (place->kind() == Place::kLegacyVMField) ||
             (place->kind() == Place::kNativeField)) &&
            !CanBeAliased(place->instance());
   }
@@ -990,8 +973,7 @@ class AliasedSet : public ZoneAllocated {
   // Returns true if there are direct loads from the given place.
   bool HasLoadsFromPlace(Definition* defn, const Place* place) {
     ASSERT((place->kind() == Place::kField) ||
-           (place->kind() == Place::kNativeField) ||
-           (place->kind() == Place::kLegacyVMField));
+           (place->kind() == Place::kNativeField));
 
     for (Value* use = defn->input_use_list(); use != NULL;
          use = use->next_use()) {
@@ -1171,7 +1153,6 @@ static Definition* GetStoredValue(Instruction* instr) {
 
 static bool IsPhiDependentPlace(Place* place) {
   return ((place->kind() == Place::kField) ||
-          (place->kind() == Place::kLegacyVMField) ||
           (place->kind() == Place::kNativeField)) &&
          (place->instance() != NULL) && place->instance()->IsPhi();
 }
@@ -2992,16 +2973,14 @@ void AllocationSinking::DetachMaterializations() {
 }
 
 // Add a field/offset to the list of fields if it is not yet present there.
-static bool AddSlot(ZoneGrowableArray<const Object*>* slots,
-                    const Object& slot) {
-  ASSERT(slot.IsSmi() || slot.IsField());
-  ASSERT(!slot.IsField() || Field::Cast(slot).IsOriginal());
-  for (intptr_t i = 0; i < slots->length(); i++) {
-    if ((*slots)[i]->raw() == slot.raw()) {
+static bool AddSlot(ZoneGrowableArray<const SlotDesc*>* slots,
+                    const SlotDesc& slot) {
+  for (auto s : *slots) {
+    if (s->Equals(slot)) {
       return false;
     }
   }
-  slots->Add(&slot);
+  slots->Add(new SlotDesc(slot));
   return true;
 }
 
@@ -3048,7 +3027,7 @@ MaterializeObjectInstr* AllocationSinking::MaterializationFor(
 void AllocationSinking::CreateMaterializationAt(
     Instruction* exit,
     Definition* alloc,
-    const ZoneGrowableArray<const Object*>& slots) {
+    const ZoneGrowableArray<const SlotDesc*>& slots) {
   ZoneGrowableArray<Value*>* values =
       new (Z) ZoneGrowableArray<Value*>(slots.length());
 
@@ -3058,24 +3037,19 @@ void AllocationSinking::CreateMaterializationAt(
   Instruction* load_point = FirstMaterializationAt(exit);
 
   // Insert load instruction for every field.
-  for (intptr_t i = 0; i < slots.length(); i++) {
-    USE(load_point);
-    UNREACHABLE();
-#if 0
+  for (auto slot : slots) {
     LoadFieldInstr* load =
-        slots[i]->IsField()
-            ? new (Z) LoadFieldInstr(
-                  new (Z) Value(alloc), &Field::Cast(*slots[i]),
-                  AbstractType::ZoneHandle(Z), alloc->token_pos(), NULL)
-            : new (Z) LoadFieldInstr(
-                  new (Z) Value(alloc), Smi::Cast(*slots[i]).Value(),
-                  AbstractType::ZoneHandle(Z), alloc->token_pos());
-    flow_graph_->InsertBefore(load_point, load, NULL, FlowGraph::kValue);
+        slot->kind() == SlotDesc::Kind::kField
+            ? new (Z) LoadFieldInstr(new (Z) Value(alloc), &slot->field(),
+                                     AbstractType::ZoneHandle(Z),
+                                     alloc->token_pos(), nullptr)
+            : new (Z) LoadFieldInstr(new (Z) Value(alloc), slot->native_field(),
+                                     alloc->token_pos());
+    flow_graph_->InsertBefore(load_point, load, nullptr, FlowGraph::kValue);
     values->Add(new (Z) Value(load));
-#endif
   }
 
-  MaterializeObjectInstr* mat = NULL;
+  MaterializeObjectInstr* mat = nullptr;
   if (alloc->IsAllocateObject()) {
     mat = new (Z)
         MaterializeObjectInstr(alloc->AsAllocateObject(), slots, values);
@@ -3085,7 +3059,7 @@ void AllocationSinking::CreateMaterializationAt(
         alloc->AsAllocateUninitializedContext(), slots, values);
   }
 
-  flow_graph_->InsertBefore(exit, mat, NULL, FlowGraph::kValue);
+  flow_graph_->InsertBefore(exit, mat, nullptr, FlowGraph::kValue);
 
   // Replace all mentions of this allocation with a newly inserted
   // MaterializeObject instruction.
@@ -3171,17 +3145,17 @@ void AllocationSinking::ExitsCollector::CollectTransitively(Definition* alloc) {
 
 void AllocationSinking::InsertMaterializations(Definition* alloc) {
   // Collect all fields that are written for this instance.
-  ZoneGrowableArray<const Object*>* slots =
-      new (Z) ZoneGrowableArray<const Object*>(5);
+  auto slots = new (Z) ZoneGrowableArray<const SlotDesc*>(5);
 
   for (Value* use = alloc->input_use_list(); use != NULL;
        use = use->next_use()) {
     StoreInstanceFieldInstr* store = use->instruction()->AsStoreInstanceField();
     if ((store != NULL) && (store->instance()->definition() == alloc)) {
       if (!store->field().IsNull()) {
-        AddSlot(slots, Field::ZoneHandle(Z, store->field().Original()));
+        AddSlot(slots,
+                SlotDesc(Field::ZoneHandle(Z, store->field().Original())));
       } else {
-        AddSlot(slots, Smi::ZoneHandle(Z, Smi::New(store->offset_in_bytes())));
+        AddSlot(slots, SlotDesc(*store->native_field()));
       }
     }
   }
@@ -3189,9 +3163,8 @@ void AllocationSinking::InsertMaterializations(Definition* alloc) {
   if (alloc->ArgumentCount() > 0) {
     AllocateObjectInstr* alloc_object = alloc->AsAllocateObject();
     ASSERT(alloc_object->ArgumentCount() == 1);
-    intptr_t type_args_offset =
-        alloc_object->cls().type_arguments_field_offset();
-    AddSlot(slots, Smi::ZoneHandle(Z, Smi::New(type_args_offset)));
+    AddSlot(slots, SlotDesc(NativeFieldDesc::GetTypeArgumentsFieldFor(
+                       flow_graph_->thread(), alloc_object->cls())));
   }
 
   // Collect all instructions that mention this object in the environment.

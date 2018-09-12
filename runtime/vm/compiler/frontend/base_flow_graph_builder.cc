@@ -450,7 +450,8 @@ Fragment BaseFlowGraphBuilder::StoreLocal(TokenPosition position,
     instructions += LoadContextAt(variable->owner()->context_level());
     instructions += LoadLocal(value);
     instructions += StoreInstanceField(
-        position, NativeFieldDesc::GetContextVariableFieldFor(thread_, variable));
+        position,
+        NativeFieldDesc::GetContextVariableFieldFor(thread_, variable));
     return instructions;
   }
   return StoreLocalRaw(position, variable);

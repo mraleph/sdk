@@ -253,7 +253,8 @@ void JitCallSpecializer::LowerContextAllocation(Definition* alloc,
   Value* initial_value;
   if (context_value != NULL) {
     LoadFieldInstr* load = new (Z)
-        LoadFieldInstr(context_value->CopyWithType(Z), NativeFieldDesc::Context_parent(), alloc->token_pos());
+        LoadFieldInstr(context_value->CopyWithType(Z),
+                       NativeFieldDesc::Context_parent(), alloc->token_pos());
     flow_graph()->InsertAfter(cursor, load, NULL, FlowGraph::kValue);
     cursor = load;
     initial_value = new (Z) Value(load);
@@ -270,7 +271,8 @@ void JitCallSpecializer::LowerContextAllocation(Definition* alloc,
   cursor = replacement;
 
   for (auto variable : context_scope->context_variables()) {
-    const auto& field = NativeFieldDesc::GetContextVariableFieldFor(thread(), variable);
+    const auto& field =
+        NativeFieldDesc::GetContextVariableFieldFor(thread(), variable);
     if (context_value != nullptr) {
       LoadFieldInstr* load = new (Z) LoadFieldInstr(
           context_value->CopyWithType(Z), field, alloc->token_pos());

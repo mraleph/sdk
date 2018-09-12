@@ -832,8 +832,8 @@ Definition* EffectGraphVisitor::BuildStoreLocal(const LocalVariable& local,
     }
     Value* tmp_val = Bind(new (Z) LoadLocalInstr(*tmp_var, token_pos));
     StoreInstanceFieldInstr* store = new (Z) StoreInstanceFieldInstr(
-        NativeFieldDesc::GetContextVariableFieldFor(thread(), &local), context, tmp_val,
-        kEmitStoreBarrier, token_pos);
+        NativeFieldDesc::GetContextVariableFieldFor(thread(), &local), context,
+        tmp_val, kEmitStoreBarrier, token_pos);
     Do(store);
     return ExitTempLocalScope(value);
   } else {
@@ -853,9 +853,9 @@ Definition* EffectGraphVisitor::BuildLoadLocal(const LocalVariable& local,
       context = Bind(new (Z) LoadFieldInstr(
           context, NativeFieldDesc::Context_parent(), token_pos));
     }
-    LoadFieldInstr* load = new (Z)
-        LoadFieldInstr(context, NativeFieldDesc::GetContextVariableFieldFor(thread(), &local),
-                       token_pos);
+    LoadFieldInstr* load = new (Z) LoadFieldInstr(
+        context, NativeFieldDesc::GetContextVariableFieldFor(thread(), &local),
+        token_pos);
     load->set_is_immutable(local.is_final());
     return load;
   } else {
@@ -2242,17 +2242,15 @@ void EffectGraphVisitor::VisitStringInterpolateNode(
   ReturnDefinition(instr);
 }
 
-static LocalVariable* MakeVariable(
-    Zone* zone,
-    TokenPosition declaration_pos,
-    TokenPosition token_pos,
-    const String& name,
-    const AbstractType& type) {
+static LocalVariable* MakeVariable(Zone* zone,
+                                   TokenPosition declaration_pos,
+                                   TokenPosition token_pos,
+                                   const String& name,
+                                   const AbstractType& type) {
   CompileType* param_type = nullptr;
   return new (zone)
       LocalVariable(declaration_pos, token_pos, name, type, param_type);
 }
-
 
 static Type& GetCanonicalType(Zone* zone, const Class& klass) {
   ASSERT(!klass.IsNull());
@@ -2272,7 +2270,8 @@ static Type& GetCanonicalType(Zone* zone, const Class& klass) {
   return type;
 }
 
-static const LocalScope* MakeImplicitClosureScope(Zone* zone, const Function& function) {
+static const LocalScope* MakeImplicitClosureScope(Zone* zone,
+                                                  const Function& function) {
   Class& klass = Class::Handle(zone, function.Owner());
   Type& klass_type = GetCanonicalType(zone, klass);
   LocalVariable* this_variable =
@@ -2391,8 +2390,8 @@ void EffectGraphVisitor::VisitClosureNode(ClosureNode* node) {
         Append(for_receiver);
         Value* receiver = for_receiver.value();
         Do(new (Z) StoreInstanceFieldInstr(
-            NativeFieldDesc::GetContextVariableFieldFor(thread(),
-                implicit_scope->context_variables()[0]),
+            NativeFieldDesc::GetContextVariableFieldFor(
+                thread(), implicit_scope->context_variables()[0]),
             context_tmp_val, receiver, kEmitStoreBarrier, node->token_pos()));
         // Store new context in closure.
         closure_tmp_val =
@@ -2774,7 +2773,8 @@ Value* EffectGraphVisitor::BuildInstantiatorTypeArguments(
   Value* instantiator = BuildInstantiator(token_pos);
 
   return Bind(new (Z) LoadFieldInstr(
-      instantiator, NativeFieldDesc::GetTypeArgumentsFieldFor(thread(), instantiator_class),
+      instantiator,
+      NativeFieldDesc::GetTypeArgumentsFieldFor(thread(), instantiator_class),
       token_pos));
 }
 
@@ -3264,8 +3264,9 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
       }
       case MethodRecognizer::kGrowableArrayCapacity: {
         Value* receiver = Bind(BuildLoadThisVar(node->scope(), token_pos));
-        LoadFieldInstr* data_load =
-            new (Z) LoadFieldInstr(receiver, NativeFieldDesc::GrowableObjectArray_data(), node->token_pos());
+        LoadFieldInstr* data_load = new (Z) LoadFieldInstr(
+            receiver, NativeFieldDesc::GrowableObjectArray_data(),
+            node->token_pos());
         Value* data = Bind(data_load);
         LoadFieldInstr* length_load = new (Z) LoadFieldInstr(
             data, NativeFieldDesc::Array_length(), node->token_pos());
@@ -3288,7 +3289,9 @@ void EffectGraphVisitor::VisitNativeBodyNode(NativeBodyNode* node) {
         auto arg_descriptor = comparison.Bind(new (Z) LoadLocalInstr(
             *owner_->parsed_function().arg_desc_var(), token_pos));
         auto positional_count = comparison.Bind(new (Z) LoadFieldInstr(
-            arg_descriptor, NativeFieldDesc::ArgumentsDescriptor_positional_count(), token_pos));
+            arg_descriptor,
+            NativeFieldDesc::ArgumentsDescriptor_positional_count(),
+            token_pos));
         auto constant_1 = comparison.Bind(
             new (Z) ConstantInstr(Smi::ZoneHandle(Z, Smi::New(2))));
         comparison.ReturnDefinition(new (Z) StrictCompareInstr(

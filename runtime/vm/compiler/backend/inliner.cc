@@ -621,8 +621,7 @@ static void ReplaceParameterStubs(Zone* zone,
           ASSERT(call_data->call->IsClosureCall());
           LoadFieldInstr* context_load = new (zone) LoadFieldInstr(
               new Value((*arguments)[first_arg_index]->definition()),
-              NativeFieldDesc::Closure_context(),
-              call_data->call->token_pos());
+              NativeFieldDesc::Closure_context(), call_data->call->token_pos());
           context_load->set_is_immutable(true);
           context_load->set_ssa_temp_index(
               caller_graph->alloc_ssa_temp_index());
@@ -2425,10 +2424,11 @@ static bool InlineSetIndexed(FlowGraph* flow_graph,
       case kArrayCid:
       case kGrowableObjectArrayCid: {
         const Class& instantiator_class = Class::Handle(Z, target.Owner());
-        LoadFieldInstr* load_type_args = new (Z) LoadFieldInstr(
-            new (Z) Value(array),
-            NativeFieldDesc::GetTypeArgumentsFieldFor(flow_graph->thread(), instantiator_class),
-            call->token_pos());
+        LoadFieldInstr* load_type_args = new (Z)
+            LoadFieldInstr(new (Z) Value(array),
+                           NativeFieldDesc::GetTypeArgumentsFieldFor(
+                               flow_graph->thread(), instantiator_class),
+                           call->token_pos());
         cursor = flow_graph->AppendTo(cursor, load_type_args, NULL,
                                       FlowGraph::kValue);
         type_args = load_type_args;

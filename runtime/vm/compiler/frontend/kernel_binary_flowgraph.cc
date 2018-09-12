@@ -558,7 +558,8 @@ FlowGraph* StreamingFlowGraphBuilder::BuildGraphOfImplicitClosureFunction(
     body +=
         LoadLocal(parsed_function()->node_sequence()->scope()->VariableAt(0));
     body += LoadNativeField(NativeFieldDesc::Closure_context());
-    body += LoadNativeField(NativeFieldDesc::GetContextVariableFieldFor(thread(), scopes()->this_variable));
+    body += LoadNativeField(NativeFieldDesc::GetContextVariableFieldFor(
+        thread(), scopes()->this_variable));
     body += PushArgument();
   }
 
@@ -670,13 +671,15 @@ FlowGraph* StreamingFlowGraphBuilder::BuildGraphOfNoSuchMethodForwarder(
       body += B->LoadArgDescriptor();
       body += LoadNativeField(NativeFieldDesc::ArgumentsDescriptor_count());
       body += LoadLocal(parsed_function()->current_context_var());
-      body += B->LoadField(Context::variable_offset(0));
+      body += B->LoadNativeField(NativeFieldDesc::GetContextVariableFieldFor(
+          thread(), scopes()->this_variable));
       body += B->StoreFpRelativeSlot(kWordSize *
                                      compiler_frame_layout.param_end_from_fp);
       body += Drop();
     } else {
       body += LoadLocal(parsed_function()->current_context_var());
-      body += B->LoadField(Context::variable_offset(0));
+      body += B->LoadNativeField(NativeFieldDesc::GetContextVariableFieldFor(
+          thread(), scopes()->this_variable));
       body += B->StoreFpRelativeSlot(
           kWordSize *
           (compiler_frame_layout.param_end_from_fp + function.NumParameters()));
@@ -827,7 +830,8 @@ FlowGraph* StreamingFlowGraphBuilder::BuildGraphOfNoSuchMethodForwarder(
       body += Constant(type);
     } else {
       body += LoadLocal(parsed_function()->current_context_var());
-      body += B->LoadField(Context::variable_offset(0));
+      body += B->LoadNativeField(NativeFieldDesc::GetContextVariableFieldFor(
+          thread(), scopes()->this_variable));
     }
   } else {
     LocalScope* scope = parsed_function()->node_sequence()->scope();
@@ -1333,7 +1337,8 @@ Fragment StreamingFlowGraphBuilder::TypeArgumentsHandling(
       prologue += LoadLocal(fn_type_args);
       prologue += PushArgument();
       prologue += LoadLocal(closure);
-      prologue += LoadNativeField(NativeFieldDesc::Closure_function_type_arguments());
+      prologue +=
+          LoadNativeField(NativeFieldDesc::Closure_function_type_arguments());
       prologue += PushArgument();
       prologue += IntConstant(dart_function.NumParentTypeParameters());
       prologue += PushArgument();
@@ -1354,7 +1359,8 @@ Fragment StreamingFlowGraphBuilder::TypeArgumentsHandling(
       prologue += Drop();
     } else {
       prologue += LoadLocal(closure);
-      prologue += LoadNativeField(NativeFieldDesc::Closure_function_type_arguments());
+      prologue +=
+          LoadNativeField(NativeFieldDesc::Closure_function_type_arguments());
       prologue += StoreLocal(TokenPosition::kNoSource, fn_type_args);
       prologue += Drop();
     }
@@ -2510,7 +2516,8 @@ Fragment StreamingFlowGraphBuilder::AllocateContext(const LocalScope* scope) {
   return flow_graph_builder_->AllocateContext(scope);
 }
 
-Fragment StreamingFlowGraphBuilder::LoadNativeField(const NativeFieldDesc& field) {
+Fragment StreamingFlowGraphBuilder::LoadNativeField(
+    const NativeFieldDesc& field) {
   return flow_graph_builder_->LoadNativeField(field);
 }
 

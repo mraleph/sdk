@@ -11,6 +11,7 @@
 namespace dart {
 
 class CSEInstructionMap;
+class SlotDesc;
 
 class AllocationSinking : public ZoneAllocated {
  public:
@@ -62,9 +63,10 @@ class AllocationSinking : public ZoneAllocated {
 
   void InsertMaterializations(Definition* alloc);
 
-  void CreateMaterializationAt(Instruction* exit,
-                               Definition* alloc,
-                               const ZoneGrowableArray<const Object*>& fields);
+  void CreateMaterializationAt(
+      Instruction* exit,
+      Definition* alloc,
+      const ZoneGrowableArray<const SlotDesc*>& fields);
 
   void EliminateAllocation(Definition* alloc);
 

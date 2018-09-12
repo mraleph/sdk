@@ -463,8 +463,7 @@ static void PrepareIndexedOp(BlockBuilder* builder,
                              Definition* index,
                              const NativeFieldDesc& length_field) {
   Definition* length = builder->AddDefinition(new LoadFieldInstr(
-      new Value(array), length_field,
-      TokenPosition::kNoSource));
+      new Value(array), length_field, TokenPosition::kNoSource));
   builder->AddInstruction(new CheckArrayBoundInstr(
       new Value(length), new Value(index), DeoptId::kNone));
 }
@@ -478,7 +477,8 @@ static bool IntrinsifyArrayGetIndexed(FlowGraph* flow_graph,
   Definition* index = builder.AddParameter(1);
   Definition* array = builder.AddParameter(2);
 
-  PrepareIndexedOp(&builder, array, index, NativeFieldDesc::GetLengthFieldForArrayCid(array_cid));
+  PrepareIndexedOp(&builder, array, index,
+                   NativeFieldDesc::GetLengthFieldForArrayCid(array_cid));
 
   if (RawObject::IsExternalTypedDataClassId(array_cid)) {
     array = builder.AddDefinition(new LoadUntaggedInstr(
@@ -555,7 +555,8 @@ static bool IntrinsifyArraySetIndexed(FlowGraph* flow_graph,
   Definition* index = builder.AddParameter(2);
   Definition* array = builder.AddParameter(3);
 
-  PrepareIndexedOp(&builder, array, index, NativeFieldDesc::GetLengthFieldForArrayCid(array_cid));
+  PrepareIndexedOp(&builder, array, index,
+                   NativeFieldDesc::GetLengthFieldForArrayCid(array_cid));
 
   // Value check/conversion.
   switch (array_cid) {
@@ -874,15 +875,16 @@ bool Intrinsifier::Build_Float32x4ShuffleW(FlowGraph* flow_graph) {
                                MethodRecognizer::kFloat32x4ShuffleW);
 }
 
-static bool BuildLoadField(FlowGraph* flow_graph, const NativeFieldDesc& field) {
+static bool BuildLoadField(FlowGraph* flow_graph,
+                           const NativeFieldDesc& field) {
   GraphEntryInstr* graph_entry = flow_graph->graph_entry();
   TargetEntryInstr* normal_entry = graph_entry->normal_entry();
   BlockBuilder builder(flow_graph, normal_entry);
 
   Definition* array = builder.AddParameter(1);
 
-  Definition* length = builder.AddDefinition(new LoadFieldInstr(
-      new Value(array), field, builder.TokenPos()));
+  Definition* length = builder.AddDefinition(
+      new LoadFieldInstr(new Value(array), field, builder.TokenPos()));
   builder.AddIntrinsicReturn(new Value(length));
   return true;
 }
@@ -896,7 +898,8 @@ bool Intrinsifier::Build_ImmutableArrayLength(FlowGraph* flow_graph) {
 }
 
 bool Intrinsifier::Build_GrowableArrayLength(FlowGraph* flow_graph) {
-  return BuildLoadField(flow_graph, NativeFieldDesc::GrowableObjectArray_length());
+  return BuildLoadField(flow_graph,
+                        NativeFieldDesc::GrowableObjectArray_length());
 }
 
 bool Intrinsifier::Build_StringBaseLength(FlowGraph* flow_graph) {
@@ -918,8 +921,8 @@ bool Intrinsifier::Build_GrowableArrayCapacity(FlowGraph* flow_graph) {
       new Value(array), NativeFieldDesc::GrowableObjectArray_data(),
       builder.TokenPos()));
   Definition* capacity = builder.AddDefinition(
-      new LoadFieldInstr(new Value(backing_store), NativeFieldDesc::Array_length(),
-                         builder.TokenPos()));
+      new LoadFieldInstr(new Value(backing_store),
+                         NativeFieldDesc::Array_length(), builder.TokenPos()));
   builder.AddIntrinsicReturn(new Value(capacity));
   return true;
 }

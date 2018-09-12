@@ -610,7 +610,8 @@ void GuardFieldInstr::PrintOperandsTo(BufferFormatter* f) const {
 void StoreInstanceFieldInstr::PrintOperandsTo(BufferFormatter* f) const {
   if (field().IsNull()) {
     ASSERT(native_field() != nullptr);
-    f->Print("%s @%" Pd ", ", native_field()->name(), native_field()->offset_in_bytes());
+    f->Print("%s @%" Pd ", ", native_field()->name(),
+             native_field()->offset_in_bytes());
   } else {
     f->Print("%s @%" Pd ", ", String::Handle(field().name()).ToCString(),
              field().Offset());
@@ -675,16 +676,17 @@ void MaterializeObjectInstr::PrintOperandsTo(BufferFormatter* f) const {
 
 void LoadFieldInstr::PrintOperandsTo(BufferFormatter* f) const {
   instance()->PrintTo(f);
-  f->Print(", %" Pd, offset_in_bytes());
 
   if (field() != nullptr) {
-    f->Print(" {%s} %s", String::Handle(field()->name()).ToCString(),
+    f->Print("%s {%s}", String::Handle(field()->name()).ToCString(),
              field()->GuardedPropertiesAsCString());
   }
 
   if (native_field() != nullptr) {
-    f->Print(" {%s}", native_field()->name());
+    f->Print("%s", native_field()->name());
   }
+
+  f->Print(" @%" Pd, offset_in_bytes());
 
   if (immutable_) {
     f->Print(", immutable");

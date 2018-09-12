@@ -97,7 +97,8 @@ Fragment PrologueBuilder::BuildTypeArgumentsLengthCheck(bool strong,
   // If expect_type_args, a non-zero length must match the declaration length.
   TargetEntryInstr *then, *fail;
   check_type_args += LoadArgDescriptor();
-  check_type_args += LoadNativeField(NativeFieldDesc::ArgumentsDescriptor_type_args_len());
+  check_type_args +=
+      LoadNativeField(NativeFieldDesc::ArgumentsDescriptor_type_args_len());
   if (expect_type_args) {
     JoinEntryInstr* join2 = BuildJoinEntry();
 
@@ -150,7 +151,8 @@ Fragment PrologueBuilder::BuildOptionalParameterHandling(bool strong,
   LocalVariable* positional_count_var = MakeTemporary();
 
   copy_args_prologue += LoadArgDescriptor();
-  copy_args_prologue += LoadNativeField(NativeFieldDesc::ArgumentsDescriptor_count());
+  copy_args_prologue +=
+      LoadNativeField(NativeFieldDesc::ArgumentsDescriptor_count());
   LocalVariable* count_var = MakeTemporary();
 
   // Ensure the caller provided at least [min_num_pos_args] arguments.
@@ -377,7 +379,8 @@ Fragment PrologueBuilder::BuildFixedParameterLengthChecks(bool strong,
   TargetEntryInstr *then2, *fail2;
   Fragment check_len(then);
   check_len += LoadArgDescriptor();
-  check_len += LoadNativeField(NativeFieldDesc::ArgumentsDescriptor_positional_count());
+  check_len +=
+      LoadNativeField(NativeFieldDesc::ArgumentsDescriptor_positional_count());
   check_len += BranchIfEqual(&then2, &fail2);
 
   Fragment(fail) + Goto(nsm);
@@ -410,7 +413,8 @@ Fragment PrologueBuilder::BuildTypeArgumentsHandling(JoinEntryInstr* nsm) {
 
   Fragment store_type_args;
   store_type_args += LoadArgDescriptor();
-  store_type_args += LoadNativeField(NativeFieldDesc::ArgumentsDescriptor_count());
+  store_type_args +=
+      LoadNativeField(NativeFieldDesc::ArgumentsDescriptor_count());
   store_type_args += LoadFpRelativeSlot(
       kWordSize * (1 + compiler_frame_layout.param_end_from_fp));
   store_type_args += StoreLocal(TokenPosition::kNoSource, type_args_var);

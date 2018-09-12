@@ -749,6 +749,7 @@ class NativeFieldDescCache : public ZoneAllocated {
     auto result = fields_.LookupValue(&value);
     if (result == nullptr) {
       result = new (zone_) NativeFieldDesc(value);
+      fields_.Insert(result);
     }
     return *result;
   }
@@ -765,12 +766,10 @@ const NativeFieldDesc& NativeFieldDesc::Get(Kind kind) {
   static const NativeFieldDesc fields[] = {
 #define IMMUTABLE (kIsImmutableBit)
 #define MUTABLE (0)
-#define DEFINE_NATIVE_FIELD(ClassName, FieldName, cid, mutability)           \
+#define DEFINE_NATIVE_FIELD(ClassName, FieldName, cid, mutability)             \
   NativeFieldDesc(Kind::k##ClassName##_##FieldName,                            \
-                  kNameIsCStringBit | mutability,    \
-                  k##cid##Cid, \
-                  ClassName::FieldName##_offset(),                \
-                  #ClassName "." #FieldName),
+                  kNameIsCStringBit | mutability, k##cid##Cid,                 \
+                  ClassName::FieldName##_offset(), #ClassName "." #FieldName),
 
       NATIVE_FIELDS_LIST(DEFINE_NATIVE_FIELD)
 
@@ -818,7 +817,8 @@ const NativeFieldDesc& NativeFieldDesc::GetTypeArgumentsFieldFor(
   ASSERT(offset != Class::kNoTypeArguments);
 
   return NativeFieldDescCache::Get(thread).Canonicalize(
-      NativeFieldDesc(Kind::kTypeArguments, kIsImmutableBit | kNameIsCStringBit, kDynamicCid, offset, ":type_arguments"));
+      NativeFieldDesc(Kind::kTypeArguments, kIsImmutableBit | kNameIsCStringBit,
+                      kDynamicCid, offset, ":type_arguments"));
 }
 
 const NativeFieldDesc& NativeFieldDesc::GetContextVariableFieldFor(
@@ -828,8 +828,7 @@ const NativeFieldDesc& NativeFieldDesc::GetContextVariableFieldFor(
   return NativeFieldDescCache::Get(thread).Canonicalize(NativeFieldDesc(
       Kind::kLocalVariable, variable->is_final() ? kIsImmutableBit : 0,
       kDynamicCid,  // TODO(vegorov) assign the proper type
-      Context::variable_offset(variable->index().value()),
-      &variable->name()));
+      Context::variable_offset(variable->index().value()), &variable->name()));
 }
 
 RawAbstractType* NativeFieldDesc::type() const {
@@ -857,7 +856,9 @@ bool NativeFieldDesc::IsEqualName(const void* other_name) const {
 
 bool NativeFieldDesc::Equals(const NativeFieldDesc* other) const {
   return (kind_ == other->kind_) && (bits_ == other->bits_) &&
-         (cid_ == other->cid_) && (offset_in_bytes_ == other->offset_in_bytes_) && IsEqualName(other->name_);
+         (cid_ == other->cid_) &&
+         (offset_in_bytes_ == other->offset_in_bytes_) &&
+         IsEqualName(other->name_);
 }
 
 intptr_t NativeFieldDesc::Hashcode() const {
@@ -2603,6 +2604,8 @@ bool LoadFieldInstr::IsImmutableLengthLoad() const {
       case NativeFieldDesc::Kind::kLinkedHashMap_used_data:
       case NativeFieldDesc::Kind::kLinkedHashMap_deleted_keys:
       case NativeFieldDesc::Kind::kArgumentsDescriptor_type_args_len:
+      case NativeFieldDesc::Kind::kArgumentsDescriptor_positional_count:
+      case NativeFieldDesc::Kind::kArgumentsDescriptor_count:
       case NativeFieldDesc::Kind::kTypeArguments:
       case NativeFieldDesc::Kind::kGrowableObjectArray_data:
       case NativeFieldDesc::Kind::kContext_parent:
@@ -2746,7 +2749,8 @@ Definition* LoadFieldInstr::Canonicalize(FlowGraph* flow_graph) {
             AbstractType::Handle(field->type()).arguments()));
       } else if (const NativeFieldDesc* native_field =
                      load_array->native_field()) {
-        if (native_field->kind() == NativeFieldDesc::Kind::kLinkedHashMap_data) {
+        if (native_field->kind() ==
+            NativeFieldDesc::Kind::kLinkedHashMap_data) {
           return flow_graph->constant_null();
         }
       }

@@ -4186,7 +4186,7 @@ class DebugStepCheckInstr : public TemplateInstruction<0, NoThrow> {
   V(LinkedHashMap, deleted_keys, Smi, MUTABLE)                                 \
   V(ArgumentsDescriptor, type_args_len, Smi, IMMUTABLE)                        \
   V(ArgumentsDescriptor, positional_count, Smi, IMMUTABLE)                     \
-  V(ArgumentsDescriptor, count, Smi, IMMUTABLE)                                \
+  V(ArgumentsDescriptor, count, Smi, IMMUTABLE)
 
 class NativeFieldDesc : public ZoneAllocated {
  public:
@@ -4991,13 +4991,65 @@ class AllocateUninitializedContextInstr
   DISALLOW_COPY_AND_ASSIGN(AllocateUninitializedContextInstr);
 };
 
+class SlotDesc : public ZoneAllocated {
+ public:
+  enum class Kind { kField, kNativeField };
+
+  SlotDesc(const SlotDesc& other) : kind_(other.kind_), field_(other.field_) {}
+
+  explicit SlotDesc(const Field& field) : kind_(Kind::kField), field_(&field) {}
+  explicit SlotDesc(const NativeFieldDesc& desc)
+      : kind_(Kind::kNativeField), field_(&desc) {}
+
+  Kind kind() const { return kind_; }
+
+  const char* ToCString() const {
+    switch (kind()) {
+      case Kind::kField:
+        return field().ToCString();
+      case Kind::kNativeField:
+        return native_field().name();
+    }
+    UNREACHABLE();
+    return "<?>";
+  }
+
+  const Field& field() const {
+    ASSERT(kind() == Kind::kField);
+    return *static_cast<const Field*>(field_);
+  }
+
+  const NativeFieldDesc& native_field() const {
+    ASSERT(kind() == Kind::kNativeField);
+    return *static_cast<const NativeFieldDesc*>(field_);
+  }
+
+  bool Equals(const SlotDesc& other) const {
+    if (kind_ == other.kind_) {
+      switch (kind_) {
+        case Kind::kNativeField:
+          return field_ == other.field_;
+        case Kind::kField:
+          return field().raw() == other.field().raw();
+        default:
+          UNREACHABLE();
+      }
+    }
+    return false;
+  }
+
+ private:
+  Kind kind_;
+  const void* field_;
+};
+
 // This instruction captures the state of the object which had its allocation
 // removed during the AllocationSinking pass.
 // It does not produce any real code only deoptimization information.
 class MaterializeObjectInstr : public Definition {
  public:
   MaterializeObjectInstr(AllocateObjectInstr* allocation,
-                         const ZoneGrowableArray<const Object*>& slots,
+                         const ZoneGrowableArray<const SlotDesc*>& slots,
                          ZoneGrowableArray<Value*>* values)
       : allocation_(allocation),
         cls_(allocation->cls()),
@@ -5015,7 +5067,7 @@ class MaterializeObjectInstr : public Definition {
   }
 
   MaterializeObjectInstr(AllocateUninitializedContextInstr* allocation,
-                         const ZoneGrowableArray<const Object*>& slots,
+                         const ZoneGrowableArray<const SlotDesc*>& slots,
                          ZoneGrowableArray<Value*>* values)
       : allocation_(allocation),
         cls_(Class::ZoneHandle(Object::context_class())),
@@ -5038,8 +5090,14 @@ class MaterializeObjectInstr : public Definition {
   intptr_t num_variables() const { return num_variables_; }
 
   intptr_t FieldOffsetAt(intptr_t i) const {
-    return slots_[i]->IsField() ? Field::Cast(*slots_[i]).Offset()
-                                : Smi::Cast(*slots_[i]).Value();
+    switch (slots_[i]->kind()) {
+      case SlotDesc::Kind::kField:
+        return slots_[i]->field().Offset();
+      case SlotDesc::Kind::kNativeField:
+        return slots_[i]->native_field().offset_in_bytes();
+    }
+    UNREACHABLE();
+    return 0;
   }
 
   const Location& LocationAt(intptr_t i) { return locations_[i]; }
@@ -5083,7 +5141,7 @@ class MaterializeObjectInstr : public Definition {
   Definition* allocation_;
   const Class& cls_;
   intptr_t num_variables_;
-  const ZoneGrowableArray<const Object*>& slots_;
+  const ZoneGrowableArray<const SlotDesc*>& slots_;
   ZoneGrowableArray<Value*>* values_;
   Location* locations_;
 
