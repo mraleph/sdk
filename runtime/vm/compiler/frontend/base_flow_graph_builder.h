@@ -131,7 +131,7 @@ class BaseFlowGraphBuilder {
         exit_collector_(exit_collector),
         inlining_unchecked_entry_(inlining_unchecked_entry) {}
 
-  Fragment LoadNativeField(const NativeFieldDesc& native_field);
+  Fragment LoadNativeField(const Slot& native_field);
   Fragment LoadIndexed(intptr_t index_scale);
 
   void SetTempIndex(Definition* definition);
@@ -145,7 +145,7 @@ class BaseFlowGraphBuilder {
   const Field& MayCloneField(const Field& field);
   Fragment StoreInstanceField(
       TokenPosition position,
-      const NativeFieldDesc& field,
+      const Slot& field,
       StoreBarrierType emit_store_barrier = kEmitStoreBarrier);
   Fragment StoreInstanceField(
       const Field& field,

@@ -57,8 +57,10 @@ class CSEInstructionMap : public ValueObject {
 // We distinguish the following aliases:
 //
 //   - for fields
-//     - *.f, *.@offs - field inside some object;
-//     - X.f, X.@offs - field inside an allocated object X;
+//     - *.f - field inside some object;
+//     - X.f - field inside an allocated object X;
+//     -   f - static fields
+//
 //   - for indexed accesses
 //     - *[*] - non-constant index inside some object;
 //     - *[C] - constant index inside some object;
@@ -102,16 +104,13 @@ class Place : public ValueObject {
   enum Kind {
     kNone,
 
-    // Field location. For instance fields is represented as a pair of a Field
-    // object and an instance (SSA definition) that is being accessed.
-    // For static fields instance is NULL.
-    // Field locations have Field objects associated with them.
-    kField,
+    // Static field location. Is represented as a Field object with a
+    // nullptr instance.
+    kStaticField,
 
-    // Native field location (e.g. type arguments field). They don't
-    // have Field object associated with them, but have a unique
-    // NativeFieldDesc associated instead.
-    kNativeField,
+    // Instance field location. It is reprensented by a pair of instance
+    // and a Slot.
+    kInstanceField,
 
     // Indexed location with a non-constant index.
     kIndexed,
@@ -165,8 +164,8 @@ class Place : public ValueObject {
         LoadFieldInstr* load_field = instr->AsLoadField();
         set_representation(load_field->representation());
         instance_ = load_field->instance()->definition()->OriginalDefinition();
-        set_kind(kNativeField);
-        native_field_ = &load_field->native_field();
+        set_kind(kInstanceField);
+        instance_field_ = &load_field->slot();
         *is_load = true;
         break;
       }
@@ -176,25 +175,25 @@ class Place : public ValueObject {
         set_representation(store->RequiredInputRepresentation(
             StoreInstanceFieldInstr::kValuePos));
         instance_ = store->instance()->definition()->OriginalDefinition();
-        set_kind(kNativeField);
-        native_field_ = &store->field();
+        set_kind(kInstanceField);
+        instance_field_ = &store->slot();
         *is_store = true;
         break;
       }
 
       case Instruction::kLoadStaticField:
-        set_kind(kField);
+        set_kind(kStaticField);
         set_representation(instr->AsLoadStaticField()->representation());
-        field_ = &instr->AsLoadStaticField()->StaticField();
+        static_field_ = &instr->AsLoadStaticField()->StaticField();
         *is_load = true;
         break;
 
       case Instruction::kStoreStaticField:
-        set_kind(kField);
+        set_kind(kStaticField);
         set_representation(
             instr->AsStoreStaticField()->RequiredInputRepresentation(
                 StoreStaticFieldInstr::kValuePos));
-        field_ = &instr->AsStoreStaticField()->field();
+        static_field_ = &instr->AsStoreStaticField()->field();
         *is_store = true;
         break;
 
@@ -226,14 +225,10 @@ class Place : public ValueObject {
 
   bool IsConstant(Object* value) const {
     switch (kind()) {
-      case kField:
+      case kInstanceField:
         return (instance() != nullptr) && instance()->IsConstant() &&
                LoadFieldInstr::TryEvaluateLoad(
-                   instance()->AsConstant()->constant_value(), field(), value);
-      case kNativeField:
-        return (instance() != nullptr) && instance()->IsConstant() &&
-               LoadFieldInstr::TryEvaluateLoad(
-                   instance()->AsConstant()->constant_value(), native_field(),
+                   instance()->AsConstant()->constant_value(), instance_field(),
                    value);
       default:
         return false;
@@ -271,12 +266,12 @@ class Place : public ValueObject {
 
   bool DependsOnInstance() const {
     switch (kind()) {
-      case kField:
-      case kNativeField:
+      case kInstanceField:
       case kIndexed:
       case kConstantIndexed:
         return true;
 
+      case kStaticField:
       case kNone:
         return false;
     }
@@ -332,14 +327,15 @@ class Place : public ValueObject {
     instance_ = def->OriginalDefinition();
   }
 
-  const Field& field() const {
-    ASSERT(kind() == kField);
-    return *field_;
+  const Field& static_field() const {
+    ASSERT(kind() == kStaticField);
+    ASSERT(static_field_->is_static());
+    return *static_field_;
   }
 
-  const NativeFieldDesc& native_field() const {
-    ASSERT(kind() == kNativeField);
-    return *native_field_;
+  const Slot& instance_field() const {
+    ASSERT(kind() == kInstanceField);
+    return *instance_field_;
   }
 
   Definition* index() const {
@@ -368,19 +364,15 @@ class Place : public ValueObject {
       case kNone:
         return "<none>";
 
-      case kField: {
-        const char* field_name = String::Handle(field().name()).ToCString();
-        if (field().is_static()) {
-          return Thread::Current()->zone()->PrintToString("<%s>", field_name);
-        } else {
-          return Thread::Current()->zone()->PrintToString(
-              "<%s.%s>", DefinitionName(instance()), field_name);
-        }
+      case kStaticField: {
+        const char* field_name =
+            String::Handle(static_field().name()).ToCString();
+        return Thread::Current()->zone()->PrintToString("<%s>", field_name);
       }
 
-      case kNativeField:
+      case kInstanceField:
         return Thread::Current()->zone()->PrintToString(
-            "<%s.%s>", DefinitionName(instance()), native_field().name());
+            "<%s.%s[%p]>", DefinitionName(instance()), instance_field().name(), &instance_field());
 
       case kIndexed:
         return Thread::Current()->zone()->PrintToString(
@@ -404,8 +396,14 @@ class Place : public ValueObject {
   // Handle static finals as non-final with precompilation because
   // they may be reset to uninitialized after compilation.
   bool IsImmutableField() const {
-    return (kind() == kField) && field().is_final() &&
-           (!field().is_static() || !FLAG_fields_may_be_reset);
+    switch (kind()) {
+      case kInstanceField:
+        return instance_field().is_immutable();
+      case kStaticField:
+        return static_field().is_final() && !FLAG_fields_may_be_reset;
+      default:
+        return false;
+    }
   }
 
   intptr_t Hashcode() const {
@@ -434,14 +432,16 @@ class Place : public ValueObject {
       : flags_(flags), instance_(instance), raw_selector_(selector), id_(0) {}
 
   bool SameField(const Place* other) const {
-    return (kind() == kField)
-               ? (field().Original() == other->field().Original())
+    return (kind() == kStaticField)
+               ? (static_field().Original() == other->static_field().Original())
                : (raw_selector_ == other->raw_selector_);
   }
 
   intptr_t FieldHashcode() const {
-    return (kind() == kField) ? reinterpret_cast<intptr_t>(field().Original())
-                              : offset_in_bytes_;
+    // TODO(XXX) this code does not seem to be safe.
+    return (kind() == kStaticField)
+               ? reinterpret_cast<intptr_t>(static_field().Original())
+               : offset_in_bytes_;
   }
 
   void set_representation(Representation rep) {
@@ -556,8 +556,8 @@ class Place : public ValueObject {
   Definition* instance_;
   union {
     intptr_t raw_selector_;
-    const Field* field_;
-    const NativeFieldDesc* native_field_;
+    const Field* static_field_;
+    const Slot* instance_field_;
     intptr_t offset_in_bytes_;
     intptr_t index_constant_;
     Definition* index_;
@@ -915,8 +915,11 @@ class AliasedSet : public ZoneAllocated {
         }
         break;
 
-      case Place::kField:
-      case Place::kNativeField:
+      case Place::kStaticField:
+        // Nothing to do.
+        break;
+
+      case Place::kInstanceField:
         if (CanBeAliased(alias->instance())) {
           // X.f alias with *.f.
           CrossAlias(alias, alias->CopyWithoutInstance());
@@ -933,30 +936,16 @@ class AliasedSet : public ZoneAllocated {
   // occur in other functions.
   bool IsIndependentFromEffects(Place* place) {
     if (place->IsImmutableField()) {
-      // Note that we can't use LoadField's is_immutable attribute here because
-      // some VM-fields (those that have no corresponding Field object and
-      // accessed through offset alone) can share offset but have different
-      // immutability properties.
-      // One example is the length property of growable and fixed size list. If
-      // loads of these two properties occur in the same function for the same
-      // receiver then they will get the same expression number. However
-      // immutability of the length of fixed size list does not mean that
-      // growable list also has immutable property. Thus we will make a
-      // conservative assumption for the VM-properties.
-      // TODO(vegorov): disambiguate immutable and non-immutable VM-fields with
-      // the same offset e.g. through recognized kind.
       return true;
     }
 
-    return ((place->kind() == Place::kField) ||
-            (place->kind() == Place::kNativeField)) &&
+    return (place->kind() == Place::kInstanceField) &&
            !CanBeAliased(place->instance());
   }
 
   // Returns true if there are direct loads from the given place.
   bool HasLoadsFromPlace(Definition* defn, const Place* place) {
-    ASSERT((place->kind() == Place::kField) ||
-           (place->kind() == Place::kNativeField));
+    ASSERT(place->kind() == Place::kInstanceField);
 
     for (Value* use = defn->input_use_list(); use != NULL;
          use = use->next_use()) {
@@ -1135,8 +1124,7 @@ static Definition* GetStoredValue(Instruction* instr) {
 }
 
 static bool IsPhiDependentPlace(Place* place) {
-  return ((place->kind() == Place::kField) ||
-          (place->kind() == Place::kNativeField)) &&
+  return (place->kind() == Place::kInstanceField) &&
          (place->instance() != NULL) && place->instance()->IsPhi();
 }
 
@@ -1636,9 +1624,7 @@ class LoadOptimizer : public ValueObject {
               // non-final fields and type arguments for escaping ones.
               // TODO(XXX) the comment above makes no sense, please review.
               if (aliased_set_->CanBeAliased(alloc) &&
-                  (load->native_field().kind() ==
-                   NativeFieldDesc::Kind::kDartField) &&
-                  load->native_field().is_immutable()) {
+                  load->slot().IsDartField() && load->slot().is_immutable()) {
                 continue;
               }
 
@@ -1647,10 +1633,8 @@ class LoadOptimizer : public ValueObject {
                 ASSERT(alloc->ArgumentCount() == 1);
                 intptr_t type_args_offset =
                     alloc->cls().type_arguments_field_offset();
-                if (load->native_field().kind() ==
-                        NativeFieldDesc::Kind::kTypeArguments &&
-                    load->native_field().offset_in_bytes() ==
-                        type_args_offset) {
+                if (load->slot().IsTypeArguments() &&
+                    load->slot().offset_in_bytes() == type_args_offset) {
                   forward_def = alloc->PushArgumentAt(0)->value()->definition();
                 }
               }
@@ -2962,14 +2946,13 @@ void AllocationSinking::DetachMaterializations() {
 }
 
 // Add a field/offset to the list of fields if it is not yet present there.
-static bool AddSlot(ZoneGrowableArray<const SlotDesc*>* slots,
-                    const SlotDesc& slot) {
+static bool AddSlot(ZoneGrowableArray<const Slot*>* slots, const Slot& slot) {
   for (auto s : *slots) {
-    if (s->Equals(slot)) {
+    if (s == &slot) {
       return false;
     }
   }
-  slots->Add(new SlotDesc(slot));
+  slots->Add(&slot);
   return true;
 }
 
@@ -3016,7 +2999,7 @@ MaterializeObjectInstr* AllocationSinking::MaterializationFor(
 void AllocationSinking::CreateMaterializationAt(
     Instruction* exit,
     Definition* alloc,
-    const ZoneGrowableArray<const SlotDesc*>& slots) {
+    const ZoneGrowableArray<const Slot*>& slots) {
   ZoneGrowableArray<Value*>* values =
       new (Z) ZoneGrowableArray<Value*>(slots.length());
 
@@ -3028,11 +3011,7 @@ void AllocationSinking::CreateMaterializationAt(
   // Insert load instruction for every field.
   for (auto slot : slots) {
     LoadFieldInstr* load =
-        slot->kind() == SlotDesc::Kind::kField
-            ? new (Z) LoadFieldInstr(new (Z) Value(alloc), &slot->field(),
-                                     alloc->token_pos(), nullptr)
-            : new (Z) LoadFieldInstr(new (Z) Value(alloc), slot->native_field(),
-                                     alloc->token_pos());
+        new (Z) LoadFieldInstr(new (Z) Value(alloc), *slot, alloc->token_pos());
     flow_graph_->InsertBefore(load_point, load, nullptr, FlowGraph::kValue);
     values->Add(new (Z) Value(load));
   }
@@ -3133,21 +3112,21 @@ void AllocationSinking::ExitsCollector::CollectTransitively(Definition* alloc) {
 
 void AllocationSinking::InsertMaterializations(Definition* alloc) {
   // Collect all fields that are written for this instance.
-  auto slots = new (Z) ZoneGrowableArray<const SlotDesc*>(5);
+  auto slots = new (Z) ZoneGrowableArray<const Slot*>(5);
 
   for (Value* use = alloc->input_use_list(); use != NULL;
        use = use->next_use()) {
     StoreInstanceFieldInstr* store = use->instruction()->AsStoreInstanceField();
     if ((store != NULL) && (store->instance()->definition() == alloc)) {
-      AddSlot(slots, SlotDesc(store->field()));
+      AddSlot(slots, store->slot());
     }
   }
 
   if (alloc->ArgumentCount() > 0) {
     AllocateObjectInstr* alloc_object = alloc->AsAllocateObject();
     ASSERT(alloc_object->ArgumentCount() == 1);
-    AddSlot(slots, SlotDesc(NativeFieldDesc::GetTypeArgumentsFieldFor(
-                       flow_graph_->thread(), alloc_object->cls())));
+    AddSlot(slots, Slot::GetTypeArgumentsSlotFor(flow_graph_->thread(),
+                                                  alloc_object->cls()));
   }
 
   // Collect all instructions that mention this object in the environment.

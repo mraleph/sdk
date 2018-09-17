@@ -190,7 +190,7 @@ void JitCallSpecializer::VisitStoreInstanceField(
     // usage count of at least 1/kGetterSetterRatio of the getter usage count.
     // This is to avoid unboxing fields where the setter is never or rarely
     // executed.
-    const Field& field = instr->field().field();
+    const Field& field = instr->slot().field();
     const String& field_name = String::Handle(Z, field.name());
     const Class& owner = Class::Handle(Z, field.Owner());
     const Function& getter =
@@ -252,9 +252,9 @@ void JitCallSpecializer::LowerContextAllocation(Definition* alloc,
 
   Value* initial_value;
   if (context_value != NULL) {
-    LoadFieldInstr* load = new (Z)
-        LoadFieldInstr(context_value->CopyWithType(Z),
-                       NativeFieldDesc::Context_parent(), alloc->token_pos());
+    LoadFieldInstr* load =
+        new (Z) LoadFieldInstr(context_value->CopyWithType(Z),
+                               Slot::Context_parent(), alloc->token_pos());
     flow_graph()->InsertAfter(cursor, load, NULL, FlowGraph::kValue);
     cursor = load;
     initial_value = new (Z) Value(load);
@@ -262,8 +262,8 @@ void JitCallSpecializer::LowerContextAllocation(Definition* alloc,
     initial_value = new (Z) Value(flow_graph()->constant_null());
   }
   StoreInstanceFieldInstr* store = new (Z) StoreInstanceFieldInstr(
-      NativeFieldDesc::Context_parent(), new (Z) Value(replacement),
-      initial_value, kNoStoreBarrier, alloc->token_pos());
+      Slot::Context_parent(), new (Z) Value(replacement), initial_value,
+      kNoStoreBarrier, alloc->token_pos());
   // Storing into uninitialized memory; remember to prevent dead store
   // elimination and ensure proper GC barrier.
   store->set_is_initialization(true);
@@ -271,8 +271,7 @@ void JitCallSpecializer::LowerContextAllocation(Definition* alloc,
   cursor = replacement;
 
   for (auto variable : context_scope->context_variables()) {
-    const auto& field =
-        NativeFieldDesc::GetContextVariableFieldFor(thread(), variable);
+    const auto& field = Slot::GetContextVariableSlotFor(thread(), variable);
     if (context_value != nullptr) {
       LoadFieldInstr* load = new (Z) LoadFieldInstr(
           context_value->CopyWithType(Z), field, alloc->token_pos());

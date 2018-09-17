@@ -104,8 +104,9 @@ class DartPrecompilationPipeline : public DartCompilationPipeline {
         for (; !it.Done(); it.Advance()) {
           StoreInstanceFieldInstr* store = it.Current()->AsStoreInstanceField();
           if (store != NULL) {
-            if (store->field().IsDartField() && store->field().field().is_final()) {
-              const Field& field = store->field().field();
+            if (store->slot().IsDartField() &&
+                store->slot().field().is_final()) {
+              const Field& field = store->slot().field();
 #ifndef PRODUCT
               if (FLAG_trace_precompiler && FLAG_support_il_printer) {
                 THR_Print("Found store to %s <- %s\n",

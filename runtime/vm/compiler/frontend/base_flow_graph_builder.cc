@@ -114,7 +114,7 @@ Fragment BaseFlowGraphBuilder::LoadContextAt(int depth) {
   ASSERT(delta >= 0);
   Fragment instructions = LoadLocal(parsed_function_->current_context_var());
   while (delta-- > 0) {
-    instructions += LoadNativeField(NativeFieldDesc::Context_parent());
+    instructions += LoadNativeField(Slot::Context_parent());
   }
   return instructions;
 }
@@ -243,7 +243,7 @@ Fragment BaseFlowGraphBuilder::TestTypeArgsLen(Fragment eq_branch,
   TargetEntryInstr* neq_entry;
 
   test += LoadArgDescriptor();
-  test += LoadNativeField(NativeFieldDesc::ArgumentsDescriptor_type_args_len());
+  test += LoadNativeField(Slot::ArgumentsDescriptor_type_args_len());
   test += IntConstant(num_type_args);
   test += BranchIfEqual(&eq_entry, &neq_entry);
 
@@ -266,7 +266,7 @@ Fragment BaseFlowGraphBuilder::TestDelayedTypeArgs(LocalVariable* closure,
   TargetEntryInstr* present_entry;
 
   test += LoadLocal(closure);
-  test += LoadNativeField(NativeFieldDesc::Closure_delayed_type_arguments());
+  test += LoadNativeField(Slot::Closure_delayed_type_arguments());
   test += Constant(Object::empty_type_arguments());
   test += BranchIfEqual(&absent_entry, &present_entry);
 
@@ -312,8 +312,7 @@ Fragment BaseFlowGraphBuilder::LoadIndexed(intptr_t index_scale) {
   return Fragment(instr);
 }
 
-Fragment BaseFlowGraphBuilder::LoadNativeField(
-    const NativeFieldDesc& native_field) {
+Fragment BaseFlowGraphBuilder::LoadNativeField(const Slot& native_field) {
   LoadFieldInstr* load =
       new (Z) LoadFieldInstr(Pop(), native_field, TokenPosition::kNoSource);
   Push(load);
@@ -364,7 +363,7 @@ const Field& BaseFlowGraphBuilder::MayCloneField(const Field& field) {
 
 Fragment BaseFlowGraphBuilder::StoreInstanceField(
     TokenPosition position,
-    const NativeFieldDesc& field,
+    const Slot& field,
     StoreBarrierType emit_store_barrier) {
   Value* value = Pop();
   if (value->BindsToConstant()) {
@@ -384,9 +383,9 @@ Fragment BaseFlowGraphBuilder::StoreInstanceField(
     emit_store_barrier = kNoStoreBarrier;
   }
 
-  StoreInstanceFieldInstr* store = new (Z)
-      StoreInstanceFieldInstr(MayCloneField(field), Pop(), value,
-                              emit_store_barrier, TokenPosition::kNoSource);
+  StoreInstanceFieldInstr* store = new (Z) StoreInstanceFieldInstr(
+      MayCloneField(field), Pop(), value, emit_store_barrier,
+      TokenPosition::kNoSource, parsed_function_);
   store->set_is_initialization(is_initialization_store);
 
   return Fragment(store);
@@ -450,8 +449,7 @@ Fragment BaseFlowGraphBuilder::StoreLocal(TokenPosition position,
     instructions += LoadContextAt(variable->owner()->context_level());
     instructions += LoadLocal(value);
     instructions += StoreInstanceField(
-        position,
-        NativeFieldDesc::GetContextVariableFieldFor(thread_, variable));
+        position, Slot::GetContextVariableSlotFor(thread_, variable));
     return instructions;
   }
   return StoreLocalRaw(position, variable);

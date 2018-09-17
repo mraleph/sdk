@@ -1955,7 +1955,7 @@ void StoreInstanceFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     XmmRegister value = locs()->in(1).fpu_reg();
     Register temp = locs()->temp(0).reg();
     Register temp2 = locs()->temp(1).reg();
-    const intptr_t cid = field().field().UnboxedFieldCid();
+    const intptr_t cid = slot().field().UnboxedFieldCid();
 
     if (is_initialization()) {
       const Class* cls = NULL;
@@ -2016,7 +2016,7 @@ void StoreInstanceFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     Label store_float32x4;
     Label store_float64x2;
 
-    __ LoadObject(temp, Field::ZoneHandle(Z, field().field().Original()));
+    __ LoadObject(temp, Field::ZoneHandle(Z, slot().field().Original()));
 
     __ cmpw(FieldAddress(temp, Field::is_nullable_offset()),
             Immediate(kNullCid));
@@ -2304,7 +2304,7 @@ void LoadFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     XmmRegister result = locs()->out(0).fpu_reg();
     Register temp = locs()->temp(0).reg();
     __ movq(temp, FieldAddress(instance_reg, OffsetInBytes()));
-    intptr_t cid = native_field().field().UnboxedFieldCid();
+    intptr_t cid = slot().field().UnboxedFieldCid();
     switch (cid) {
       case kDoubleCid:
         __ Comment("UnboxedDoubleLoadFieldInstr");
@@ -2335,7 +2335,7 @@ void LoadFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     Label load_float32x4;
     Label load_float64x2;
 
-    __ LoadObject(result, Field::ZoneHandle(native_field().field().Original()));
+    __ LoadObject(result, Field::ZoneHandle(slot().field().Original()));
 
     FieldAddress field_cid_operand(result, Field::guarded_cid_offset());
     FieldAddress field_nullability_operand(result, Field::is_nullable_offset());

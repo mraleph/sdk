@@ -903,7 +903,7 @@ void CallSpecializer::InlineImplicitInstanceGetter(Definition* call,
   call->RemoveEnvironment();
   ReplaceCall(call, load);
 
-  if (load->native_field().nullable_cid() != kDynamicCid) {
+  if (load->slot().nullable_cid() != kDynamicCid) {
     // Reset value types if we know concrete cid.
     for (Value::Iterator it(load->input_use_list()); !it.Done(); it.Advance()) {
       it.Current()->SetReachingType(NULL);
@@ -1034,10 +1034,10 @@ bool CallSpecializer::TryInlineInstanceSetter(InstanceCallInstr* instr,
       if (!dst_type.IsInstantiated()) {
         const Class& owner = Class::Handle(Z, field.Owner());
         if (owner.NumTypeArguments() > 0) {
-          instantiator_type_args = new (Z) LoadFieldInstr(
-              new (Z) Value(instr->ArgumentAt(0)),
-              NativeFieldDesc::GetTypeArgumentsFieldFor(thread(), owner),
-              instr->token_pos());
+          instantiator_type_args = new (Z)
+              LoadFieldInstr(new (Z) Value(instr->ArgumentAt(0)),
+                             Slot::GetTypeArgumentsSlotFor(thread(), owner),
+                             instr->token_pos());
           InsertBefore(instr, instantiator_type_args, instr->env(),
                        FlowGraph::kValue);
         }
@@ -1056,15 +1056,10 @@ bool CallSpecializer::TryInlineInstanceSetter(InstanceCallInstr* instr,
 
   // Field guard was detached.
   ASSERT(instr->FirstArgIndex() == 0);
-  StoreInstanceFieldInstr* store = new (Z)
-      StoreInstanceFieldInstr(field, new (Z) Value(instr->ArgumentAt(0)),
-                              new (Z) Value(instr->ArgumentAt(1)),
-                              kEmitStoreBarrier, instr->token_pos());
-
-  ASSERT(I->use_field_guards() || !store->IsUnboxedStore());
-  if (I->use_field_guards() && store->IsUnboxedStore()) {
-    flow_graph()->parsed_function().AddToGuardedFields(&field);
-  }
+  StoreInstanceFieldInstr* store = new (Z) StoreInstanceFieldInstr(
+      field, new (Z) Value(instr->ArgumentAt(0)),
+      new (Z) Value(instr->ArgumentAt(1)), kEmitStoreBarrier,
+      instr->token_pos(), &flow_graph()->parsed_function());
 
   // Discard the environment from the original instruction because the store
   // can't deoptimize.

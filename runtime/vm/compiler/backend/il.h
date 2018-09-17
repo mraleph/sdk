@@ -4188,7 +4188,7 @@ class DebugStepCheckInstr : public TemplateInstruction<0, NoThrow> {
   V(ArgumentsDescriptor, positional_count, Smi, IMMUTABLE)                     \
   V(ArgumentsDescriptor, count, Smi, IMMUTABLE)
 
-class NativeFieldDesc : public ZoneAllocated {
+class Slot : public ZoneAllocated {
  public:
   // clang-format off
   enum class Kind : uint8_t {
@@ -4203,29 +4203,28 @@ class NativeFieldDesc : public ZoneAllocated {
   // clang-format on
 
 #define DEFINE_GETTER(ClassName, FieldName, cid, mutability)                   \
-  static const NativeFieldDesc& ClassName##_##FieldName() {                    \
+  static const Slot& ClassName##_##FieldName() {                               \
     return Get(Kind::k##ClassName##_##FieldName);                              \
   }
 
   NATIVE_FIELDS_LIST(DEFINE_GETTER)
 #undef DEFINE_GETTER
 
-  static const NativeFieldDesc& Get(Kind kind);
-  static const NativeFieldDesc& GetLengthFieldForArrayCid(intptr_t array_cid);
-  static const NativeFieldDesc& GetTypeArgumentsFieldFor(Thread* thread,
-                                                         const Class& cls);
+  static const Slot& GetLengthFieldForArrayCid(intptr_t array_cid);
+  static const Slot& GetTypeArgumentsSlotFor(Thread* thread, const Class& cls);
 
-  static const NativeFieldDesc& GetContextVariableFieldFor(
-      Thread* thread,
-      const LocalVariable* var);
+  static const Slot& GetContextVariableSlotFor(Thread* thread,
+                                                const LocalVariable* var);
 
-  static const NativeFieldDesc& Get(
-      const Field& field,
-      const ParsedFunction* parsed_function = nullptr);
-
-  const char* name() const;
+  static const Slot& Get(const Field& field,
+                         const ParsedFunction* parsed_function);
 
   Kind kind() const { return kind_; }
+  bool IsDartField() const { return kind() == Kind::kDartField; }
+  bool IsLocalVariable() const { return kind() == Kind::kLocalVariable; }
+  bool IsTypeArguments() const { return kind() == Kind::kTypeArguments; }
+
+  const char* name() const;
 
   intptr_t offset_in_bytes() const { return offset_in_bytes_; }
 
@@ -4237,24 +4236,22 @@ class NativeFieldDesc : public ZoneAllocated {
   const AbstractType& static_type() const;
   CompileType compile_type() const;
 
-  bool IsDartField() const { return kind() == Kind::kDartField; }
-  bool IsLocalVariable() const { return kind() == Kind::kLocalVariable; }
   const Field& field() const {
     ASSERT(IsDartField());
     ASSERT(data_ != nullptr);
     return *data_as<const Field>();
   }
 
-  bool Equals(const NativeFieldDesc* other) const;
+  bool Equals(const Slot* other) const;
   intptr_t Hashcode() const;
 
  private:
-  NativeFieldDesc(Kind kind,
-                  int8_t bits,
-                  int16_t cid,
-                  intptr_t offset_in_bytes,
-                  const void* data,
-                  const AbstractType& static_type)
+  Slot(Kind kind,
+       int8_t bits,
+       int16_t cid,
+       intptr_t offset_in_bytes,
+       const void* data,
+       const AbstractType* static_type)
       : kind_(kind),
         bits_(bits),
         cid_(cid),
@@ -4262,13 +4259,13 @@ class NativeFieldDesc : public ZoneAllocated {
         data_(data),
         static_type_(static_type) {}
 
-  NativeFieldDesc(const NativeFieldDesc& other)
-      : NativeFieldDesc(other.kind_,
-                        other.bits_,
-                        other.cid_,
-                        other.offset_in_bytes_,
-                        other.data_,
-                        other.static_type_) {}
+  Slot(const Slot& other)
+      : Slot(other.kind_,
+             other.bits_,
+             other.cid_,
+             other.offset_in_bytes_,
+             other.data_,
+             other.static_type_) {}
 
   using IsImmutableBit = BitField<int8_t, bool, 0, 1>;
   using IsNullableBit = BitField<int8_t, bool, 1, 1>;
@@ -4276,15 +4273,17 @@ class NativeFieldDesc : public ZoneAllocated {
   template<typename T>
   const T* data_as() const { return static_cast<const T*>(data_); }
 
+  static const Slot& Get(Kind kind);
+
   const Kind kind_;
   const int8_t bits_;
   const int16_t cid_;
 
   const intptr_t offset_in_bytes_;
   const void* data_;
-  const AbstractType& static_type_;
+  const AbstractType* static_type_;
 
-  friend class NativeFieldDescCache;
+  friend class SlotCache;
 };
 
 enum StoreBarrierType { kNoStoreBarrier, kEmitStoreBarrier };
@@ -4295,21 +4294,22 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
                           Value* instance,
                           Value* value,
                           StoreBarrierType emit_store_barrier,
-                          TokenPosition token_pos)
-      : field_(NativeFieldDesc::Get(field)),
-        emit_store_barrier_(emit_store_barrier),
-        token_pos_(token_pos) {
-    SetInputAt(kInstancePos, instance);
-    SetInputAt(kValuePos, value);
+                          TokenPosition token_pos,
+                          const ParsedFunction* parsed_function)
+      : StoreInstanceFieldInstr(Slot::Get(field, parsed_function),
+                                instance,
+                                value,
+                                emit_store_barrier,
+                                token_pos) {
     CheckField(field);
   }
 
-  StoreInstanceFieldInstr(const NativeFieldDesc& field,
+  StoreInstanceFieldInstr(const Slot& slot,
                           Value* instance,
                           Value* value,
                           StoreBarrierType emit_store_barrier,
                           TokenPosition token_pos)
-      : field_(field),
+      : slot_(slot),
         emit_store_barrier_(emit_store_barrier),
         token_pos_(token_pos) {
     SetInputAt(kInstancePos, instance);
@@ -4318,15 +4318,14 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
 
   DECLARE_INSTRUCTION(StoreInstanceField)
 
-  void set_is_initialization(bool value) { is_initialization_ = value; }
-
   enum { kInstancePos = 0, kValuePos = 1 };
 
   Value* instance() const { return inputs_[kInstancePos]; }
+  const Slot& slot() const { return slot_; }
   Value* value() const { return inputs_[kValuePos]; }
-  bool is_initialization() const { return is_initialization_; }
 
-  const NativeFieldDesc& field() const { return field_; }
+  bool is_initialization() const { return is_initialization_; }
+  void set_is_initialization(bool value) { is_initialization_ = value; }
 
   virtual TokenPosition token_pos() const { return token_pos_; }
 
@@ -4354,7 +4353,6 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
   virtual bool HasUnknownSideEffects() const { return false; }
 
   bool IsUnboxedStore() const;
-
   bool IsPotentialUnboxedStore() const;
 
   virtual Representation RequiredInputRepresentation(intptr_t index) const;
@@ -4364,9 +4362,7 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
  private:
   friend class JitCallSpecializer;  // For ASSERT(initialization_).
 
-  intptr_t OffsetInBytes() const {
-    return field().offset_in_bytes();
-  }
+  intptr_t OffsetInBytes() const { return slot().offset_in_bytes(); }
 
   Assembler::CanBeSmi CanValueBeSmi() const {
     Isolate* isolate = Isolate::Current();
@@ -4383,7 +4379,7 @@ class StoreInstanceFieldInstr : public TemplateDefinition<2, NoThrow> {
                               : Assembler::kValueIsNotSmi;
   }
 
-  const NativeFieldDesc& field_;
+  const Slot& slot_;
   StoreBarrierType emit_store_barrier_;
   const TokenPosition token_pos_;
   // Marks initializing stores. E.g. in the constructor.
@@ -5004,65 +5000,13 @@ class AllocateUninitializedContextInstr
   DISALLOW_COPY_AND_ASSIGN(AllocateUninitializedContextInstr);
 };
 
-class SlotDesc : public ZoneAllocated {
- public:
-  enum class Kind { kField, kNativeField };
-
-  SlotDesc(const SlotDesc& other) : kind_(other.kind_), field_(other.field_) {}
-
-  explicit SlotDesc(const Field& field) : kind_(Kind::kField), field_(&field) {}
-  explicit SlotDesc(const NativeFieldDesc& desc)
-      : kind_(Kind::kNativeField), field_(&desc) {}
-
-  Kind kind() const { return kind_; }
-
-  const char* ToCString() const {
-    switch (kind()) {
-      case Kind::kField:
-        return field().ToCString();
-      case Kind::kNativeField:
-        return native_field().name();
-    }
-    UNREACHABLE();
-    return "<?>";
-  }
-
-  const Field& field() const {
-    ASSERT(kind() == Kind::kField);
-    return *static_cast<const Field*>(field_);
-  }
-
-  const NativeFieldDesc& native_field() const {
-    ASSERT(kind() == Kind::kNativeField);
-    return *static_cast<const NativeFieldDesc*>(field_);
-  }
-
-  bool Equals(const SlotDesc& other) const {
-    if (kind_ == other.kind_) {
-      switch (kind_) {
-        case Kind::kNativeField:
-          return field_ == other.field_;
-        case Kind::kField:
-          return field().raw() == other.field().raw();
-        default:
-          UNREACHABLE();
-      }
-    }
-    return false;
-  }
-
- private:
-  Kind kind_;
-  const void* field_;
-};
-
 // This instruction captures the state of the object which had its allocation
 // removed during the AllocationSinking pass.
 // It does not produce any real code only deoptimization information.
 class MaterializeObjectInstr : public Definition {
  public:
   MaterializeObjectInstr(AllocateObjectInstr* allocation,
-                         const ZoneGrowableArray<const SlotDesc*>& slots,
+                         const ZoneGrowableArray<const Slot*>& slots,
                          ZoneGrowableArray<Value*>* values)
       : allocation_(allocation),
         cls_(allocation->cls()),
@@ -5080,7 +5024,7 @@ class MaterializeObjectInstr : public Definition {
   }
 
   MaterializeObjectInstr(AllocateUninitializedContextInstr* allocation,
-                         const ZoneGrowableArray<const SlotDesc*>& slots,
+                         const ZoneGrowableArray<const Slot*>& slots,
                          ZoneGrowableArray<Value*>* values)
       : allocation_(allocation),
         cls_(Class::ZoneHandle(Object::context_class())),
@@ -5103,14 +5047,7 @@ class MaterializeObjectInstr : public Definition {
   intptr_t num_variables() const { return num_variables_; }
 
   intptr_t FieldOffsetAt(intptr_t i) const {
-    switch (slots_[i]->kind()) {
-      case SlotDesc::Kind::kField:
-        return slots_[i]->field().Offset();
-      case SlotDesc::Kind::kNativeField:
-        return slots_[i]->native_field().offset_in_bytes();
-    }
-    UNREACHABLE();
-    return 0;
+    return slots_[i]->offset_in_bytes();
   }
 
   const Location& LocationAt(intptr_t i) { return locations_[i]; }
@@ -5154,7 +5091,7 @@ class MaterializeObjectInstr : public Definition {
   Definition* allocation_;
   const Class& cls_;
   intptr_t num_variables_;
-  const ZoneGrowableArray<const SlotDesc*>& slots_;
+  const ZoneGrowableArray<const Slot*>& slots_;
   ZoneGrowableArray<Value*>* values_;
   Location* locations_;
 
@@ -5259,10 +5196,8 @@ class LoadClassIdInstr : public TemplateDefinition<1, NoThrow, Pure> {
 
 class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
  public:
-  LoadFieldInstr(Value* instance,
-                 const NativeFieldDesc& native_field,
-                 TokenPosition token_pos)
-      : native_field_(native_field), token_pos_(token_pos) {
+  LoadFieldInstr(Value* instance, const Slot& slot, TokenPosition token_pos)
+      : slot_(slot), token_pos_(token_pos) {
     SetInputAt(0, instance);
   }
 
@@ -5271,17 +5206,13 @@ class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
                  TokenPosition token_pos,
                  const ParsedFunction* parsed_function)
       : LoadFieldInstr(instance,
-                       NativeFieldDesc::Get(*field, parsed_function),
+                       Slot::Get(*field, parsed_function),
                        token_pos) {}
 
   Value* instance() const { return inputs_[0]; }
-  const NativeFieldDesc& native_field() const { return native_field_; }
+  const Slot& slot() const { return slot_; }
 
   virtual TokenPosition token_pos() const { return token_pos_; }
-
-  intptr_t OffsetInBytes() const { return native_field().offset_in_bytes(); }
-  //const AbstractType& type() const { return native_field().type(); }
-  //intptr_t result_cid() const { return native_field().cid(); }
 
   virtual Representation representation() const;
 
@@ -5309,14 +5240,14 @@ class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
                               Object* result);
 
   static bool TryEvaluateLoad(const Object& instance,
-                              const NativeFieldDesc& field,
+                              const Slot& field,
                               Object* result);
 
   virtual Definition* Canonicalize(FlowGraph* flow_graph);
 
   static bool IsFixedLengthArrayCid(intptr_t cid);
 
-  virtual bool AllowsCSE() const { return native_field_.is_immutable(); }
+  virtual bool AllowsCSE() const { return slot_.is_immutable(); }
   virtual bool HasUnknownSideEffects() const { return false; }
 
   virtual bool AttributesEqual(Instruction* other) const;
@@ -5324,7 +5255,9 @@ class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
   PRINT_OPERANDS_TO_SUPPORT
 
  private:
-  const NativeFieldDesc& native_field_;
+  intptr_t OffsetInBytes() const { return slot().offset_in_bytes(); }
+
+  const Slot& slot_;
   const TokenPosition token_pos_;
 
   DISALLOW_COPY_AND_ASSIGN(LoadFieldInstr);

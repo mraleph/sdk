@@ -608,9 +608,8 @@ void GuardFieldInstr::PrintOperandsTo(BufferFormatter* f) const {
 }
 
 void StoreInstanceFieldInstr::PrintOperandsTo(BufferFormatter* f) const {
-  f->Print("%s @%" Pd ", ", field().name(), field().offset_in_bytes());
   instance()->PrintTo(f);
-  f->Print(", ");
+  f->Print(" . %s = ", slot().name());
   value()->PrintTo(f);
   if (!ShouldEmitStoreBarrier()) f->Print(", barrier removed");
 }
@@ -662,17 +661,15 @@ void MaterializeObjectInstr::PrintOperandsTo(BufferFormatter* f) const {
   f->Print("%s", String::Handle(cls_.ScrubbedName()).ToCString());
   for (intptr_t i = 0; i < InputCount(); i++) {
     f->Print(", ");
-    f->Print("%s: ", slots_[i]->ToCString());
+    f->Print("%s: ", slots_[i]->name());
     InputAt(i)->PrintTo(f);
   }
 }
 
 void LoadFieldInstr::PrintOperandsTo(BufferFormatter* f) const {
   instance()->PrintTo(f);
-
-  f->Print("%s @%" Pd "%s", native_field().name(),
-           native_field().offset_in_bytes(),
-           native_field().is_immutable() ? " final" : "");
+  f->Print(" . %s%s", slot().name(), &slot(),
+           slot().is_immutable() ? " {final}" : "");
 }
 
 void InstantiateTypeInstr::PrintOperandsTo(BufferFormatter* f) const {

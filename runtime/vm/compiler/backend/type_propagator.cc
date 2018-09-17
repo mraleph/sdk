@@ -1290,8 +1290,8 @@ CompileType LoadClassIdInstr::ComputeType() const {
 }
 
 CompileType LoadFieldInstr::ComputeType() const {
-  const AbstractType& field_type = native_field().type();
-  CompileType compile_type_cid = native_field().compile_type();
+  const AbstractType& field_type = slot().static_type();
+  CompileType compile_type_cid = slot().compile_type();
   if (field_type.raw() == AbstractType::null()) {
     return compile_type_cid;
   }

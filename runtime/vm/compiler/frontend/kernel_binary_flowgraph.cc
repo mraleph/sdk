@@ -557,9 +557,9 @@ FlowGraph* StreamingFlowGraphBuilder::BuildGraphOfImplicitClosureFunction(
     // closed-over receiver.
     body +=
         LoadLocal(parsed_function()->node_sequence()->scope()->VariableAt(0));
-    body += LoadNativeField(NativeFieldDesc::Closure_context());
-    body += LoadNativeField(NativeFieldDesc::GetContextVariableFieldFor(
-        thread(), scopes()->this_variable));
+    body += LoadNativeField(Slot::Closure_context());
+    body += LoadNativeField(
+        Slot::GetContextVariableSlotFor(thread(), scopes()->this_variable));
     body += PushArgument();
   }
 
@@ -669,17 +669,17 @@ FlowGraph* StreamingFlowGraphBuilder::BuildGraphOfNoSuchMethodForwarder(
   if (is_implicit_closure_function) {
     if (parsed_function()->has_arg_desc_var()) {
       body += B->LoadArgDescriptor();
-      body += LoadNativeField(NativeFieldDesc::ArgumentsDescriptor_count());
+      body += LoadNativeField(Slot::ArgumentsDescriptor_count());
       body += LoadLocal(parsed_function()->current_context_var());
-      body += B->LoadNativeField(NativeFieldDesc::GetContextVariableFieldFor(
-          thread(), scopes()->this_variable));
+      body += B->LoadNativeField(
+          Slot::GetContextVariableSlotFor(thread(), scopes()->this_variable));
       body += B->StoreFpRelativeSlot(kWordSize *
                                      compiler_frame_layout.param_end_from_fp);
       body += Drop();
     } else {
       body += LoadLocal(parsed_function()->current_context_var());
-      body += B->LoadNativeField(NativeFieldDesc::GetContextVariableFieldFor(
-          thread(), scopes()->this_variable));
+      body += B->LoadNativeField(
+          Slot::GetContextVariableSlotFor(thread(), scopes()->this_variable));
       body += B->StoreFpRelativeSlot(
           kWordSize *
           (compiler_frame_layout.param_end_from_fp + function.NumParameters()));
@@ -717,7 +717,7 @@ FlowGraph* StreamingFlowGraphBuilder::BuildGraphOfNoSuchMethodForwarder(
 
   if (function.HasOptionalParameters()) {
     body += B->LoadArgDescriptor();
-    body += LoadNativeField(NativeFieldDesc::ArgumentsDescriptor_count());
+    body += LoadNativeField(Slot::ArgumentsDescriptor_count());
   } else {
     body += IntConstant(function.NumParameters());
   }
@@ -830,8 +830,8 @@ FlowGraph* StreamingFlowGraphBuilder::BuildGraphOfNoSuchMethodForwarder(
       body += Constant(type);
     } else {
       body += LoadLocal(parsed_function()->current_context_var());
-      body += B->LoadNativeField(NativeFieldDesc::GetContextVariableFieldFor(
-          thread(), scopes()->this_variable));
+      body += B->LoadNativeField(
+          Slot::GetContextVariableSlotFor(thread(), scopes()->this_variable));
     }
   } else {
     LocalScope* scope = parsed_function()->node_sequence()->scope();
@@ -1337,8 +1337,7 @@ Fragment StreamingFlowGraphBuilder::TypeArgumentsHandling(
       prologue += LoadLocal(fn_type_args);
       prologue += PushArgument();
       prologue += LoadLocal(closure);
-      prologue +=
-          LoadNativeField(NativeFieldDesc::Closure_function_type_arguments());
+      prologue += LoadNativeField(Slot::Closure_function_type_arguments());
       prologue += PushArgument();
       prologue += IntConstant(dart_function.NumParentTypeParameters());
       prologue += PushArgument();
@@ -1359,8 +1358,7 @@ Fragment StreamingFlowGraphBuilder::TypeArgumentsHandling(
       prologue += Drop();
     } else {
       prologue += LoadLocal(closure);
-      prologue +=
-          LoadNativeField(NativeFieldDesc::Closure_function_type_arguments());
+      prologue += LoadNativeField(Slot::Closure_function_type_arguments());
       prologue += StoreLocal(TokenPosition::kNoSource, fn_type_args);
       prologue += Drop();
     }
@@ -1473,7 +1471,7 @@ Fragment StreamingFlowGraphBuilder::SetupCapturedParameters(
         body += LoadLocal(&raw_parameter);
         body += flow_graph_builder_->StoreInstanceField(
             TokenPosition::kNoSource,
-            NativeFieldDesc::GetContextVariableFieldFor(thread(), variable));
+            Slot::GetContextVariableSlotFor(thread(), variable));
         body += NullConstant();
         body += StoreLocal(TokenPosition::kNoSource, &raw_parameter);
         body += Drop();
@@ -2516,8 +2514,7 @@ Fragment StreamingFlowGraphBuilder::AllocateContext(const LocalScope* scope) {
   return flow_graph_builder_->AllocateContext(scope);
 }
 
-Fragment StreamingFlowGraphBuilder::LoadNativeField(
-    const NativeFieldDesc& field) {
+Fragment StreamingFlowGraphBuilder::LoadNativeField(const Slot& field) {
   return flow_graph_builder_->LoadNativeField(field);
 }
 
@@ -3679,7 +3676,7 @@ Fragment StreamingFlowGraphBuilder::BuildMethodInvocation(TokenPosition* p) {
   if (is_unchecked_closure_call) {
     // Lookup the function in the closure.
     instructions += LoadLocal(receiver_temp);
-    instructions += LoadNativeField(NativeFieldDesc::Closure_function());
+    instructions += LoadNativeField(Slot::Closure_function());
     if (parsed_function()->function().is_debuggable()) {
       ASSERT(!parsed_function()->function().is_native());
       instructions += DebugStepCheck(position);
@@ -4806,43 +4803,39 @@ Fragment StreamingFlowGraphBuilder::BuildPartialTearoffInstantiation(
   instructions += LoadLocal(new_closure);
   instructions += LoadLocal(type_args_vec);
   instructions += flow_graph_builder_->StoreInstanceField(
-      TokenPosition::kNoSource,
-      NativeFieldDesc::Closure_delayed_type_arguments());
+      TokenPosition::kNoSource, Slot::Closure_delayed_type_arguments());
   instructions += Drop();  // Drop type args.
 
   // Copy over the target function.
   instructions += LoadLocal(new_closure);
   instructions += LoadLocal(original_closure);
   instructions +=
-      flow_graph_builder_->LoadNativeField(NativeFieldDesc::Closure_function());
+      flow_graph_builder_->LoadNativeField(Slot::Closure_function());
   instructions += flow_graph_builder_->StoreInstanceField(
-      TokenPosition::kNoSource, NativeFieldDesc::Closure_function());
+      TokenPosition::kNoSource, Slot::Closure_function());
 
   // Copy over the instantiator type arguments.
   instructions += LoadLocal(new_closure);
   instructions += LoadLocal(original_closure);
   instructions += flow_graph_builder_->LoadNativeField(
-      NativeFieldDesc::Closure_instantiator_type_arguments());
+      Slot::Closure_instantiator_type_arguments());
   instructions += flow_graph_builder_->StoreInstanceField(
-      TokenPosition::kNoSource,
-      NativeFieldDesc::Closure_instantiator_type_arguments());
+      TokenPosition::kNoSource, Slot::Closure_instantiator_type_arguments());
 
   // Copy over the function type arguments.
   instructions += LoadLocal(new_closure);
   instructions += LoadLocal(original_closure);
   instructions += flow_graph_builder_->LoadNativeField(
-      NativeFieldDesc::Closure_function_type_arguments());
+      Slot::Closure_function_type_arguments());
   instructions += flow_graph_builder_->StoreInstanceField(
-      TokenPosition::kNoSource,
-      NativeFieldDesc::Closure_function_type_arguments());
+      TokenPosition::kNoSource, Slot::Closure_function_type_arguments());
 
   // Copy over the context.
   instructions += LoadLocal(new_closure);
   instructions += LoadLocal(original_closure);
-  instructions +=
-      flow_graph_builder_->LoadNativeField(NativeFieldDesc::Closure_context());
+  instructions += flow_graph_builder_->LoadNativeField(Slot::Closure_context());
   instructions += flow_graph_builder_->StoreInstanceField(
-      TokenPosition::kNoSource, NativeFieldDesc::Closure_context());
+      TokenPosition::kNoSource, Slot::Closure_context());
 
   instructions += DropTempsPreserveTop(1);  // Drop old closure.
 
@@ -5957,8 +5950,7 @@ Fragment StreamingFlowGraphBuilder::BuildFunctionNode(
     instructions += LoadLocal(closure);
     instructions += LoadInstantiatorTypeArguments();
     instructions += flow_graph_builder_->StoreInstanceField(
-        TokenPosition::kNoSource,
-        NativeFieldDesc::Closure_instantiator_type_arguments());
+        TokenPosition::kNoSource, Slot::Closure_instantiator_type_arguments());
   }
 
   // TODO(30455): We only need to save these if the closure uses any captured
@@ -5966,25 +5958,23 @@ Fragment StreamingFlowGraphBuilder::BuildFunctionNode(
   instructions += LoadLocal(closure);
   instructions += LoadFunctionTypeArguments();
   instructions += flow_graph_builder_->StoreInstanceField(
-      TokenPosition::kNoSource,
-      NativeFieldDesc::Closure_function_type_arguments());
+      TokenPosition::kNoSource, Slot::Closure_function_type_arguments());
 
   instructions += LoadLocal(closure);
   instructions += Constant(Object::empty_type_arguments());
   instructions += flow_graph_builder_->StoreInstanceField(
-      TokenPosition::kNoSource,
-      NativeFieldDesc::Closure_delayed_type_arguments());
+      TokenPosition::kNoSource, Slot::Closure_delayed_type_arguments());
 
   // Store the function and the context in the closure.
   instructions += LoadLocal(closure);
   instructions += Constant(function);
   instructions += flow_graph_builder_->StoreInstanceField(
-      TokenPosition::kNoSource, NativeFieldDesc::Closure_function());
+      TokenPosition::kNoSource, Slot::Closure_function());
 
   instructions += LoadLocal(closure);
   instructions += LoadLocal(parsed_function()->current_context_var());
   instructions += flow_graph_builder_->StoreInstanceField(
-      TokenPosition::kNoSource, NativeFieldDesc::Closure_context());
+      TokenPosition::kNoSource, Slot::Closure_context());
 
   return instructions;
 }

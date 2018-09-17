@@ -2683,52 +2683,52 @@ void ConstraintInstr::InferRange(RangeAnalysis* analysis, Range* range) {
 }
 
 void LoadFieldInstr::InferRange(RangeAnalysis* analysis, Range* range) {
-  switch (native_field().kind()) {
-    case NativeFieldDesc::Kind::kArray_length:
-    case NativeFieldDesc::Kind::kGrowableObjectArray_length:
+  switch (slot().kind()) {
+    case Slot::Kind::kArray_length:
+    case Slot::Kind::kGrowableObjectArray_length:
       *range = Range(RangeBoundary::FromConstant(0),
                      RangeBoundary::FromConstant(Array::kMaxElements));
       break;
 
-    case NativeFieldDesc::Kind::kTypedData_length:
+    case Slot::Kind::kTypedData_length:
       *range = Range(RangeBoundary::FromConstant(0), RangeBoundary::MaxSmi());
       break;
 
-    case NativeFieldDesc::Kind::kString_length:
+    case Slot::Kind::kString_length:
       *range = Range(RangeBoundary::FromConstant(0),
                      RangeBoundary::FromConstant(String::kMaxElements));
       break;
 
-    case NativeFieldDesc::Kind::kDartField:
-    case NativeFieldDesc::Kind::kLocalVariable:
+    case Slot::Kind::kDartField:
+    case Slot::Kind::kLocalVariable:
       // Use default value.
       Definition::InferRange(analysis, range);
       break;
 
-    case NativeFieldDesc::Kind::kLinkedHashMap_index:
-    case NativeFieldDesc::Kind::kLinkedHashMap_data:
-    case NativeFieldDesc::Kind::kGrowableObjectArray_data:
-    case NativeFieldDesc::Kind::kContext_parent:
-    case NativeFieldDesc::Kind::kTypeArguments:
-    case NativeFieldDesc::Kind::kClosure_context:
-    case NativeFieldDesc::Kind::kClosure_delayed_type_arguments:
-    case NativeFieldDesc::Kind::kClosure_function:
-    case NativeFieldDesc::Kind::kClosure_function_type_arguments:
-    case NativeFieldDesc::Kind::kClosure_instantiator_type_arguments:
+    case Slot::Kind::kLinkedHashMap_index:
+    case Slot::Kind::kLinkedHashMap_data:
+    case Slot::Kind::kGrowableObjectArray_data:
+    case Slot::Kind::kContext_parent:
+    case Slot::Kind::kTypeArguments:
+    case Slot::Kind::kClosure_context:
+    case Slot::Kind::kClosure_delayed_type_arguments:
+    case Slot::Kind::kClosure_function:
+    case Slot::Kind::kClosure_function_type_arguments:
+    case Slot::Kind::kClosure_instantiator_type_arguments:
       // Not an integer valued field.
       UNREACHABLE();
       break;
 
-    case NativeFieldDesc::Kind::kLinkedHashMap_hash_mask:
-    case NativeFieldDesc::Kind::kLinkedHashMap_used_data:
-    case NativeFieldDesc::Kind::kLinkedHashMap_deleted_keys:
+    case Slot::Kind::kLinkedHashMap_hash_mask:
+    case Slot::Kind::kLinkedHashMap_used_data:
+    case Slot::Kind::kLinkedHashMap_deleted_keys:
       *range = Range(RangeBoundary::FromConstant(0), RangeBoundary::MaxSmi());
       break;
 
     // TODO(vegorov) more precise bounds for this?
-    case NativeFieldDesc::Kind::kArgumentsDescriptor_type_args_len:
-    case NativeFieldDesc::Kind::kArgumentsDescriptor_positional_count:
-    case NativeFieldDesc::Kind::kArgumentsDescriptor_count:
+    case Slot::Kind::kArgumentsDescriptor_type_args_len:
+    case Slot::Kind::kArgumentsDescriptor_positional_count:
+    case Slot::Kind::kArgumentsDescriptor_count:
       *range = Range(RangeBoundary::FromConstant(0), RangeBoundary::MaxSmi());
       break;
   }

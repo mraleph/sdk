@@ -734,42 +734,41 @@ intptr_t CheckClassInstr::ComputeCidMask() const {
   return mask;
 }
 
-class NativeFieldDescCache : public ZoneAllocated {
+class SlotCache : public ZoneAllocated {
  public:
-  static NativeFieldDescCache& Get(Thread* thread) {
+  static SlotCache& Get(Thread* thread) {
     auto result = thread->compiler_state().native_field_desc_cache();
     if (result == nullptr) {
-      result = new NativeFieldDescCache(thread);
+      result = new SlotCache(thread);
       thread->compiler_state().set_native_field_desc_cache(result);
     }
     return *result;
   }
 
-  const NativeFieldDesc& Canonicalize(const NativeFieldDesc& value) {
+  const Slot& Canonicalize(const Slot& value) {
     auto result = fields_.LookupValue(&value);
     if (result == nullptr) {
-      result = new (zone_) NativeFieldDesc(value);
+      result = new (zone_) Slot(value);
       fields_.Insert(result);
     }
     return *result;
   }
 
  private:
-  explicit NativeFieldDescCache(Thread* thread)
+  explicit SlotCache(Thread* thread)
       : zone_(thread->zone()), fields_(thread->zone()) {}
 
   Zone* zone_;
-  DirectChainedHashMap<PointerKeyValueTrait<const NativeFieldDesc> > fields_;
+  DirectChainedHashMap<PointerKeyValueTrait<const Slot> > fields_;
 };
 
-const NativeFieldDesc& NativeFieldDesc::Get(Kind kind) {
-  static const NativeFieldDesc fields[] = {
+const Slot& Slot::Get(Kind kind) {
+  static const Slot fields[] = {
 #define IMMUTABLE (IsImmutableBit::encode(true))
 #define MUTABLE (0)
 #define DEFINE_NATIVE_FIELD(ClassName, FieldName, cid, mutability)             \
-  NativeFieldDesc(Kind::k##ClassName##_##FieldName, mutability, k##cid##Cid,   \
-                  ClassName::FieldName##_offset(), #ClassName "." #FieldName,  \
-                  nullptr),
+  Slot(Kind::k##ClassName##_##FieldName, mutability, k##cid##Cid,              \
+       ClassName::FieldName##_offset(), #ClassName "." #FieldName, nullptr),
 
       NATIVE_FIELDS_LIST(DEFINE_NATIVE_FIELD)
 
@@ -781,8 +780,7 @@ const NativeFieldDesc& NativeFieldDesc::Get(Kind kind) {
   return fields[static_cast<uint8_t>(kind)];
 }
 
-const NativeFieldDesc& NativeFieldDesc::GetLengthFieldForArrayCid(
-    intptr_t array_cid) {
+const Slot& Slot::GetLengthFieldForArrayCid(intptr_t array_cid) {
   if (RawObject::IsExternalTypedDataClassId(array_cid) ||
       RawObject::IsTypedDataClassId(array_cid)) {
     return Get(Kind::kTypedData_length);
@@ -808,34 +806,30 @@ const NativeFieldDesc& NativeFieldDesc::GetLengthFieldForArrayCid(
   }
 }
 
-const NativeFieldDesc& NativeFieldDesc::GetTypeArgumentsFieldFor(
-    Thread* thread,
-    const Class& cls) {
+const Slot& Slot::GetTypeArgumentsSlotFor(Thread* thread, const Class& cls) {
   // TODO(vegorov) consider caching type arguments fields for specific classes
   // in some sort of a flow-graph specific cache.
   const intptr_t offset = cls.type_arguments_field_offset();
   ASSERT(offset != Class::kNoTypeArguments);
 
-  return NativeFieldDescCache::Get(thread).Canonicalize(NativeFieldDesc(
-      Kind::kTypeArguments, IsImmutableBit::encode(true), kDynamicCid, offset,
-      ":type_arguments", /*type=*/nullptr));
+  return SlotCache::Get(thread).Canonicalize(
+      Slot(Kind::kTypeArguments, IsImmutableBit::encode(true), kDynamicCid,
+           offset, ":type_arguments", /*type=*/nullptr));
 }
 
-const NativeFieldDesc& NativeFieldDesc::GetContextVariableFieldFor(
-    Thread* thread,
-    const LocalVariable* variable) {
+const Slot& Slot::GetContextVariableSlotFor(Thread* thread,
+                                             const LocalVariable* variable) {
   ASSERT(variable->is_captured());
-  return NativeFieldDescCache::Get(thread).Canonicalize(NativeFieldDesc(
-      Kind::kLocalVariable,
-      IsImmutableBit::encode(variable->is_final()) |
-          IsNullableBit::encode(true),
-      kDynamicCid, Context::variable_offset(variable->index().value()),
-      &variable->name(), &variable->type()));
+  return SlotCache::Get(thread).Canonicalize(
+      Slot(Kind::kLocalVariable,
+           IsImmutableBit::encode(variable->is_final()) |
+               IsNullableBit::encode(true),
+           kDynamicCid, Context::variable_offset(variable->index().value()),
+           &variable->name(), &variable->type()));
 }
 
-const NativeFieldDesc& NativeFieldDesc::Get(
-    const Field& field,
-    const ParsedFunction* parsed_function /* = nullptr */) {
+const Slot& Slot::Get(const Field& field,
+                      const ParsedFunction* parsed_function /* = nullptr */) {
   Thread* thread = Thread::Current();
   Zone* zone = thread->zone();
   intptr_t nullable_cid = kDynamicCid;
@@ -849,24 +843,24 @@ const NativeFieldDesc& NativeFieldDesc::Get(
     parsed_function->AddToGuardedFields(zone_field);
   }
 
-  return NativeFieldDescCache::Get(thread).Canonicalize(NativeFieldDesc(
-      Kind::kDartField,
-      IsImmutableBit::encode(field.is_final() || field.is_const()) |
-          IsNullableBit::encode(is_nullable),
-      nullable_cid,  // TODO(XXX) assign the proper type
-      field.Offset(), zone_field,
-      &AbstractType::ZoneHandle(zone, field.type())));
+  return SlotCache::Get(thread).Canonicalize(
+      Slot(Kind::kDartField,
+           IsImmutableBit::encode(field.is_final() || field.is_const()) |
+               IsNullableBit::encode(is_nullable),
+           nullable_cid,  // TODO(XXX) assign the proper type
+           field.Offset(), zone_field,
+           &AbstractType::ZoneHandle(zone, field.type())));
 }
 
-CompileType NativeFieldDesc::compile_type() const {
+CompileType Slot::compile_type() const {
   return CompileType(is_nullable(), nullable_cid(), nullptr);
 }
 
-const AbstractType& NativeFieldDesc::static_type() const {
-  return static_type_ != nullptr ? static_type_ : Object::null_abstract_type();
+const AbstractType& Slot::static_type() const {
+  return static_type_ != nullptr ? *static_type_ : Object::null_abstract_type();
 }
 
-const char* NativeFieldDesc::name() const {
+const char* Slot::name() const {
   if (IsLocalVariable()) {
     return data_as<const String>()->ToCString();
   } else if (IsDartField()) {
@@ -876,7 +870,7 @@ const char* NativeFieldDesc::name() const {
   }
 }
 
-bool NativeFieldDesc::Equals(const NativeFieldDesc* other) const {
+bool Slot::Equals(const Slot* other) const {
   if (kind_ != other->kind_) {
     return false;
   }
@@ -887,7 +881,8 @@ bool NativeFieldDesc::Equals(const NativeFieldDesc* other) const {
 
     case Kind::kLocalVariable:
       return (offset_in_bytes_ == other->offset_in_bytes_) &&
-             (bits_ == other->bits_) && (type_ == other->type_) &&
+             (bits_ == other->bits_) &&
+             (static_type_->raw() == other->static_type_->raw()) &&
              (data_as<const String>()->raw() ==
               other->data_as<const String>()->raw());
 
@@ -902,7 +897,7 @@ bool NativeFieldDesc::Equals(const NativeFieldDesc* other) const {
   }
 }
 
-intptr_t NativeFieldDesc::Hashcode() const {
+intptr_t Slot::Hashcode() const {
   intptr_t result = (static_cast<int8_t>(kind_) * 63 + offset_in_bytes_) * 31;
   if (IsDartField()) {
     result += String::Handle(data_as<const Field>()->name()).Hash();
@@ -913,20 +908,18 @@ intptr_t NativeFieldDesc::Hashcode() const {
 }
 
 bool LoadFieldInstr::IsUnboxedLoad() const {
-  return FLAG_unbox_numeric_fields &&
-         (native_field().kind() == NativeFieldDesc::Kind::kDartField) &&
-         FlowGraphCompiler::IsUnboxedField(native_field().field());
+  return FLAG_unbox_numeric_fields && slot().IsDartField() &&
+         FlowGraphCompiler::IsUnboxedField(slot().field());
 }
 
 bool LoadFieldInstr::IsPotentialUnboxedLoad() const {
-  return FLAG_unbox_numeric_fields &&
-         (native_field().kind() == NativeFieldDesc::Kind::kDartField) &&
-         FlowGraphCompiler::IsPotentialUnboxedField(native_field().field());
+  return FLAG_unbox_numeric_fields && slot().IsDartField() &&
+         FlowGraphCompiler::IsPotentialUnboxedField(slot().field());
 }
 
 Representation LoadFieldInstr::representation() const {
   if (IsUnboxedLoad()) {
-    const intptr_t cid = native_field().field().UnboxedFieldCid();
+    const intptr_t cid = slot().field().UnboxedFieldCid();
     switch (cid) {
       case kDoubleCid:
         return kUnboxedDouble;
@@ -942,20 +935,20 @@ Representation LoadFieldInstr::representation() const {
 }
 
 bool StoreInstanceFieldInstr::IsUnboxedStore() const {
-  return FLAG_unbox_numeric_fields && field().IsDartField() &&
-         FlowGraphCompiler::IsUnboxedField(field().field());
+  return FLAG_unbox_numeric_fields && slot().IsDartField() &&
+         FlowGraphCompiler::IsUnboxedField(slot().field());
 }
 
 bool StoreInstanceFieldInstr::IsPotentialUnboxedStore() const {
-  return FLAG_unbox_numeric_fields && field().IsDartField() &&
-         FlowGraphCompiler::IsPotentialUnboxedField(field().field());
+  return FLAG_unbox_numeric_fields && slot().IsDartField() &&
+         FlowGraphCompiler::IsPotentialUnboxedField(slot().field());
 }
 
 Representation StoreInstanceFieldInstr::RequiredInputRepresentation(
     intptr_t index) const {
   ASSERT((index == 0) || (index == 1));
   if ((index == 1) && IsUnboxedStore()) {
-    const intptr_t cid = field().field().UnboxedFieldCid();
+    const intptr_t cid = slot().field().UnboxedFieldCid();
     switch (cid) {
       case kDoubleCid:
         return kUnboxedDouble;
@@ -1058,7 +1051,7 @@ bool BinaryIntegerOpInstr::AttributesEqual(Instruction* other) const {
 bool LoadFieldInstr::AttributesEqual(Instruction* other) const {
   LoadFieldInstr* other_load = other->AsLoadField();
   ASSERT(other_load != NULL);
-  return &this->native_field_ == &other_load->native_field_;
+  return &this->slot_ == &other_load->slot_;
 }
 
 Instruction* InitStaticFieldInstr::Canonicalize(FlowGraph* flow_graph) {
@@ -2628,33 +2621,33 @@ Instruction* CheckStackOverflowInstr::Canonicalize(FlowGraph* flow_graph) {
 }
 
 bool LoadFieldInstr::IsImmutableLengthLoad() const {
-  switch (native_field().kind()) {
-    case NativeFieldDesc::Kind::kArray_length:
-    case NativeFieldDesc::Kind::kTypedData_length:
-    case NativeFieldDesc::Kind::kString_length:
+  switch (slot().kind()) {
+    case Slot::Kind::kArray_length:
+    case Slot::Kind::kTypedData_length:
+    case Slot::Kind::kString_length:
       return true;
-    case NativeFieldDesc::Kind::kGrowableObjectArray_length:
+    case Slot::Kind::kGrowableObjectArray_length:
       return false;
 
     // Not length loads.
-    case NativeFieldDesc::Kind::kLinkedHashMap_index:
-    case NativeFieldDesc::Kind::kLinkedHashMap_data:
-    case NativeFieldDesc::Kind::kLinkedHashMap_hash_mask:
-    case NativeFieldDesc::Kind::kLinkedHashMap_used_data:
-    case NativeFieldDesc::Kind::kLinkedHashMap_deleted_keys:
-    case NativeFieldDesc::Kind::kArgumentsDescriptor_type_args_len:
-    case NativeFieldDesc::Kind::kArgumentsDescriptor_positional_count:
-    case NativeFieldDesc::Kind::kArgumentsDescriptor_count:
-    case NativeFieldDesc::Kind::kTypeArguments:
-    case NativeFieldDesc::Kind::kGrowableObjectArray_data:
-    case NativeFieldDesc::Kind::kContext_parent:
-    case NativeFieldDesc::Kind::kClosure_context:
-    case NativeFieldDesc::Kind::kClosure_delayed_type_arguments:
-    case NativeFieldDesc::Kind::kClosure_function:
-    case NativeFieldDesc::Kind::kClosure_function_type_arguments:
-    case NativeFieldDesc::Kind::kClosure_instantiator_type_arguments:
-    case NativeFieldDesc::Kind::kLocalVariable:
-    case NativeFieldDesc::Kind::kDartField:
+    case Slot::Kind::kLinkedHashMap_index:
+    case Slot::Kind::kLinkedHashMap_data:
+    case Slot::Kind::kLinkedHashMap_hash_mask:
+    case Slot::Kind::kLinkedHashMap_used_data:
+    case Slot::Kind::kLinkedHashMap_deleted_keys:
+    case Slot::Kind::kArgumentsDescriptor_type_args_len:
+    case Slot::Kind::kArgumentsDescriptor_positional_count:
+    case Slot::Kind::kArgumentsDescriptor_count:
+    case Slot::Kind::kTypeArguments:
+    case Slot::Kind::kGrowableObjectArray_data:
+    case Slot::Kind::kContext_parent:
+    case Slot::Kind::kClosure_context:
+    case Slot::Kind::kClosure_delayed_type_arguments:
+    case Slot::Kind::kClosure_function:
+    case Slot::Kind::kClosure_function_type_arguments:
+    case Slot::Kind::kClosure_instantiator_type_arguments:
+    case Slot::Kind::kLocalVariable:
+    case Slot::Kind::kDartField:
       return false;
   }
 }
@@ -2686,13 +2679,13 @@ Definition* MathUnaryInstr::Canonicalize(FlowGraph* flow_graph) {
 }
 
 bool LoadFieldInstr::TryEvaluateLoad(const Object& instance,
-                                     const NativeFieldDesc& field,
+                                     const Slot& field,
                                      Object* result) {
   switch (field.kind()) {
-    case NativeFieldDesc::Kind::kDartField:
+    case Slot::Kind::kDartField:
       return TryEvaluateLoad(instance, field.field(), result);
 
-    case NativeFieldDesc::Kind::kArgumentsDescriptor_type_args_len:
+    case Slot::Kind::kArgumentsDescriptor_type_args_len:
       if (instance.IsArray() && Array::Cast(instance).IsImmutable()) {
         ArgumentsDescriptor desc(Array::Cast(instance));
         *result = Smi::New(desc.TypeArgsLen());
@@ -2730,7 +2723,7 @@ bool LoadFieldInstr::TryEvaluateLoad(const Object& instance,
 }
 
 bool LoadFieldInstr::Evaluate(const Object& instance, Object* result) {
-  return TryEvaluateLoad(instance, native_field(), result);
+  return TryEvaluateLoad(instance, slot(), result);
 }
 
 Definition* LoadFieldInstr::Canonicalize(FlowGraph* flow_graph) {
@@ -2747,21 +2740,21 @@ Definition* LoadFieldInstr::Canonicalize(FlowGraph* flow_graph) {
         return call->ArgumentAt(1);
       }
     } else if (CreateArrayInstr* create_array = array->AsCreateArray()) {
-      if (native_field().kind() == NativeFieldDesc::Kind::kArray_length) {
+      if (slot().kind() == Slot::Kind::kArray_length) {
         return create_array->num_elements()->definition();
       }
     } else if (LoadFieldInstr* load_array = array->AsLoadField()) {
       // For arrays with guarded lengths, replace the length load
       // with a constant.
-      const NativeFieldDesc& field = load_array->native_field();
-      if (field.IsDartField()) {
-        if (field.field().guarded_list_length() >= 0) {
+      const Slot& slot = load_array->slot();
+      if (slot.IsDartField()) {
+        if (slot.field().guarded_list_length() >= 0) {
           return flow_graph->GetConstant(
-              Smi::Handle(Smi::New(field.field().guarded_list_length())));
+              Smi::Handle(Smi::New(slot.field().guarded_list_length())));
         }
       }
     }
-  } else if (native_field().kind() == NativeFieldDesc::Kind::kTypeArguments) {
+  } else if (slot().IsTypeArguments()) {
     Definition* array = instance()->definition()->OriginalDefinition();
     if (StaticCallInstr* call = array->AsStaticCall()) {
       if (call->is_known_list_constructor()) {
@@ -2773,20 +2766,20 @@ Definition* LoadFieldInstr::Canonicalize(FlowGraph* flow_graph) {
     } else if (CreateArrayInstr* create_array = array->AsCreateArray()) {
       return create_array->element_type()->definition();
     } else if (LoadFieldInstr* load_array = array->AsLoadField()) {
-      const NativeFieldDesc& field = load_array->native_field();
-      switch (field.kind()) {
-        case NativeFieldDesc::Kind::kDartField: {
+      const Slot& slot = load_array->slot();
+      switch (slot.kind()) {
+        case Slot::Kind::kDartField: {
           // For trivially exact fields we know that type arguments match
           // static type arguments exactly.
-          const Field& dart_field = field.field();
-          if (dart_field.static_type_exactness_state().IsTriviallyExact()) {
+          const Field& field = slot.field();
+          if (field.static_type_exactness_state().IsTriviallyExact()) {
             return flow_graph->GetConstant(TypeArguments::Handle(
-                AbstractType::Handle(dart_field.type()).arguments()));
+                AbstractType::Handle(field.type()).arguments()));
           }
           break;
         }
 
-        case NativeFieldDesc::Kind::kLinkedHashMap_data:
+        case Slot::Kind::kLinkedHashMap_data:
           return flow_graph->constant_null();
 
         default:
@@ -2871,20 +2864,18 @@ Definition* AssertAssignableInstr::Canonicalize(FlowGraph* flow_graph) {
   if (instantiator_type_args == nullptr) {
     if (LoadFieldInstr* load_type_args =
             instantiator_type_arguments()->definition()->AsLoadField()) {
-      if (load_type_args->native_field().kind() ==
-          NativeFieldDesc::Kind::kTypeArguments) {
+      if (load_type_args->slot().IsTypeArguments()) {
         if (LoadFieldInstr* load_field = load_type_args->instance()
                                              ->definition()
                                              ->OriginalDefinition()
                                              ->AsLoadField()) {
-          if (load_field->native_field().IsDartField() &&
-              load_field->native_field()
+          if (load_field->slot().IsDartField() &&
+              load_field->slot()
                   .field()
                   .static_type_exactness_state()
                   .IsHasExactSuperClass()) {
             instantiator_type_args = &TypeArguments::Handle(
-                Z, AbstractType::Handle(
-                       Z, load_field->native_field().field().type())
+                Z, AbstractType::Handle(Z, load_field->slot().field().type())
                        .arguments());
           }
         }

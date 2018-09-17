@@ -110,8 +110,8 @@ Fragment FlowGraphBuilder::PushContext(const LocalScope* scope) {
   LocalVariable* context = MakeTemporary();
   instructions += LoadLocal(context);
   instructions += LoadLocal(parsed_function_->current_context_var());
-  instructions += StoreInstanceField(TokenPosition::kNoSource,
-                                     NativeFieldDesc::Context_parent());
+  instructions +=
+      StoreInstanceField(TokenPosition::kNoSource, Slot::Context_parent());
   instructions += StoreLocal(TokenPosition::kNoSource,
                              parsed_function_->current_context_var());
   ++context_depth_;
@@ -139,8 +139,8 @@ Fragment FlowGraphBuilder::LoadInstantiatorTypeArguments() {
              active_class_.ClassNumTypeArguments() > 0) {
     ASSERT(!parsed_function_->function().IsFactory());
     instructions += LoadLocal(scopes_->this_variable);
-    instructions += LoadNativeField(NativeFieldDesc::GetTypeArgumentsFieldFor(
-        thread_, *active_class_.klass));
+    instructions += LoadNativeField(
+        Slot::GetTypeArgumentsSlotFor(thread_, *active_class_.klass));
   } else {
     instructions += NullConstant();
   }
@@ -264,7 +264,7 @@ Fragment FlowGraphBuilder::CatchBlockEntry(const Array& handler_types,
     LocalVariable* closure_parameter = scope->VariableAt(0);
     ASSERT(!closure_parameter->is_captured());
     instructions += LoadLocal(closure_parameter);
-    instructions += LoadNativeField(NativeFieldDesc::Closure_context());
+    instructions += LoadNativeField(Slot::Closure_context());
     instructions += StoreLocal(TokenPosition::kNoSource, context_variable);
     instructions += Drop();
   }
@@ -274,14 +274,14 @@ Fragment FlowGraphBuilder::CatchBlockEntry(const Array& handler_types,
     instructions += LoadLocal(raw_exception_var);
     instructions += StoreInstanceField(
         TokenPosition::kNoSource,
-        NativeFieldDesc::GetContextVariableFieldFor(thread_, exception_var));
+        Slot::GetContextVariableSlotFor(thread_, exception_var));
   }
   if (stacktrace_var->is_captured()) {
     instructions += LoadLocal(context_variable);
     instructions += LoadLocal(raw_stacktrace_var);
     instructions += StoreInstanceField(
         TokenPosition::kNoSource,
-        NativeFieldDesc::GetContextVariableFieldFor(thread_, stacktrace_var));
+        Slot::GetContextVariableSlotFor(thread_, stacktrace_var));
   }
 
   // :saved_try_context_var can be captured in the context of
@@ -427,8 +427,8 @@ Fragment FlowGraphBuilder::LoadLocal(LocalVariable* variable) {
   if (variable->is_captured()) {
     Fragment instructions;
     instructions += LoadContextAt(variable->owner()->context_level());
-    instructions += LoadNativeField(
-        NativeFieldDesc::GetContextVariableFieldFor(thread_, variable));
+    instructions +=
+        LoadNativeField(Slot::GetContextVariableSlotFor(thread_, variable));
     return instructions;
   } else {
     return BaseFlowGraphBuilder::LoadLocal(variable);
@@ -763,7 +763,7 @@ Fragment FlowGraphBuilder::NativeFunctionBody(const Function& function,
     case MethodRecognizer::kStringBaseLength:
     case MethodRecognizer::kStringBaseIsEmpty:
       body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(NativeFieldDesc::String_length());
+      body += LoadNativeField(Slot::String_length());
       if (kind == MethodRecognizer::kStringBaseIsEmpty) {
         body += IntConstant(0);
         body += StrictCompare(Token::kEQ_STRICT);
@@ -771,16 +771,16 @@ Fragment FlowGraphBuilder::NativeFunctionBody(const Function& function,
       break;
     case MethodRecognizer::kGrowableArrayLength:
       body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(NativeFieldDesc::GrowableObjectArray_length());
+      body += LoadNativeField(Slot::GrowableObjectArray_length());
       break;
     case MethodRecognizer::kObjectArrayLength:
     case MethodRecognizer::kImmutableArrayLength:
       body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(NativeFieldDesc::Array_length());
+      body += LoadNativeField(Slot::Array_length());
       break;
     case MethodRecognizer::kTypedDataLength:
       body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(NativeFieldDesc::TypedData_length());
+      body += LoadNativeField(Slot::TypedData_length());
       break;
     case MethodRecognizer::kClassIDgetID:
       body += LoadLocal(first_parameter);
@@ -788,8 +788,8 @@ Fragment FlowGraphBuilder::NativeFunctionBody(const Function& function,
       break;
     case MethodRecognizer::kGrowableArrayCapacity:
       body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(NativeFieldDesc::GrowableObjectArray_data());
-      body += LoadNativeField(NativeFieldDesc::Array_length());
+      body += LoadNativeField(Slot::GrowableObjectArray_data());
+      body += LoadNativeField(Slot::Array_length());
       break;
     case MethodRecognizer::kListFactory: {
       // factory List<E>([int length]) {
@@ -801,8 +801,7 @@ Fragment FlowGraphBuilder::NativeFunctionBody(const Function& function,
       TargetEntryInstr *allocate_non_growable, *allocate_growable;
 
       body += LoadArgDescriptor();
-      body += LoadNativeField(
-          NativeFieldDesc::ArgumentsDescriptor_positional_count());
+      body += LoadNativeField(Slot::ArgumentsDescriptor_positional_count());
       body += IntConstant(2);
       body += BranchIfStrictEqual(&allocate_non_growable, &allocate_growable);
 
@@ -863,59 +862,59 @@ Fragment FlowGraphBuilder::NativeFunctionBody(const Function& function,
       break;
     case MethodRecognizer::kLinkedHashMap_getIndex:
       body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(NativeFieldDesc::LinkedHashMap_index());
+      body += LoadNativeField(Slot::LinkedHashMap_index());
       break;
     case MethodRecognizer::kLinkedHashMap_setIndex:
       body += LoadLocal(scopes_->this_variable);
       body += LoadLocal(first_parameter);
       body += StoreInstanceField(TokenPosition::kNoSource,
-                                 NativeFieldDesc::LinkedHashMap_index());
+                                 Slot::LinkedHashMap_index());
       body += NullConstant();
       break;
     case MethodRecognizer::kLinkedHashMap_getData:
       body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(NativeFieldDesc::LinkedHashMap_data());
+      body += LoadNativeField(Slot::LinkedHashMap_data());
       break;
     case MethodRecognizer::kLinkedHashMap_setData:
       body += LoadLocal(scopes_->this_variable);
       body += LoadLocal(first_parameter);
       body += StoreInstanceField(TokenPosition::kNoSource,
-                                 NativeFieldDesc::LinkedHashMap_data());
+                                 Slot::LinkedHashMap_data());
       body += NullConstant();
       break;
     case MethodRecognizer::kLinkedHashMap_getHashMask:
       body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(NativeFieldDesc::LinkedHashMap_hash_mask());
+      body += LoadNativeField(Slot::LinkedHashMap_hash_mask());
       break;
     case MethodRecognizer::kLinkedHashMap_setHashMask:
       body += LoadLocal(scopes_->this_variable);
       body += LoadLocal(first_parameter);
-      body += StoreInstanceField(TokenPosition::kNoSource,
-                                 NativeFieldDesc::LinkedHashMap_hash_mask(),
-                                 kNoStoreBarrier);
+      body +=
+          StoreInstanceField(TokenPosition::kNoSource,
+                             Slot::LinkedHashMap_hash_mask(), kNoStoreBarrier);
       body += NullConstant();
       break;
     case MethodRecognizer::kLinkedHashMap_getUsedData:
       body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(NativeFieldDesc::LinkedHashMap_used_data());
+      body += LoadNativeField(Slot::LinkedHashMap_used_data());
       break;
     case MethodRecognizer::kLinkedHashMap_setUsedData:
       body += LoadLocal(scopes_->this_variable);
       body += LoadLocal(first_parameter);
-      body += StoreInstanceField(TokenPosition::kNoSource,
-                                 NativeFieldDesc::LinkedHashMap_used_data(),
-                                 kNoStoreBarrier);
+      body +=
+          StoreInstanceField(TokenPosition::kNoSource,
+                             Slot::LinkedHashMap_used_data(), kNoStoreBarrier);
       body += NullConstant();
       break;
     case MethodRecognizer::kLinkedHashMap_getDeletedKeys:
       body += LoadLocal(scopes_->this_variable);
-      body += LoadNativeField(NativeFieldDesc::LinkedHashMap_deleted_keys());
+      body += LoadNativeField(Slot::LinkedHashMap_deleted_keys());
       break;
     case MethodRecognizer::kLinkedHashMap_setDeletedKeys:
       body += LoadLocal(scopes_->this_variable);
       body += LoadLocal(first_parameter);
       body += StoreInstanceField(TokenPosition::kNoSource,
-                                 NativeFieldDesc::LinkedHashMap_deleted_keys(),
+                                 Slot::LinkedHashMap_deleted_keys(),
                                  kNoStoreBarrier);
       body += NullConstant();
       break;
@@ -993,9 +992,8 @@ Fragment FlowGraphBuilder::BuildImplicitClosureCreation(
   if (!target.HasInstantiatedSignature(kCurrentClass)) {
     fragment += LoadLocal(closure);
     fragment += LoadInstantiatorTypeArguments();
-    fragment += StoreInstanceField(
-        TokenPosition::kNoSource,
-        NativeFieldDesc::Closure_instantiator_type_arguments());
+    fragment += StoreInstanceField(TokenPosition::kNoSource,
+                                   Slot::Closure_instantiator_type_arguments());
   }
 
   // The function signature cannot have uninstantiated function type parameters,
@@ -1012,19 +1010,18 @@ Fragment FlowGraphBuilder::BuildImplicitClosureCreation(
   // Store the function and the context in the closure.
   fragment += LoadLocal(closure);
   fragment += Constant(target);
-  fragment += StoreInstanceField(TokenPosition::kNoSource,
-                                 NativeFieldDesc::Closure_function());
+  fragment +=
+      StoreInstanceField(TokenPosition::kNoSource, Slot::Closure_function());
 
   fragment += LoadLocal(closure);
   fragment += LoadLocal(context);
-  fragment += StoreInstanceField(TokenPosition::kNoSource,
-                                 NativeFieldDesc::Closure_context());
+  fragment +=
+      StoreInstanceField(TokenPosition::kNoSource, Slot::Closure_context());
 
   fragment += LoadLocal(closure);
   fragment += Constant(Object::empty_type_arguments());
-  fragment +=
-      StoreInstanceField(TokenPosition::kNoSource,
-                         NativeFieldDesc::Closure_delayed_type_arguments());
+  fragment += StoreInstanceField(TokenPosition::kNoSource,
+                                 Slot::Closure_delayed_type_arguments());
 
   // The context is on top of the operand stack.  Store `this`.  The context
   // doesn't need a parent pointer because it doesn't close over anything
@@ -1032,7 +1029,7 @@ Fragment FlowGraphBuilder::BuildImplicitClosureCreation(
   fragment += LoadLocal(scopes_->this_variable);
   fragment += StoreInstanceField(
       TokenPosition::kNoSource,
-      NativeFieldDesc::GetContextVariableFieldFor(
+      Slot::GetContextVariableSlotFor(
           thread_, implicit_closure_scope->context_variables()[0]));
 
   return fragment;
@@ -1407,7 +1404,7 @@ FlowGraph* FlowGraphBuilder::BuildGraphOfInvokeFieldDispatcher(
   if (is_closure_call) {
     // Lookup the function in the closure.
     body += LoadLocal(closure);
-    body += LoadNativeField(NativeFieldDesc::Closure_function());
+    body += LoadNativeField(Slot::Closure_function());
 
     body += ClosureCall(TokenPosition::kNoSource, descriptor.TypeArgsLen(),
                         descriptor.Count(), argument_names);
