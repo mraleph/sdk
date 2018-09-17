@@ -895,18 +895,16 @@ bool CallSpecializer::TryInlineImplicitInstanceGetter(InstanceCallInstr* call) {
 void CallSpecializer::InlineImplicitInstanceGetter(Definition* call,
                                                    const Field& field) {
   LoadFieldInstr* load = new (Z) LoadFieldInstr(
-      new (Z) Value(call->ArgumentAt(0)), &field,
-      AbstractType::ZoneHandle(Z, field.type()), call->token_pos(),
+      new (Z) Value(call->ArgumentAt(0)), &field, call->token_pos(),
       isolate()->use_field_guards() ? &flow_graph()->parsed_function() : NULL);
-  load->set_is_immutable(field.is_final());
 
   // Discard the environment from the original instruction because the load
   // can't deoptimize.
   call->RemoveEnvironment();
   ReplaceCall(call, load);
 
-  if (load->result_cid() != kDynamicCid) {
-    // Reset value types if guarded_cid was used.
+  if (load->native_field().nullable_cid() != kDynamicCid) {
+    // Reset value types if we know concrete cid.
     for (Value::Iterator it(load->input_use_list()); !it.Done(); it.Advance()) {
       it.Current()->SetReachingType(NULL);
     }

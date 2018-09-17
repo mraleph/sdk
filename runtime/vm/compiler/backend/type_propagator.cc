@@ -1290,32 +1290,24 @@ CompileType LoadClassIdInstr::ComputeType() const {
 }
 
 CompileType LoadFieldInstr::ComputeType() const {
-  // Type may be null if the field is a VM field, e.g. context parent.
-  // Keep it as null for debug purposes and do not return dynamic in production
-  // mode, since misuse of the type would remain undetected.
-  if (type().IsNull()) {
-    return CompileType::Dynamic();
+  const AbstractType& field_type = native_field().type();
+  CompileType compile_type_cid = native_field().compile_type();
+  if (field_type.raw() == AbstractType::null()) {
+    return compile_type_cid;
   }
 
   const Isolate* isolate = Isolate::Current();
   CompileType compile_type_annotation = CompileType::None();
   if (isolate->can_use_strong_mode_types() ||
       (isolate->type_checks() &&
-       (type().IsFunctionType() || type().HasResolvedTypeClass()))) {
-    const AbstractType* abstract_type = &type();
+       (field_type.IsFunctionType() || field_type.HasResolvedTypeClass()))) {
+    const AbstractType* abstract_type = &field_type;
     TraceStrongModeType(this, *abstract_type);
     compile_type_annotation = CompileType::FromAbstractType(*abstract_type);
   }
 
-  CompileType compile_type_cid = CompileType::None();
-  if ((field_ != NULL) && (field_->guarded_cid() != kIllegalCid)) {
-    bool is_nullable = field_->is_nullable();
-    intptr_t field_cid = field_->guarded_cid();
-
-    compile_type_cid = CompileType(is_nullable, field_cid, NULL);
-  } else {
-    compile_type_cid = CompileType::FromCid(result_cid_);
-  }
+  THR_Print("[%s] compile_type_cid = %s\n", ToCString(), compile_type_cid.ToCString());
+  THR_Print("... compile_type_annotation = %s\n", compile_type_annotation.ToCString());
 
   return *CompileType::ComputeRefinedType(&compile_type_cid,
                                           &compile_type_annotation);

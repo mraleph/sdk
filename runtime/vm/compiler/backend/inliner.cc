@@ -622,7 +622,6 @@ static void ReplaceParameterStubs(Zone* zone,
           LoadFieldInstr* context_load = new (zone) LoadFieldInstr(
               new Value((*arguments)[first_arg_index]->definition()),
               NativeFieldDesc::Closure_context(), call_data->call->token_pos());
-          context_load->set_is_immutable(true);
           context_load->set_ssa_temp_index(
               caller_graph->alloc_ssa_temp_index());
           context_load->InsertBefore(callee_entry->next());
@@ -2330,7 +2329,6 @@ static intptr_t PrepareInlineIndexedOp(FlowGraph* flow_graph,
     LoadFieldInstr* elements = new (Z) LoadFieldInstr(
         new (Z) Value(*array), NativeFieldDesc::GrowableObjectArray_data(),
         call->token_pos());
-    elements->set_result_cid(kArrayCid);
     *cursor = flow_graph->AppendTo(*cursor, elements, NULL, FlowGraph::kValue);
     // Load from the data from backing store which is a fixed-length array.
     *array = elements;

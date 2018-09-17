@@ -165,16 +165,8 @@ class Place : public ValueObject {
         LoadFieldInstr* load_field = instr->AsLoadField();
         set_representation(load_field->representation());
         instance_ = load_field->instance()->definition()->OriginalDefinition();
-        if (load_field->field() != nullptr) {
-          set_kind(kField);
-          field_ = load_field->field();
-        } else if (load_field->native_field() != nullptr) {
-          set_kind(kNativeField);
-          native_field_ = load_field->native_field();
-        } else {
-          // Either field() or native_field() must be present.
-          UNREACHABLE();
-        }
+        set_kind(kNativeField);
+        native_field_ = &load_field->native_field();
         *is_load = true;
         break;
       }
@@ -1642,8 +1634,11 @@ class LoadOptimizer : public ValueObject {
 
               // Forward for all fields for non-escaping objects and only
               // non-final fields and type arguments for escaping ones.
+              // TODO(XXX) the comment above makes no sense, please review.
               if (aliased_set_->CanBeAliased(alloc) &&
-                  (load->field() != NULL) && load->field()->is_final()) {
+                  (load->native_field().kind() ==
+                   NativeFieldDesc::Kind::kDartField) &&
+                  load->native_field().is_immutable()) {
                 continue;
               }
 
@@ -1652,7 +1647,10 @@ class LoadOptimizer : public ValueObject {
                 ASSERT(alloc->ArgumentCount() == 1);
                 intptr_t type_args_offset =
                     alloc->cls().type_arguments_field_offset();
-                if (load->offset_in_bytes() == type_args_offset) {
+                if (load->native_field().kind() ==
+                        NativeFieldDesc::Kind::kTypeArguments &&
+                    load->native_field().offset_in_bytes() ==
+                        type_args_offset) {
                   forward_def = alloc->PushArgumentAt(0)->value()->definition();
                 }
               }
@@ -3032,7 +3030,6 @@ void AllocationSinking::CreateMaterializationAt(
     LoadFieldInstr* load =
         slot->kind() == SlotDesc::Kind::kField
             ? new (Z) LoadFieldInstr(new (Z) Value(alloc), &slot->field(),
-                                     AbstractType::ZoneHandle(Z),
                                      alloc->token_pos(), nullptr)
             : new (Z) LoadFieldInstr(new (Z) Value(alloc), slot->native_field(),
                                      alloc->token_pos());

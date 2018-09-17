@@ -2303,8 +2303,8 @@ void LoadFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   if (IsUnboxedLoad() && compiler->is_optimizing()) {
     XmmRegister result = locs()->out(0).fpu_reg();
     Register temp = locs()->temp(0).reg();
-    __ movq(temp, FieldAddress(instance_reg, offset_in_bytes()));
-    intptr_t cid = field()->UnboxedFieldCid();
+    __ movq(temp, FieldAddress(instance_reg, OffsetInBytes()));
+    intptr_t cid = native_field().field().UnboxedFieldCid();
     switch (cid) {
       case kDoubleCid:
         __ Comment("UnboxedDoubleLoadFieldInstr");
@@ -2335,7 +2335,7 @@ void LoadFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     Label load_float32x4;
     Label load_float64x2;
 
-    __ LoadObject(result, Field::ZoneHandle(field()->Original()));
+    __ LoadObject(result, Field::ZoneHandle(native_field().field().Original()));
 
     FieldAddress field_cid_operand(result, Field::guarded_cid_offset());
     FieldAddress field_nullability_operand(result, Field::is_nullable_offset());
@@ -2363,7 +2363,7 @@ void LoadFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       __ Bind(&load_double);
       BoxAllocationSlowPath::Allocate(compiler, this, compiler->double_class(),
                                       result, temp);
-      __ movq(temp, FieldAddress(instance_reg, offset_in_bytes()));
+      __ movq(temp, FieldAddress(instance_reg, OffsetInBytes()));
       __ movsd(value, FieldAddress(temp, Double::value_offset()));
       __ movsd(FieldAddress(result, Double::value_offset()), value);
       __ jmp(&done);
@@ -2373,7 +2373,7 @@ void LoadFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       __ Bind(&load_float32x4);
       BoxAllocationSlowPath::Allocate(
           compiler, this, compiler->float32x4_class(), result, temp);
-      __ movq(temp, FieldAddress(instance_reg, offset_in_bytes()));
+      __ movq(temp, FieldAddress(instance_reg, OffsetInBytes()));
       __ movups(value, FieldAddress(temp, Float32x4::value_offset()));
       __ movups(FieldAddress(result, Float32x4::value_offset()), value);
       __ jmp(&done);
@@ -2383,7 +2383,7 @@ void LoadFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       __ Bind(&load_float64x2);
       BoxAllocationSlowPath::Allocate(
           compiler, this, compiler->float64x2_class(), result, temp);
-      __ movq(temp, FieldAddress(instance_reg, offset_in_bytes()));
+      __ movq(temp, FieldAddress(instance_reg, OffsetInBytes()));
       __ movups(value, FieldAddress(temp, Float64x2::value_offset()));
       __ movups(FieldAddress(result, Float64x2::value_offset()), value);
       __ jmp(&done);
@@ -2391,7 +2391,7 @@ void LoadFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
 
     __ Bind(&load_pointer);
   }
-  __ movq(result, FieldAddress(instance_reg, offset_in_bytes()));
+  __ movq(result, FieldAddress(instance_reg, OffsetInBytes()));
   __ Bind(&done);
 }
 

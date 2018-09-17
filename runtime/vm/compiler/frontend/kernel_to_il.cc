@@ -418,8 +418,7 @@ Fragment FlowGraphBuilder::LoadClassId() {
 
 Fragment FlowGraphBuilder::LoadField(const Field& field) {
   LoadFieldInstr* load = new (Z) LoadFieldInstr(
-      Pop(), &MayCloneField(field), AbstractType::ZoneHandle(Z, field.type()),
-      TokenPosition::kNoSource, parsed_function_);
+      Pop(), &MayCloneField(field), TokenPosition::kNoSource, parsed_function_);
   Push(load);
   return Fragment(load);
 }

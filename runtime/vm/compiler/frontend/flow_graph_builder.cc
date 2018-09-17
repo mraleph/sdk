@@ -856,7 +856,6 @@ Definition* EffectGraphVisitor::BuildLoadLocal(const LocalVariable& local,
     LoadFieldInstr* load = new (Z) LoadFieldInstr(
         context, NativeFieldDesc::GetContextVariableFieldFor(thread(), &local),
         token_pos);
-    load->set_is_immutable(local.is_final());
     return load;
   } else {
     return new (Z) LoadLocalInstr(local, token_pos);
@@ -2589,7 +2588,6 @@ void EffectGraphVisitor::BuildClosureCall(ClosureCallNode* node,
   closure_val = Bind(new (Z) LoadLocalInstr(*tmp_var, node->token_pos()));
   LoadFieldInstr* function_load = new (Z) LoadFieldInstr(
       closure_val, NativeFieldDesc::Closure_function(), node->token_pos());
-  function_load->set_is_immutable(true);
   Value* function_val = Bind(function_load);
 
   Definition* closure_call = new (Z) ClosureCallInstr(
@@ -3499,7 +3497,6 @@ void EffectGraphVisitor::VisitLoadInstanceFieldNode(
   Append(for_instance);
   LoadFieldInstr* load =
       new (Z) LoadFieldInstr(for_instance.value(), &node->field(),
-                             AbstractType::ZoneHandle(Z, node->field().type()),
                              node->token_pos(), &owner()->parsed_function());
   ReturnDefinition(load);
 }

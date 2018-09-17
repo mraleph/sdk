@@ -670,20 +670,9 @@ void MaterializeObjectInstr::PrintOperandsTo(BufferFormatter* f) const {
 void LoadFieldInstr::PrintOperandsTo(BufferFormatter* f) const {
   instance()->PrintTo(f);
 
-  if (field() != nullptr) {
-    f->Print("%s {%s}", String::Handle(field()->name()).ToCString(),
-             field()->GuardedPropertiesAsCString());
-  }
-
-  if (native_field() != nullptr) {
-    f->Print("%s", native_field()->name());
-  }
-
-  f->Print(" @%" Pd, offset_in_bytes());
-
-  if (immutable_) {
-    f->Print(", immutable");
-  }
+  f->Print("%s @%" Pd "%s", native_field().name(),
+           native_field().offset_in_bytes(),
+           native_field().is_immutable() ? " final" : "");
 }
 
 void InstantiateTypeInstr::PrintOperandsTo(BufferFormatter* f) const {

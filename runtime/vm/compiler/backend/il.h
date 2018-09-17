@@ -4219,7 +4219,9 @@ class NativeFieldDesc : public ZoneAllocated {
       Thread* thread,
       const LocalVariable* var);
 
-  static const NativeFieldDesc& Get(const Field& field);
+  static const NativeFieldDesc& Get(
+      const Field& field,
+      const ParsedFunction* parsed_function = nullptr);
 
   const char* name() const;
 
@@ -4227,18 +4229,16 @@ class NativeFieldDesc : public ZoneAllocated {
 
   intptr_t offset_in_bytes() const { return offset_in_bytes_; }
 
-  bool is_immutable() const { return (bits_ & kIsImmutableBit) != 0; }
+  bool is_immutable() const { return IsImmutableBit::decode(bits_); }
 
-  intptr_t cid() const {
-    if (kind() == Kind::kDartField) {
-      return field().is_nullable() ? field().guarded_cid() : kDynamicCid;
-    }
-    return cid_;
-  }
+  intptr_t nullable_cid() const { return cid_; }
+  intptr_t is_nullable() const { return IsNullableBit::decode(bits_); }
 
-  RawAbstractType* type() const;
+  const AbstractType& static_type() const;
+  CompileType compile_type() const;
 
   bool IsDartField() const { return kind() == Kind::kDartField; }
+  bool IsLocalVariable() const { return kind() == Kind::kLocalVariable; }
   const Field& field() const {
     ASSERT(IsDartField());
     ASSERT(data_ != nullptr);
@@ -4253,31 +4253,28 @@ class NativeFieldDesc : public ZoneAllocated {
                   int8_t bits,
                   int16_t cid,
                   intptr_t offset_in_bytes,
-                  const void* data)
+                  const void* data,
+                  const AbstractType& static_type)
       : kind_(kind),
         bits_(bits),
         cid_(cid),
         offset_in_bytes_(offset_in_bytes),
-        data_(data) {}
+        data_(data),
+        static_type_(static_type) {}
 
   NativeFieldDesc(const NativeFieldDesc& other)
       : NativeFieldDesc(other.kind_,
                         other.bits_,
                         other.cid_,
                         other.offset_in_bytes_,
-                        other.data_) {}
+                        other.data_,
+                        other.static_type_) {}
 
-  enum {
-    kIsImmutableBit = 1 << 0,
-    kNameIsCStringBit = 1 << 1,
-  };
+  using IsImmutableBit = BitField<int8_t, bool, 0, 1>;
+  using IsNullableBit = BitField<int8_t, bool, 1, 1>;
 
   template<typename T>
   const T* data_as() const { return static_cast<const T*>(data_); }
-
-  bool is_name_cstring() const { return (bits_ & kNameIsCStringBit) != 0; }
-  bool IsEqualData(const NativeFieldDesc* other) const;
-
 
   const Kind kind_;
   const int8_t bits_;
@@ -4285,6 +4282,7 @@ class NativeFieldDesc : public ZoneAllocated {
 
   const intptr_t offset_in_bytes_;
   const void* data_;
+  const AbstractType& static_type_;
 
   friend class NativeFieldDescCache;
 };
@@ -5264,61 +5262,30 @@ class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
   LoadFieldInstr(Value* instance,
                  const NativeFieldDesc& native_field,
                  TokenPosition token_pos)
-      : offset_in_bytes_(native_field.offset_in_bytes()),
-        type_(AbstractType::ZoneHandle(native_field.type())),
-        result_cid_(native_field.cid()),
-        immutable_(native_field.is_immutable()),
-        native_field_(&native_field),
-        field_(nullptr),
-        token_pos_(token_pos) {
-    ASSERT(offset_in_bytes_ >= 0);
-    // May be null if field is not an instance.
-    ASSERT(type_.IsZoneHandle() || type_.IsReadOnlyHandle());
+      : native_field_(native_field), token_pos_(token_pos) {
     SetInputAt(0, instance);
   }
 
   LoadFieldInstr(Value* instance,
                  const Field* field,
-                 const AbstractType& type,
                  TokenPosition token_pos,
                  const ParsedFunction* parsed_function)
-      : offset_in_bytes_(field->Offset()),
-        type_(type),
-        result_cid_(kDynamicCid),
-        immutable_(false),
-        native_field_(nullptr),
-        field_(field),
-        token_pos_(token_pos) {
-    ASSERT(Class::Handle(field->Owner()).is_finalized());
-    ASSERT(field->IsZoneHandle());
-    // May be null if field is not an instance.
-    ASSERT(type.IsZoneHandle() || type.IsReadOnlyHandle());
-    SetInputAt(0, instance);
-
-    if (parsed_function != nullptr && field->guarded_cid() != kIllegalCid) {
-      if (!field->is_nullable() || (field->guarded_cid() == kNullCid)) {
-        set_result_cid(field->guarded_cid());
-      }
-      parsed_function->AddToGuardedFields(field);
-    }
-  }
-
-  void set_is_immutable(bool value) { immutable_ = value; }
+      : LoadFieldInstr(instance,
+                       NativeFieldDesc::Get(*field, parsed_function),
+                       token_pos) {}
 
   Value* instance() const { return inputs_[0]; }
-  intptr_t offset_in_bytes() const { return offset_in_bytes_; }
-  const AbstractType& type() const { return type_; }
-  void set_result_cid(intptr_t value) { result_cid_ = value; }
-  intptr_t result_cid() const { return result_cid_; }
+  const NativeFieldDesc& native_field() const { return native_field_; }
+
   virtual TokenPosition token_pos() const { return token_pos_; }
 
-  const Field* field() const { return field_; }
-  const NativeFieldDesc* native_field() const { return native_field_; }
+  intptr_t OffsetInBytes() const { return native_field().offset_in_bytes(); }
+  //const AbstractType& type() const { return native_field().type(); }
+  //intptr_t result_cid() const { return native_field().cid(); }
 
   virtual Representation representation() const;
 
   bool IsUnboxedLoad() const;
-
   bool IsPotentialUnboxedLoad() const;
 
   DECLARE_INSTRUCTION(LoadField)
@@ -5349,7 +5316,7 @@ class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
 
   static bool IsFixedLengthArrayCid(intptr_t cid);
 
-  virtual bool AllowsCSE() const { return immutable_; }
+  virtual bool AllowsCSE() const { return native_field_.is_immutable(); }
   virtual bool HasUnknownSideEffects() const { return false; }
 
   virtual bool AttributesEqual(Instruction* other) const;
@@ -5357,13 +5324,7 @@ class LoadFieldInstr : public TemplateDefinition<1, NoThrow> {
   PRINT_OPERANDS_TO_SUPPORT
 
  private:
-  const intptr_t offset_in_bytes_;
-  const AbstractType& type_;
-  intptr_t result_cid_;
-  bool immutable_;
-
-  const NativeFieldDesc* native_field_;
-  const Field* field_;
+  const NativeFieldDesc& native_field_;
   const TokenPosition token_pos_;
 
   DISALLOW_COPY_AND_ASSIGN(LoadFieldInstr);

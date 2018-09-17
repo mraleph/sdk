@@ -764,12 +764,12 @@ class NativeFieldDescCache : public ZoneAllocated {
 
 const NativeFieldDesc& NativeFieldDesc::Get(Kind kind) {
   static const NativeFieldDesc fields[] = {
-#define IMMUTABLE (kIsImmutableBit)
+#define IMMUTABLE (IsImmutableBit::encode(true))
 #define MUTABLE (0)
 #define DEFINE_NATIVE_FIELD(ClassName, FieldName, cid, mutability)             \
-  NativeFieldDesc(Kind::k##ClassName##_##FieldName,                            \
-                  kNameIsCStringBit | mutability, k##cid##Cid,                 \
-                  ClassName::FieldName##_offset(), #ClassName "." #FieldName),
+  NativeFieldDesc(Kind::k##ClassName##_##FieldName, mutability, k##cid##Cid,   \
+                  ClassName::FieldName##_offset(), #ClassName "." #FieldName,  \
+                  nullptr),
 
       NATIVE_FIELDS_LIST(DEFINE_NATIVE_FIELD)
 
@@ -816,9 +816,9 @@ const NativeFieldDesc& NativeFieldDesc::GetTypeArgumentsFieldFor(
   const intptr_t offset = cls.type_arguments_field_offset();
   ASSERT(offset != Class::kNoTypeArguments);
 
-  return NativeFieldDescCache::Get(thread).Canonicalize(
-      NativeFieldDesc(Kind::kTypeArguments, kIsImmutableBit | kNameIsCStringBit,
-                      kDynamicCid, offset, ":type_arguments"));
+  return NativeFieldDescCache::Get(thread).Canonicalize(NativeFieldDesc(
+      Kind::kTypeArguments, IsImmutableBit::encode(true), kDynamicCid, offset,
+      ":type_arguments", /*type=*/nullptr));
 }
 
 const NativeFieldDesc& NativeFieldDesc::GetContextVariableFieldFor(
@@ -826,78 +826,107 @@ const NativeFieldDesc& NativeFieldDesc::GetContextVariableFieldFor(
     const LocalVariable* variable) {
   ASSERT(variable->is_captured());
   return NativeFieldDescCache::Get(thread).Canonicalize(NativeFieldDesc(
-      Kind::kLocalVariable, variable->is_final() ? kIsImmutableBit : 0,
-      kDynamicCid,  // TODO(vegorov) assign the proper type
-      Context::variable_offset(variable->index().value()), &variable->name()));
+      Kind::kLocalVariable,
+      IsImmutableBit::encode(variable->is_final()) |
+          IsNullableBit::encode(true),
+      kDynamicCid, Context::variable_offset(variable->index().value()),
+      &variable->name(), &variable->type()));
 }
 
-const NativeFieldDesc& NativeFieldDesc::Get(const Field& field) {
+const NativeFieldDesc& NativeFieldDesc::Get(
+    const Field& field,
+    const ParsedFunction* parsed_function /* = nullptr */) {
   Thread* thread = Thread::Current();
-  return NativeFieldDescCache::Get(thread).Canonicalize(NativeFieldDesc(
-        Kind::kDartField, field.is_final() || field.is_const() ? kIsImmutableBit : 0,
-        kIllegalCid,  // TODO(vegorov) assign the proper type
-        field.Offset(), &Field::ZoneHandle(thread->zone(), field.raw())));
-}
+  Zone* zone = thread->zone();
+  intptr_t nullable_cid = kDynamicCid;
+  bool is_nullable = true;
 
-RawAbstractType* NativeFieldDesc::type() const {
-  if (cid() == kSmiCid) {
-    return Type::SmiType();
+  // TODO(XXX) avoid rewrapping.
+  const Field* zone_field = &Field::ZoneHandle(zone, field.raw());
+  if (parsed_function != nullptr && field.guarded_cid() != kIllegalCid) {
+    nullable_cid = field.guarded_cid();
+    is_nullable = field.is_nullable();
+    parsed_function->AddToGuardedFields(zone_field);
   }
 
-  return Type::DynamicType();
+  return NativeFieldDescCache::Get(thread).Canonicalize(NativeFieldDesc(
+      Kind::kDartField,
+      IsImmutableBit::encode(field.is_final() || field.is_const()) |
+          IsNullableBit::encode(is_nullable),
+      nullable_cid,  // TODO(XXX) assign the proper type
+      field.Offset(), zone_field,
+      &AbstractType::ZoneHandle(zone, field.type())));
+}
+
+CompileType NativeFieldDesc::compile_type() const {
+  return CompileType(is_nullable(), nullable_cid(), nullptr);
+}
+
+const AbstractType& NativeFieldDesc::static_type() const {
+  return static_type_ != nullptr ? static_type_ : Object::null_abstract_type();
 }
 
 const char* NativeFieldDesc::name() const {
-  if (is_name_cstring()) {
-    return data_as<const char>();
+  if (IsLocalVariable()) {
+    return data_as<const String>()->ToCString();
   } else if (IsDartField()) {
     return String::Handle(field().name()).ToCString();
   } else {
-    return data_as<const String>()->ToCString();
-  }
-}
-
-bool NativeFieldDesc::IsEqualData(const NativeFieldDesc* other) const {
-  if (kind_ == Kind::kLocalVariable) {
-    // Local variable names are symbols.
-    return other->data_as<const String>()->raw() == data_as<const String>()->raw();
-  } else if (kind_ == Kind::kDartField) {
-    return other->data_as<const Field>()->Original() == data_as<const Field>()->Original();
-  } else {
-    return true;
+    return data_as<const char>();
   }
 }
 
 bool NativeFieldDesc::Equals(const NativeFieldDesc* other) const {
-  return (kind_ == other->kind_) && (bits_ == other->bits_) &&
-         (cid_ == other->cid_) &&
-         (offset_in_bytes_ == other->offset_in_bytes_) &&
-         IsEqualData(other);
+  if (kind_ != other->kind_) {
+    return false;
+  }
+
+  switch (kind_) {
+    case Kind::kTypeArguments:
+      return (offset_in_bytes_ == other->offset_in_bytes_);
+
+    case Kind::kLocalVariable:
+      return (offset_in_bytes_ == other->offset_in_bytes_) &&
+             (bits_ == other->bits_) && (type_ == other->type_) &&
+             (data_as<const String>()->raw() ==
+              other->data_as<const String>()->raw());
+
+    case Kind::kDartField:
+      return (offset_in_bytes_ == other->offset_in_bytes_) &&
+             other->data_as<const Field>()->Original() ==
+                 data_as<const Field>()->Original();
+
+    default:
+      UNREACHABLE();
+      return false;
+  }
 }
 
 intptr_t NativeFieldDesc::Hashcode() const {
   intptr_t result = (static_cast<int8_t>(kind_) * 63 + offset_in_bytes_) * 31;
   if (IsDartField()) {
     result += String::Handle(data_as<const Field>()->name()).Hash();
-  } else if (!is_name_cstring()) {
+  } else if (IsLocalVariable()) {
     result += data_as<const String>()->Hash();
   }
   return result;
 }
 
 bool LoadFieldInstr::IsUnboxedLoad() const {
-  return FLAG_unbox_numeric_fields && (field() != NULL) &&
-         FlowGraphCompiler::IsUnboxedField(*field());
+  return FLAG_unbox_numeric_fields &&
+         (native_field().kind() == NativeFieldDesc::Kind::kDartField) &&
+         FlowGraphCompiler::IsUnboxedField(native_field().field());
 }
 
 bool LoadFieldInstr::IsPotentialUnboxedLoad() const {
-  return FLAG_unbox_numeric_fields && (field() != NULL) &&
-         FlowGraphCompiler::IsPotentialUnboxedField(*field());
+  return FLAG_unbox_numeric_fields &&
+         (native_field().kind() == NativeFieldDesc::Kind::kDartField) &&
+         FlowGraphCompiler::IsPotentialUnboxedField(native_field().field());
 }
 
 Representation LoadFieldInstr::representation() const {
   if (IsUnboxedLoad()) {
-    const intptr_t cid = field()->UnboxedFieldCid();
+    const intptr_t cid = native_field().field().UnboxedFieldCid();
     switch (cid) {
       case kDoubleCid:
         return kUnboxedDouble;
@@ -1029,12 +1058,7 @@ bool BinaryIntegerOpInstr::AttributesEqual(Instruction* other) const {
 bool LoadFieldInstr::AttributesEqual(Instruction* other) const {
   LoadFieldInstr* other_load = other->AsLoadField();
   ASSERT(other_load != NULL);
-  if (field() != NULL) {
-    return (other_load->field() != NULL) &&
-           (field()->raw() == other_load->field()->raw());
-  }
-  return (other_load->field() == NULL) &&
-         (offset_in_bytes() == other_load->offset_in_bytes());
+  return &this->native_field_ == &other_load->native_field_;
 }
 
 Instruction* InitStaticFieldInstr::Canonicalize(FlowGraph* flow_graph) {
@@ -2604,38 +2628,35 @@ Instruction* CheckStackOverflowInstr::Canonicalize(FlowGraph* flow_graph) {
 }
 
 bool LoadFieldInstr::IsImmutableLengthLoad() const {
-  if (native_field() != nullptr) {
-    switch (native_field()->kind()) {
-      case NativeFieldDesc::Kind::kArray_length:
-      case NativeFieldDesc::Kind::kTypedData_length:
-      case NativeFieldDesc::Kind::kString_length:
-        return true;
-      case NativeFieldDesc::Kind::kGrowableObjectArray_length:
-        return false;
+  switch (native_field().kind()) {
+    case NativeFieldDesc::Kind::kArray_length:
+    case NativeFieldDesc::Kind::kTypedData_length:
+    case NativeFieldDesc::Kind::kString_length:
+      return true;
+    case NativeFieldDesc::Kind::kGrowableObjectArray_length:
+      return false;
 
-      // Not length loads.
-      case NativeFieldDesc::Kind::kLinkedHashMap_index:
-      case NativeFieldDesc::Kind::kLinkedHashMap_data:
-      case NativeFieldDesc::Kind::kLinkedHashMap_hash_mask:
-      case NativeFieldDesc::Kind::kLinkedHashMap_used_data:
-      case NativeFieldDesc::Kind::kLinkedHashMap_deleted_keys:
-      case NativeFieldDesc::Kind::kArgumentsDescriptor_type_args_len:
-      case NativeFieldDesc::Kind::kArgumentsDescriptor_positional_count:
-      case NativeFieldDesc::Kind::kArgumentsDescriptor_count:
-      case NativeFieldDesc::Kind::kTypeArguments:
-      case NativeFieldDesc::Kind::kGrowableObjectArray_data:
-      case NativeFieldDesc::Kind::kContext_parent:
-      case NativeFieldDesc::Kind::kClosure_context:
-      case NativeFieldDesc::Kind::kClosure_delayed_type_arguments:
-      case NativeFieldDesc::Kind::kClosure_function:
-      case NativeFieldDesc::Kind::kClosure_function_type_arguments:
-      case NativeFieldDesc::Kind::kClosure_instantiator_type_arguments:
-      case NativeFieldDesc::Kind::kLocalVariable:
-      case NativeFieldDesc::Kind::kDartField:
-        return false;
-    }
+    // Not length loads.
+    case NativeFieldDesc::Kind::kLinkedHashMap_index:
+    case NativeFieldDesc::Kind::kLinkedHashMap_data:
+    case NativeFieldDesc::Kind::kLinkedHashMap_hash_mask:
+    case NativeFieldDesc::Kind::kLinkedHashMap_used_data:
+    case NativeFieldDesc::Kind::kLinkedHashMap_deleted_keys:
+    case NativeFieldDesc::Kind::kArgumentsDescriptor_type_args_len:
+    case NativeFieldDesc::Kind::kArgumentsDescriptor_positional_count:
+    case NativeFieldDesc::Kind::kArgumentsDescriptor_count:
+    case NativeFieldDesc::Kind::kTypeArguments:
+    case NativeFieldDesc::Kind::kGrowableObjectArray_data:
+    case NativeFieldDesc::Kind::kContext_parent:
+    case NativeFieldDesc::Kind::kClosure_context:
+    case NativeFieldDesc::Kind::kClosure_delayed_type_arguments:
+    case NativeFieldDesc::Kind::kClosure_function:
+    case NativeFieldDesc::Kind::kClosure_function_type_arguments:
+    case NativeFieldDesc::Kind::kClosure_instantiator_type_arguments:
+    case NativeFieldDesc::Kind::kLocalVariable:
+    case NativeFieldDesc::Kind::kDartField:
+      return false;
   }
-  return false;
 }
 
 bool LoadFieldInstr::IsFixedLengthArrayCid(intptr_t cid) {
@@ -2668,6 +2689,9 @@ bool LoadFieldInstr::TryEvaluateLoad(const Object& instance,
                                      const NativeFieldDesc& field,
                                      Object* result) {
   switch (field.kind()) {
+    case NativeFieldDesc::Kind::kDartField:
+      return TryEvaluateLoad(instance, field.field(), result);
+
     case NativeFieldDesc::Kind::kArgumentsDescriptor_type_args_len:
       if (instance.IsArray() && Array::Cast(instance).IsImmutable()) {
         ArgumentsDescriptor desc(Array::Cast(instance));
@@ -2706,15 +2730,7 @@ bool LoadFieldInstr::TryEvaluateLoad(const Object& instance,
 }
 
 bool LoadFieldInstr::Evaluate(const Object& instance, Object* result) {
-  if (native_field() != nullptr) {
-    return TryEvaluateLoad(instance, *native_field(), result);
-  }
-
-  if (field() != nullptr) {
-    return TryEvaluateLoad(instance, *field(), result);
-  }
-
-  return false;
+  return TryEvaluateLoad(instance, native_field(), result);
 }
 
 Definition* LoadFieldInstr::Canonicalize(FlowGraph* flow_graph) {
@@ -2731,21 +2747,21 @@ Definition* LoadFieldInstr::Canonicalize(FlowGraph* flow_graph) {
         return call->ArgumentAt(1);
       }
     } else if (CreateArrayInstr* create_array = array->AsCreateArray()) {
-      if (native_field()->kind() == NativeFieldDesc::Kind::kArray_length) {
+      if (native_field().kind() == NativeFieldDesc::Kind::kArray_length) {
         return create_array->num_elements()->definition();
       }
     } else if (LoadFieldInstr* load_array = array->AsLoadField()) {
       // For arrays with guarded lengths, replace the length load
       // with a constant.
-      if (const Field* field = load_array->field()) {
-        if (field->guarded_list_length() >= 0) {
+      const NativeFieldDesc& field = load_array->native_field();
+      if (field.IsDartField()) {
+        if (field.field().guarded_list_length() >= 0) {
           return flow_graph->GetConstant(
-              Smi::Handle(Smi::New(field->guarded_list_length())));
+              Smi::Handle(Smi::New(field.field().guarded_list_length())));
         }
       }
     }
-  } else if (native_field() != nullptr &&
-             native_field()->kind() == NativeFieldDesc::Kind::kTypeArguments) {
+  } else if (native_field().kind() == NativeFieldDesc::Kind::kTypeArguments) {
     Definition* array = instance()->definition()->OriginalDefinition();
     if (StaticCallInstr* call = array->AsStaticCall()) {
       if (call->is_known_list_constructor()) {
@@ -2757,19 +2773,24 @@ Definition* LoadFieldInstr::Canonicalize(FlowGraph* flow_graph) {
     } else if (CreateArrayInstr* create_array = array->AsCreateArray()) {
       return create_array->element_type()->definition();
     } else if (LoadFieldInstr* load_array = array->AsLoadField()) {
-      const Field* field = load_array->field();
-      // For trivially exact fields we know that type arguments match
-      // static type arguments exactly.
-      if ((field != nullptr) &&
-          field->static_type_exactness_state().IsTriviallyExact()) {
-        return flow_graph->GetConstant(TypeArguments::Handle(
-            AbstractType::Handle(field->type()).arguments()));
-      } else if (const NativeFieldDesc* native_field =
-                     load_array->native_field()) {
-        if (native_field->kind() ==
-            NativeFieldDesc::Kind::kLinkedHashMap_data) {
-          return flow_graph->constant_null();
+      const NativeFieldDesc& field = load_array->native_field();
+      switch (field.kind()) {
+        case NativeFieldDesc::Kind::kDartField: {
+          // For trivially exact fields we know that type arguments match
+          // static type arguments exactly.
+          const Field& dart_field = field.field();
+          if (dart_field.static_type_exactness_state().IsTriviallyExact()) {
+            return flow_graph->GetConstant(TypeArguments::Handle(
+                AbstractType::Handle(dart_field.type()).arguments()));
+          }
+          break;
         }
+
+        case NativeFieldDesc::Kind::kLinkedHashMap_data:
+          return flow_graph->constant_null();
+
+        default:
+          break;
       }
     }
   }
@@ -2850,19 +2871,20 @@ Definition* AssertAssignableInstr::Canonicalize(FlowGraph* flow_graph) {
   if (instantiator_type_args == nullptr) {
     if (LoadFieldInstr* load_type_args =
             instantiator_type_arguments()->definition()->AsLoadField()) {
-      if (load_type_args->native_field() != nullptr &&
-          load_type_args->native_field()->kind() ==
-              NativeFieldDesc::Kind::kTypeArguments) {
+      if (load_type_args->native_field().kind() ==
+          NativeFieldDesc::Kind::kTypeArguments) {
         if (LoadFieldInstr* load_field = load_type_args->instance()
                                              ->definition()
                                              ->OriginalDefinition()
                                              ->AsLoadField()) {
-          if (load_field->field() != nullptr &&
-              load_field->field()
-                  ->static_type_exactness_state()
+          if (load_field->native_field().IsDartField() &&
+              load_field->native_field()
+                  .field()
+                  .static_type_exactness_state()
                   .IsHasExactSuperClass()) {
             instantiator_type_args = &TypeArguments::Handle(
-                Z, AbstractType::Handle(Z, load_field->field()->type())
+                Z, AbstractType::Handle(
+                       Z, load_field->native_field().field().type())
                        .arguments());
           }
         }
