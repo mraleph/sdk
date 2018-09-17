@@ -2591,6 +2591,10 @@ enum SafeUseCheck { kOptimisticCheck, kStrictCheck };
 // Fix-point algorithm in CollectCandiates first collects a set of allocations
 // optimistically and then checks each collected candidate strictly and unmarks
 // invalid candidates transitively until only strictly valid ones remain.
+static bool IsSupportedAllocation(Instruction* instr) {
+  return instr->IsAllocateObject() || instr->IsAllocateUninitializedContext();
+}
+
 static bool IsSafeUse(Value* use, SafeUseCheck check_type) {
   if (use->instruction()->IsMaterializeObject()) {
     return true;
@@ -2600,7 +2604,7 @@ static bool IsSafeUse(Value* use, SafeUseCheck check_type) {
   if (store != NULL) {
     if (use == store->value()) {
       Definition* instance = store->instance()->definition();
-      return instance->IsAllocateObject() &&
+      return IsSupportedAllocation(instance) &&
              ((check_type == kOptimisticCheck) ||
               instance->Identity().IsAllocationSinkingCandidate());
     }
@@ -2683,22 +2687,16 @@ void AllocationSinking::CollectCandidates() {
        !block_it.Done(); block_it.Advance()) {
     BlockEntryInstr* block = block_it.Current();
     for (ForwardInstructionIterator it(block); !it.Done(); it.Advance()) {
-      {
-        AllocateObjectInstr* alloc = it.Current()->AsAllocateObject();
-        if ((alloc != NULL) &&
-            IsAllocationSinkingCandidate(alloc, kOptimisticCheck)) {
-          alloc->SetIdentity(AliasIdentity::AllocationSinkingCandidate());
-          candidates_.Add(alloc);
-        }
+      Instruction* current = it.Current();
+      if (!IsSupportedAllocation(current)) {
+        continue;
       }
-      {
-        AllocateUninitializedContextInstr* alloc =
-            it.Current()->AsAllocateUninitializedContext();
-        if ((alloc != NULL) &&
-            IsAllocationSinkingCandidate(alloc, kOptimisticCheck)) {
-          alloc->SetIdentity(AliasIdentity::AllocationSinkingCandidate());
-          candidates_.Add(alloc);
-        }
+
+
+      Definition* alloc = current->Cast<Definition>();
+      if (IsAllocationSinkingCandidate(alloc, kOptimisticCheck)) {
+        alloc->SetIdentity(AliasIdentity::AllocationSinkingCandidate());
+        candidates_.Add(alloc);
       }
     }
   }
