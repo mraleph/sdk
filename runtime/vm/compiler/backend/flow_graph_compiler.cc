@@ -80,11 +80,7 @@ void CompilerDeoptInfo::AllocateIncomingParametersRecursive(
   for (Environment::ShallowIterator it(env); !it.Done(); it.Advance()) {
     if (it.CurrentLocation().IsInvalid() &&
         it.CurrentValue()->definition()->IsPushArgument()) {
-      it.SetCurrentLocation(Location::StackSlot(
-          compiler::target::frame_layout.FrameSlotForVariableIndex(
-              -*stack_height),
-          FPREG));
-      (*stack_height)++;
+      it.SetCurrentLocation(it.CurrentValue()->definition()->locs()->out(0));
     }
   }
 }
@@ -648,6 +644,10 @@ void FlowGraphCompiler::Bailout(const char* reason) {
   parsed_function_.Bailout("FlowGraphCompiler", reason);
 }
 
+bool FlowGraphCompiler::is_frameless() const {
+  return intrinsic_mode() || flow_graph_.graph_entry()->frameless_;
+}
+
 intptr_t FlowGraphCompiler::StackSize() const {
   if (is_optimizing_) {
     return flow_graph_.graph_entry()->spill_slot_count();
@@ -873,13 +873,36 @@ void FlowGraphCompiler::RecordSafepoint(LocationSummary* locs,
     // The first safepoint will grow the bitmap to be the size of
     // spill_area_size but the second safepoint will truncate the bitmap and
     // append the bits for arguments and live registers to it again.
-    const intptr_t bitmap_previous_length = bitmap->Length();
+    // const intptr_t bitmap_previous_length = bitmap->Length();
     bitmap->SetLength(spill_area_size);
-
-    intptr_t unboxed_arg_bits_count = 0;
 
     auto instr = current_instruction();
     const intptr_t args_count = instr->ArgumentCount();
+
+    for (intptr_t i = 0, j = spill_area_size - args_count; i < args_count; i++, j++) {
+      auto push_arg =
+          instr->ArgumentValueAt(i)->instruction()->AsPushArgument();
+      switch (push_arg->representation()) {
+        case kUnboxedInt64:
+          RELEASE_ASSERT(compiler::target::kIntSpillFactor == 1);
+          bitmap->Set(j, false);
+          break;
+        case kUnboxedDouble:
+          RELEASE_ASSERT(compiler::target::kDoubleSpillFactor == 1);
+          bitmap->Set(j, false);
+          break;
+        case kTagged:
+          bitmap->Set(j, true);
+          break;
+        default:
+          UNREACHABLE();
+          break;
+      }
+    }
+
+#if 0
+    intptr_t unboxed_arg_bits_count = 0;
+
     bool pushed_unboxed = false;
 
     for (intptr_t i = 0; i < args_count; i++) {
@@ -920,7 +943,7 @@ void FlowGraphCompiler::RecordSafepoint(LocationSummary* locs,
     }
     ASSERT(bitmap_previous_length <=
            (spill_area_size + unboxed_arg_bits_count + saved_registers_size));
-
+#endif
     ASSERT(slow_path_argument_count == 0 || !using_shared_stub);
 
     // Mark the bits in the stack map in the same order we push registers in
@@ -1513,7 +1536,7 @@ void FlowGraphCompiler::EmitComment(Instruction* instr) {
   if (!FLAG_support_il_printer || !FLAG_support_disassembler) {
     return;
   }
-#ifndef PRODUCT
+#if !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)
   char buffer[256];
   BufferFormatter f(buffer, sizeof(buffer));
   instr->PrintTo(&f);
@@ -2190,7 +2213,6 @@ void FlowGraphCompiler::EmitTestAndCall(const CallTargets& targets,
     const Function& function = *targets.TargetAt(smi_case)->target;
     GenerateStaticDartCall(deopt_id, token_index, RawPcDescriptors::kOther,
                            locs, function, entry_kind);
-    __ Drop(args_info.size_with_type_args);
     if (match_found != NULL) {
       __ Jump(match_found);
     }
@@ -2240,7 +2262,6 @@ void FlowGraphCompiler::EmitTestAndCall(const CallTargets& targets,
     const Function& function = *targets.TargetAt(i)->target;
     GenerateStaticDartCall(deopt_id, token_index, RawPcDescriptors::kOther,
                            locs, function, entry_kind);
-    __ Drop(args_info.size_with_type_args);
     if (!is_last_check || add_megamorphic_call) {
       __ Jump(match_found);
     }

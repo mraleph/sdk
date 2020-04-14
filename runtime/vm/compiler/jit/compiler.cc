@@ -46,6 +46,10 @@
 #include "vm/timeline.h"
 #include "vm/timer.h"
 
+#if defined(UC_BUILD_LLVM_COMPILER) && defined(DART_PRECOMPILER)
+#include "vm/compiler/backend/llvm/llvm_config.h"
+#endif
+
 namespace dart {
 
 DEFINE_FLAG(
@@ -113,6 +117,11 @@ static void PrecompilationModeHandler(bool value) {
     FLAG_deoptimize_every = 0;     // Used in some tests.
     FLAG_use_osr = false;
 #endif
+// Do not enable llvm_compiler by default - to allow external choice through
+// command line arguments.
+//#if defined(DART_ENABLE_LLVM_COMPILER)
+//     FLAG_llvm_compiler = true;
+//#endif
   }
 }
 

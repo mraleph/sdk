@@ -11,6 +11,7 @@
 #include "vm/allocation.h"
 #include "vm/code_descriptors.h"
 #include "vm/compiler/backend/compile_type.h"
+#include "vm/compiler/backend/llvm/llvm_config.h"
 #include "vm/compiler/backend/locations.h"
 #include "vm/compiler/backend/slot.h"
 #include "vm/compiler/compiler_state.h"
@@ -62,6 +63,12 @@ namespace compiler {
 class BlockBuilder;
 struct TableSelector;
 }  // namespace compiler
+
+#if defined(DART_ENABLE_LLVM_COMPILER)
+namespace dart_llvm {
+class IRTranslator;
+}
+#endif
 
 class Value : public ZoneAllocated {
  public:
@@ -1218,6 +1225,14 @@ class MoveOperands : public ZoneAllocated {
  public:
   MoveOperands(Location dest, Location src) : dest_(dest), src_(src) {}
 
+  MoveOperands(const MoveOperands& other) : dest_(other.dest_), src_(other.src_) {};
+
+  MoveOperands& operator= (const MoveOperands& other) {
+    dest_ = other.dest_;
+    src_ = other.src_;
+    return *this;
+  }
+
   Location src() const { return src_; }
   Location dest() const { return dest_; }
 
@@ -1267,8 +1282,6 @@ class MoveOperands : public ZoneAllocated {
  private:
   Location dest_;
   Location src_;
-
-  DISALLOW_COPY_AND_ASSIGN(MoveOperands);
 };
 
 class ParallelMoveInstr : public TemplateInstruction<0, NoThrow> {
@@ -1283,6 +1296,8 @@ class ParallelMoveInstr : public TemplateInstruction<0, NoThrow> {
     UNREACHABLE();  // This instruction never visited by optimization passes.
     return false;
   }
+
+  const GrowableArray<MoveOperands*>& moves() const { return moves_; }
 
   MoveOperands* AddMove(Location dest, Location src) {
     MoveOperands* move = new MoveOperands(dest, src);
@@ -1641,6 +1656,8 @@ class GraphEntryInstr : public BlockEntryWithInitialDefs {
   OsrEntryInstr* osr_entry() const { return osr_entry_; }
   void set_osr_entry(OsrEntryInstr* entry) { osr_entry_ = entry; }
 
+  bool frameless_ = false;
+
   const ParsedFunction& parsed_function() const { return parsed_function_; }
 
   const GrowableArray<CatchBlockEntryInstr*>& catch_entries() const {
@@ -1725,6 +1742,8 @@ class JoinEntryInstr : public BlockEntryInstr {
   // Direct access to phis_ in order to resize it due to phi elimination.
   friend class ConstantPropagator;
   friend class DeadCodeElimination;
+
+  friend class FlowGraph;  // Access to predecessors_ in TailMerge
 
   virtual void ClearPredecessors() { predecessors_.Clear(); }
   virtual void AddPredecessor(BlockEntryInstr* predecessor);
@@ -1990,6 +2009,9 @@ class CatchBlockEntryInstr : public BlockEntryWithInitialDefs {
   // Returns try index for the try block to which this catch handler
   // corresponds.
   intptr_t catch_try_index() const { return catch_try_index_; }
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  const Array& catch_handler_types() const { return catch_handler_types_; }
+#endif
 
   PRINT_TO_SUPPORT
 
@@ -2428,6 +2450,7 @@ class PhiInstr : public Definition {
   // Direct access to inputs_ in order to resize it due to unreachable
   // predecessors.
   friend class ConstantPropagator;
+  friend class FlowGraph;
 
   void RawSetInputAt(intptr_t i, Value* value) { inputs_[i] = value; }
 
@@ -2719,8 +2742,8 @@ class TailCallInstr : public Instruction {
 
 class PushArgumentInstr : public TemplateDefinition<1, NoThrow> {
  public:
-  explicit PushArgumentInstr(Value* value, Representation representation)
-      : representation_(representation) {
+  explicit PushArgumentInstr(Value* value, Representation representation, intptr_t index)
+      : representation_(representation), index_(index) {
     SetInputAt(0, value);
   }
 
@@ -2745,10 +2768,13 @@ class PushArgumentInstr : public TemplateDefinition<1, NoThrow> {
     return representation();
   }
 
+  intptr_t index() const { return index_; }
+
   PRINT_OPERANDS_TO_SUPPORT
 
  private:
   const Representation representation_;
+  const intptr_t index_;
 
   DISALLOW_COPY_AND_ASSIGN(PushArgumentInstr);
 };
@@ -4669,6 +4695,9 @@ class StaticCallInstr : public TemplateDartCall<0> {
   Code::EntryKind entry_kind_ = Code::EntryKind::kNormal;
 
   AliasIdentity identity_;
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  friend class dart::dart_llvm::IRTranslator;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(StaticCallInstr);
 };
@@ -5116,10 +5145,13 @@ class StoreInstanceFieldInstr : public TemplateInstruction<2, NoThrow> {
   ADD_OPERANDS_TO_S_EXPRESSION_SUPPORT
   ADD_EXTRA_INFO_TO_S_EXPRESSION_SUPPORT
 
+  intptr_t OffsetInBytes() const { return slot().offset_in_bytes(); }
+
  private:
   friend class JitCallSpecializer;  // For ASSERT(initialization_).
-
-  intptr_t OffsetInBytes() const { return slot().offset_in_bytes(); }
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  friend class dart::dart_llvm::IRTranslator;
+#endif
 
   compiler::Assembler::CanBeSmi CanValueBeSmi() const {
     const intptr_t cid = value()->Type()->ToNullableCid();
@@ -5282,6 +5314,9 @@ class StoreStaticFieldInstr : public TemplateDefinition<1, NoThrow> {
   PRINT_OPERANDS_TO_SUPPORT
 
  private:
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  friend class dart::dart_llvm::IRTranslator;
+#endif
   compiler::Assembler::CanBeSmi CanValueBeSmi() const {
     const intptr_t cid = value()->Type()->ToNullableCid();
     // Write barrier is skipped for nullable and non-nullable smis.
@@ -5586,6 +5621,9 @@ class StoreIndexedInstr : public TemplateInstruction<3, NoThrow> {
   ADD_EXTRA_INFO_TO_S_EXPRESSION_SUPPORT
 
  private:
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  friend class dart::dart_llvm::IRTranslator;
+#endif
   compiler::Assembler::CanBeSmi CanValueBeSmi() const {
     return compiler::Assembler::kValueCanBeSmi;
   }
@@ -6083,6 +6121,9 @@ class LoadClassIdInstr : public TemplateDefinition<1, NoThrow, Pure> {
   }
 
  private:
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  friend class dart::dart_llvm::IRTranslator;
+#endif
   Representation representation_;
   bool input_can_be_smi_;
 
@@ -6515,6 +6556,9 @@ class BoxInstr : public TemplateDefinition<1, NoThrow, Pure> {
   const Representation from_representation_;
 
   DISALLOW_COPY_AND_ASSIGN(BoxInstr);
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  friend class dart::dart_llvm::IRTranslator;
+#endif
 };
 
 class BoxIntegerInstr : public BoxInstr {
@@ -6659,6 +6703,9 @@ class UnboxInstr : public TemplateDefinition<1, NoThrow, Pure> {
   const SpeculativeMode speculative_mode_;
 
   DISALLOW_COPY_AND_ASSIGN(UnboxInstr);
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  friend class dart::dart_llvm::IRTranslator;
+#endif
 };
 
 class UnboxIntegerInstr : public UnboxInstr {

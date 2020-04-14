@@ -1000,6 +1000,14 @@ void FlowGraphCompiler::GenerateRuntimeCall(TokenPosition token_pos,
   EmitCallsiteMetadata(token_pos, deopt_id, RawPcDescriptors::kOther, locs);
 }
 
+void FlowGraphCompiler::DropArguments(intptr_t count) {
+  if (current_instruction()->ArgumentCount() == 0) {
+    __ Drop(count, RCX);  // OK
+  } else {
+    RELEASE_ASSERT(current_instruction()->ArgumentCount() == count);
+  }
+}
+
 void FlowGraphCompiler::EmitUnoptimizedStaticCall(intptr_t size_with_type_args,
                                                   intptr_t deopt_id,
                                                   TokenPosition token_pos,
@@ -1118,7 +1126,7 @@ void FlowGraphCompiler::EmitMegamorphicInstanceCall(
     AddCurrentDescriptor(RawPcDescriptors::kDeopt, deopt_id_after, token_pos);
   }
   RecordCatchEntryMoves(pending_deoptimization_env_, try_index);
-  __ Drop(args_desc.SizeWithTypeArgs(), RCX);
+  DropArguments(args_desc.SizeWithTypeArgs());
 }
 
 void FlowGraphCompiler::EmitInstanceCallAOT(const ICData& ic_data,
@@ -1183,7 +1191,7 @@ void FlowGraphCompiler::EmitOptimizedStaticCall(
   // we can record the outgoing edges to other code.
   GenerateStaticDartCall(deopt_id, token_pos, RawPcDescriptors::kOther, locs,
                          function, entry_kind);
-  __ Drop(size_with_type_args, RCX);
+  DropArguments(size_with_type_args);
 }
 
 void FlowGraphCompiler::EmitDispatchTableCall(

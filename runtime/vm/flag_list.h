@@ -41,14 +41,18 @@ constexpr bool kDartUseBackgroundCompilation = true;
   P(disassemble, bool, false, "Disassemble dart code.")                        \
   P(disassemble_optimized, bool, false, "Disassemble optimized code.")         \
   P(disassemble_relative, bool, false, "Use offsets instead of absolute PCs")  \
-  P(support_disassembler, bool, true, "Support the disassembler.")
+  P(support_disassembler, bool, true, "Support the disassembler.")             \
+  P(support_il_printer, bool, true, "Support the IL printer.")                 \
+
 #else
 #define DISASSEMBLE_FLAGS(P, R, C, D)                                          \
   R(disassemble, false, bool, false, "Disassemble dart code.")                 \
   R(disassemble_optimized, false, bool, false, "Disassemble optimized code.")  \
   R(disassemble_relative, false, bool, false,                                  \
     "Use offsets instead of absolute PCs")                                     \
-  R(support_disassembler, false, bool, true, "Support the disassembler.")
+  R(support_disassembler, false, bool, true, "Support the disassembler.")      \
+  R(support_il_printer, false, bool, true, "Support the IL printer.")          \
+
 #endif
 
 // List of VM-global (i.e. non-isolate specific) flags.
@@ -86,6 +90,7 @@ constexpr bool kDartUseBackgroundCompilation = true;
 #define FLAG_LIST(P, R, C, D)                                                  \
   VM_GLOBAL_FLAG_LIST(P, R, C, D)                                              \
   DISASSEMBLE_FLAGS(P, R, C, D)                                                \
+  P(use_monomorphic_checked_entries, bool, false, "Emit monomorphic checked entries")                               \
   P(experimental_unsafe_mode_use_at_your_own_risk, bool, false,                \
     "Omit runtime strong mode type checks and disable optimizations based on " \
     "types.")                                                                  \
@@ -200,7 +205,6 @@ constexpr bool kDartUseBackgroundCompilation = true;
     "Show invisible frames in stack traces.")                                  \
   R(show_invisible_isolates, false, bool, false,                               \
     "Show invisible isolates in the vm-service.")                              \
-  R(support_il_printer, false, bool, true, "Support the IL printer.")          \
   D(trace_cha, bool, false, "Trace CHA operations")                            \
   R(trace_field_guards, false, bool, false, "Trace changes in field's cids.")  \
   D(trace_ic, bool, false, "Trace IC handling")                                \
@@ -255,6 +259,14 @@ constexpr bool kDartUseBackgroundCompilation = true;
   D(support_rr, bool, false, "Support running within RR.")                     \
   P(verify_entry_points, bool, false,                                          \
     "Throw API error on invalid member access throuh native API. See "         \
-    "entry_point_pragma.md")
+    "entry_point_pragma.md")                                                   \
+  UC_FLAG_LIST(P, R, C, D)
+
+#if defined(UC_BUILD)
+#define UC_FLAG_LIST(P, R, C, D)                                               \
+  P(llvm_compiler, bool, false, "Use LLVM compiler")
+#else
+#define UC_FLAG_LIST(P, R, C, D)
+#endif
 
 #endif  // RUNTIME_VM_FLAG_LIST_H_

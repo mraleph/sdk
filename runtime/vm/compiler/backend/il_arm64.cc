@@ -162,19 +162,20 @@ class ArgumentsPusher : public ValueObject {
   // Flush all buffered registers.
   void Flush(FlowGraphCompiler* compiler) {
     if (pending_register_ != kNoRegister) {
-      __ Push(pending_register_);
+      __ StoreToOffset(pending_register_, FPREG, target_offset_);
       pending_register_ = kNoRegister;
     }
   }
 
   // Buffer given register. May push buffered registers if needed.
-  void PushRegister(FlowGraphCompiler* compiler, Register reg) {
+  void StoreRegister(FlowGraphCompiler* compiler, intptr_t offset, Register reg) {
     if (pending_register_ != kNoRegister) {
-      __ PushPair(reg, pending_register_);
+      __ stp(reg, pending_register_, compiler::Address(FPREG, offset, compiler::Address::PairOffset));
       pending_register_ = kNoRegister;
       return;
     }
     pending_register_ = reg;
+    target_offset_ = offset;
   }
 
   // Returns free temp register to hold argument value.
@@ -190,6 +191,7 @@ class ArgumentsPusher : public ValueObject {
 
  private:
   Register pending_register_ = kNoRegister;
+  intptr_t target_offset_ = 0;
 };
 
 void PushArgumentInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
@@ -204,6 +206,7 @@ void PushArgumentInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     for (PushArgumentInstr* push_arg = this; push_arg != nullptr;
          push_arg = push_arg->next()->AsPushArgument()) {
       const Location value = push_arg->locs()->in(0);
+      const Location dst = push_arg->locs()->out(0);
       Register reg = kNoRegister;
       if (value.IsRegister()) {
         reg = value.reg();
@@ -216,7 +219,7 @@ void PushArgumentInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
         }
       } else if (value.IsFpuRegister()) {
         pusher.Flush(compiler);
-        __ PushDouble(value.fpu_reg());
+        __ StoreDToOffset(value.fpu_reg(), dst.base_reg(), dst.ToStackSlotOffset());
         continue;
       } else {
         ASSERT(value.IsStackSlot());
@@ -224,7 +227,8 @@ void PushArgumentInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
         reg = pusher.GetFreeTempRegister();
         __ LoadFromOffset(reg, value.base_reg(), value_offset);
       }
-      pusher.PushRegister(compiler, reg);
+      RELEASE_ASSERT(dst.base_reg() == FPREG);
+      pusher.StoreRegister(compiler, dst.ToStackSlotOffset(), reg);
     }
     pusher.Flush(compiler);
   }
@@ -265,7 +269,7 @@ void ReturnInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     ASSERT(result == CallingConventions::kReturnFpuReg);
   }
 
-  if (compiler->intrinsic_mode()) {
+  if (compiler->is_frameless()) {
     // Intrinsics don't have a frame.
     __ ret();
     return;
@@ -436,7 +440,7 @@ void ClosureCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   __ blr(R2);
   compiler->EmitCallsiteMetadata(token_pos(), deopt_id(),
                                  RawPcDescriptors::kOther, locs());
-  __ Drop(argument_count);
+  if (!compiler->is_optimizing()) __ Drop(argument_count);
 }
 
 LocationSummary* LoadLocalInstr::MakeLocationSummary(Zone* zone,
@@ -1064,7 +1068,7 @@ void NativeCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   }
   __ Pop(result);
 
-  __ Drop(ArgumentCount());  // Drop the arguments.
+  if (!compiler->is_optimizing()) __ Drop(ArgumentCount());  // Drop the arguments.
 }
 
 void FfiCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
@@ -1791,7 +1795,7 @@ void StoreIndexedInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     }
     const Register value = locs()->in(2).reg();
     __ StoreIntoArray(array, temp, value, CanValueBeSmi(),
-                      /*lr_reserved=*/!compiler->intrinsic_mode());
+                      /*lr_reserved=*/!compiler->is_frameless());
     return;
   }
 
@@ -2193,7 +2197,7 @@ class BoxAllocationSlowPath : public TemplateSlowPathCode<Instruction> {
                        const Class& cls,
                        Register result,
                        Register temp) {
-    if (compiler->intrinsic_mode()) {
+    if (compiler->is_frameless()) {
       __ TryAllocate(cls, compiler->intrinsic_slow_path_label(), result, temp);
     } else {
       BoxAllocationSlowPath* slow_path =
@@ -2225,7 +2229,7 @@ static void EnsureMutableBox(FlowGraphCompiler* compiler,
   __ MoveRegister(temp, box_reg);
   __ StoreIntoObjectOffset(instance_reg, offset, temp,
                            compiler::Assembler::kValueIsNotSmi,
-                           /*lr_reserved=*/!compiler->intrinsic_mode());
+                           /*lr_reserved=*/!compiler->is_frameless());
   __ Bind(&done);
 }
 
@@ -2329,7 +2333,7 @@ void StoreInstanceFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       __ MoveRegister(temp2, temp);
       __ StoreIntoObjectOffset(instance_reg, offset_in_bytes, temp2,
                                compiler::Assembler::kValueIsNotSmi,
-                               /*lr_reserved=*/!compiler->intrinsic_mode());
+                               /*lr_reserved=*/!compiler->is_frameless());
     } else {
       __ LoadFieldFromOffset(temp, instance_reg, offset_in_bytes);
     }
@@ -2442,7 +2446,7 @@ void StoreInstanceFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     ASSERT((kDartAvailableCpuRegs & (1 << LR)) == 0);
     __ StoreIntoObjectOffset(instance_reg, offset_in_bytes, value_reg,
                              CanValueBeSmi(),
-                             /*lr_reserved=*/!compiler->intrinsic_mode());
+                             /*lr_reserved=*/!compiler->is_frameless());
   } else {
     if (locs()->in(1).IsConstant()) {
       __ StoreIntoObjectOffsetNoBarrier(instance_reg, offset_in_bytes,
@@ -4105,7 +4109,7 @@ void BoxInt64Instr::EmitNativeCode(FlowGraphCompiler* compiler) {
 
   Register temp = locs()->temp(0).reg();
 
-  if (compiler->intrinsic_mode()) {
+  if (compiler->is_frameless()) {
     __ TryAllocate(compiler->mint_class(),
                    compiler->intrinsic_slow_path_label(), out, temp);
   } else {
@@ -5206,7 +5210,7 @@ static void InvokeDoublePow(FlowGraphCompiler* compiler,
 }
 
 void InvokeMathCFunctionInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  if (recognized_kind() == MethodRecognizer::kMathDoublePow) {
+  if (false && recognized_kind() == MethodRecognizer::kMathDoublePow) {
     InvokeDoublePow(compiler, this);
     return;
   }

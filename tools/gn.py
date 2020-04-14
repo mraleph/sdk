@@ -227,6 +227,7 @@ def ToGnArgs(args, mode, arch, target_os, sanitizer, use_nnbd):
     gn_args[
         'dart_precompiled_runtime_stripped_binary'] = 'exe.stripped/dart_precompiled_runtime'
     gn_args['gen_snapshot_stripped_binary'] = 'exe.stripped/gen_snapshot'
+    gn_args['uc_build_llvm_compiler'] = True
 
     # Setup the user-defined sysroot.
     if UseSysroot(args, gn_args):

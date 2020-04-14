@@ -12,6 +12,9 @@
 #include "vm/globals.h"
 #include "vm/growable_array.h"
 #include "vm/hash_map.h"
+#if defined(UC_BUILD_LLVM_COMPILER) && defined(DART_PRECOMPILER)
+#include "vm/compiler/backend/llvm/llvm_config.h"
+#endif
 
 namespace dart {
 
@@ -163,6 +166,14 @@ class AssemblerBuffer : public ValueObject {
     *reinterpret_cast<T*>(cursor_) = value;
     cursor_ += sizeof(T);
   }
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  friend class AssemblerBase;
+  void EmitRange(const void* src, size_t s) {
+    ASSERT(HasEnsuredCapacity());
+    memcpy(reinterpret_cast<void*>(cursor_), src, s);
+    cursor_ += s;
+  }
+#endif
 
   template <typename T>
   void Remit() {
@@ -366,6 +377,14 @@ class AssemblerBase : public StackResource {
   // Returns the offset (from the very beginning of the instructions) to the
   // unchecked entry point (incl. prologue/frame setup, etc.).
   intptr_t UncheckedEntryOffset() const { return unchecked_entry_offset_; }
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  void EmitRange(const void* src, size_t s) {
+    AssemblerBuffer::EnsureCapacity ensured(&buffer_);
+    while (buffer_.cursor() + s >= buffer_.limit())
+      buffer_.ExtendCapacity();
+    buffer_.EmitRange(src, s);
+  }
+#endif
 
  protected:
   AssemblerBuffer buffer_;  // Contains position independent code.

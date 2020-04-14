@@ -181,6 +181,7 @@ class ObjectPointerVisitor;
   RW(Code, stack_overflow_stub_without_fpu_regs_stub)                          \
   RW(Code, write_barrier_wrappers_stub)                                        \
   RW(Code, array_write_barrier_stub)                                           \
+  RW(Code, write_barrier_stub)                                                 \
   R_(Code, megamorphic_miss_code)                                              \
   R_(Function, megamorphic_miss_function)                                      \
   R_(GrowableObjectArray, resume_capabilities)                                 \

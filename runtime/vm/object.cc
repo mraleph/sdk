@@ -9009,6 +9009,10 @@ RawCode* Function::EnsureHasCode() const {
 
 bool Function::NeedsMonomorphicCheckedEntry(Zone* zone) const {
 #if !defined(DART_PRECOMPILED_RUNTIME)
+  if (!FLAG_use_monomorphic_checked_entries) {
+    return false;
+  }
+
   if (!IsDynamicFunction()) {
     return false;
   }
@@ -15635,7 +15639,7 @@ void Code::Disassemble(DisassemblyFormatter* formatter) const {
 }
 
 const Code::Comments& Code::comments() const {
-#if defined(PRODUCT)
+#if defined(PRODUCT) && !defined(FORCE_INCLUDE_DISASSEMBLER)
   Comments* comments = new Code::Comments(Array::Handle());
 #else
   Comments* comments = new Code::Comments(Array::Handle(raw_ptr()->comments_));
@@ -15644,7 +15648,7 @@ const Code::Comments& Code::comments() const {
 }
 
 void Code::set_comments(const Code::Comments& comments) const {
-#if defined(PRODUCT)
+#if defined(PRODUCT) && !defined(FORCE_INCLUDE_DISASSEMBLER)
   UNREACHABLE();
 #else
   ASSERT(comments.comments_.IsOld());
@@ -15865,9 +15869,12 @@ RawCode* Code::FinalizeCode(FlowGraphCompiler* compiler,
     CPU::FlushICache(instrs.PayloadStart(), instrs.Size());
   }
 
+#if !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)
+  code.set_comments(CreateCommentsFrom(assembler));
+#endif
+
 #ifndef PRODUCT
   code.set_compile_timestamp(OS::GetCurrentMonotonicMicros());
-  code.set_comments(CreateCommentsFrom(assembler));
   if (assembler->prologue_offset() >= 0) {
     code.SetPrologueOffset(assembler->prologue_offset());
   } else {

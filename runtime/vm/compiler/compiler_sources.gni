@@ -2,6 +2,8 @@
 # for details. All rights reserved. Use of this source code is governed by a
 # BSD-style license that can be found in the LICENSE file.
 
+import("../../runtime_args.gni")
+
 # This file contains all sources (vm and tests) for the compiler pipeline.
 # Unit test files need to have a "_test" suffix appended to the name.
 compiler_sources = [
@@ -170,6 +172,42 @@ compiler_sources = [
   "write_barrier_elimination.cc",
   "write_barrier_elimination.h",
 ]
+
+if (uc_build_llvm_compiler) {
+  compiler_sources += [
+    "backend/llvm/abbreviated_types.h",
+    "backend/llvm/abbreviations.h",
+    "backend/llvm/common_values.cc",
+    "backend/llvm/common_values.h",
+    "backend/llvm/compile.cc",
+    "backend/llvm/compile.h",
+    "backend/llvm/compiler_state.cc",
+    "backend/llvm/compiler_state.h",
+    "backend/llvm/dwarf_info.h",
+    "backend/llvm/dwarf_info.cc",
+    "backend/llvm/exception_table_parser.h",
+    "backend/llvm/exception_table_parser.cc",
+    "backend/llvm/intrinsic_repository.cc",
+    "backend/llvm/intrinsic_repository.h",
+    "backend/llvm/initialize_llvm.cc",
+    "backend/llvm/initialize_llvm.h",
+    "backend/llvm/ir_translator.cc",
+    "backend/llvm/ir_translator.h",
+    "backend/llvm/liveness_analysis.cc",
+    "backend/llvm/liveness_analysis.h",
+    "backend/llvm/llvm_code_assembler.cc",
+    "backend/llvm/llvm_code_assembler.h",
+    "backend/llvm/llvm_headers.h",
+    "backend/llvm/llvm_log.cc",
+    "backend/llvm/llvm_log.h",
+    "backend/llvm/output.cc",
+    "backend/llvm/output.h",
+    "backend/llvm/stack_map_info.cc",
+    "backend/llvm/stack_map_info.h",
+    "backend/llvm/stack_maps.cc",
+    "backend/llvm/stack_maps.h",
+  ]
+}
 
 compiler_sources_tests = [
   "assembler/assembler_arm64_test.cc",

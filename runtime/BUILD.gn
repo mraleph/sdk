@@ -56,7 +56,23 @@ config("dart_precompiled_runtime_config") {
 # Controls DART_PRECOMPILER #define.
 config("dart_precompiler_config") {
   defines = []
-  defines += [ "DART_PRECOMPILER" ]
+  defines += [ "DART_PRECOMPILER", "FORCE_INCLUDE_DISASSEMBLER" ]
+  enable_llvm = false
+  if (uc_build_llvm_compiler) {
+    if (dart_target_arch == "arm") {
+      enable_llvm = true
+    }
+    if (dart_target_arch == "arm64") {
+      enable_llvm = true
+    }
+  }
+  if (enable_llvm) {
+    include_dirs = [ "vm/compiler/backend/llvm/include" ]
+    libs = [ "LLVM-10" ]
+    defines += [ "LLVMLOG_LEVEL=1", "UC_BUILD", "UC_BUILD_LLVM_COMPILER" ]
+    ldflags = [ "-Wl,-rpath,\$ORIGIN/../../../third_party/dart/lib" ]
+    lib_dirs = [ "../lib/" ]
+  }
 }
 
 config("dart_os_config") {
@@ -177,7 +193,7 @@ config("dart_config") {
     } else if (dart_debug) {
       cflags += [ "-O${dart_debug_optimization_level}" ]
     } else {
-      cflags += [ "-O3" ]
+      cflags += [ "-O0" ]
     }
 
     if (is_fuchsia) {

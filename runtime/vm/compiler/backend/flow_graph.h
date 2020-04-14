@@ -11,6 +11,12 @@
 #include "vm/hash_map.h"
 #include "vm/parser.h"
 #include "vm/thread.h"
+#if defined(UC_BUILD_LLVM_COMPILER) && defined(DART_PRECOMPILER)
+#include "vm/compiler/backend/llvm/llvm_config.h"
+#endif
+#if defined(DART_ENABLE_LLVM_COMPILER)
+#include "vm/compiler/backend/llvm/llvm_code_assembler.h"
+#endif
 
 namespace dart {
 
@@ -20,6 +26,11 @@ class VariableLivenessAnalysis;
 namespace compiler {
 class GraphIntrinsifier;
 }
+#if defined(DART_ENABLE_LLVM_COMPILER)
+namespace dart_llvm {
+struct CompilerState;
+}  // namespace dart_llvm
+#endif
 
 class BlockIterator : public ValueObject {
  public:
@@ -404,6 +415,9 @@ class FlowGraph : public ZoneAllocated {
 
   bool should_print() const { return should_print_; }
 
+  void TailMerge();
+  JoinEntryInstr* TailMergeImpl(GrowableArray<BlockEntryInstr*>& blocks);
+
   //
   // High-level utilities.
   //
@@ -439,6 +453,15 @@ class FlowGraph : public ZoneAllocated {
   void ComputeDominators(GrowableArray<BitVector*>* dominance_frontier);
 
   void CreateCommonConstants();
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  void SetLLVMCompilerState(std::unique_ptr<dart_llvm::CompilerState> state);
+  std::unique_ptr<dart_llvm::CompilerState>&& ReleaseLLVMState() const {
+    return std::move(llvm_compiler_state_);
+  }
+  bool llvm_compile_ready() const { return !!llvm_compiler_state_; }
+#endif
+
+  intptr_t max_argument_count_ = 0;
 
  private:
   friend class FlowGraphCompiler;  // TODO(ajcbik): restructure
@@ -559,6 +582,9 @@ class FlowGraph : public ZoneAllocated {
 
   intptr_t inlining_id_;
   bool should_print_;
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  mutable std::unique_ptr<dart_llvm::CompilerState> llvm_compiler_state_;
+#endif
 };
 
 class LivenessAnalysis : public ValueObject {

@@ -4147,7 +4147,7 @@ static constexpr dart::compiler::target::word AOT_Capability_InstanceSize = 16;
 static constexpr dart::compiler::target::word AOT_Class_InstanceSize = 112;
 static constexpr dart::compiler::target::word AOT_Closure_InstanceSize = 28;
 static constexpr dart::compiler::target::word AOT_ClosureData_InstanceSize = 20;
-static constexpr dart::compiler::target::word AOT_Code_InstanceSize = 88;
+static constexpr dart::compiler::target::word AOT_Code_InstanceSize = 80;
 static constexpr dart::compiler::target::word AOT_CodeSourceMap_InstanceSize =
     8;
 static constexpr dart::compiler::target::word
@@ -4661,7 +4661,7 @@ static constexpr dart::compiler::target::word AOT_Capability_InstanceSize = 16;
 static constexpr dart::compiler::target::word AOT_Class_InstanceSize = 192;
 static constexpr dart::compiler::target::word AOT_Closure_InstanceSize = 56;
 static constexpr dart::compiler::target::word AOT_ClosureData_InstanceSize = 40;
-static constexpr dart::compiler::target::word AOT_Code_InstanceSize = 152;
+static constexpr dart::compiler::target::word AOT_Code_InstanceSize = 144;
 static constexpr dart::compiler::target::word AOT_CodeSourceMap_InstanceSize =
     16;
 static constexpr dart::compiler::target::word
@@ -5180,7 +5180,7 @@ static constexpr dart::compiler::target::word AOT_Capability_InstanceSize = 16;
 static constexpr dart::compiler::target::word AOT_Class_InstanceSize = 192;
 static constexpr dart::compiler::target::word AOT_Closure_InstanceSize = 56;
 static constexpr dart::compiler::target::word AOT_ClosureData_InstanceSize = 40;
-static constexpr dart::compiler::target::word AOT_Code_InstanceSize = 152;
+static constexpr dart::compiler::target::word AOT_Code_InstanceSize = 144;
 static constexpr dart::compiler::target::word AOT_CodeSourceMap_InstanceSize =
     16;
 static constexpr dart::compiler::target::word

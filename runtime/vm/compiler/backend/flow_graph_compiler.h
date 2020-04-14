@@ -14,8 +14,16 @@
 #include "vm/compiler/backend/il.h"
 #include "vm/compiler/backend/locations.h"
 #include "vm/runtime_entry.h"
+#if defined(UC_BUILD_LLVM_COMPILER) && defined(DART_PRECOMPILER)
+#include "vm/compiler/backend/llvm/llvm_config.h"
+#endif
 
 namespace dart {
+#if defined(DART_ENABLE_LLVM_COMPILER)
+namespace dart_llvm {
+class CodeAssembler;
+}
+#endif
 
 // Forward declarations.
 class CatchEntryMovesMapBuilder;
@@ -771,6 +779,9 @@ class FlowGraphCompiler : public ValueObject {
 
   void EmitComment(Instruction* instr);
 
+  bool is_frameless() const;
+
+
   // Returns stack size (number of variables on stack for unoptimized
   // code, or number of spill slots for optimized code).
   intptr_t StackSize() const;
@@ -973,6 +984,8 @@ class FlowGraphCompiler : public ValueObject {
       TokenPosition token_pos,
       LocationSummary* locs,
       Code::EntryKind entry_kind = Code::EntryKind::kNormal);
+
+  void DropArguments(intptr_t count);
 
   void EmitUnoptimizedStaticCall(
       intptr_t size_with_type_args,
@@ -1221,6 +1234,9 @@ class FlowGraphCompiler : public ValueObject {
   // Instruction currently running EmitNativeCode().
   Instruction* current_instruction_ = nullptr;
 
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  friend class dart_llvm::CodeAssembler;
+#endif
   DISALLOW_COPY_AND_ASSIGN(FlowGraphCompiler);
 };
 

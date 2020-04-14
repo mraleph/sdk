@@ -26,6 +26,10 @@
 #endif
 #include "vm/timeline.h"
 
+#if defined(UC_BUILD_LLVM_COMPILER)
+#include "vm/compiler/backend/llvm/ir_translator.h"
+#endif
+
 #define COMPILER_PASS_REPEAT(Name, Body)                                       \
   class CompilerPass_##Name : public CompilerPass {                            \
    public:                                                                     \
@@ -271,6 +275,7 @@ FlowGraph* CompilerPass::RunForceOptimizedPipeline(
   INVOKE_PASS(FinalizeGraph);
 #if defined(DART_PRECOMPILER)
   if (mode == kAOT) {
+    INVOKE_PASS(TailMerge);
     INVOKE_PASS(SerializeGraph);
   }
 #endif
@@ -330,6 +335,7 @@ FlowGraph* CompilerPass::RunPipeline(PipelineMode mode,
   INVOKE_PASS(TryOptimizePatterns);
   INVOKE_PASS(DSE);
   INVOKE_PASS(TypePropagation);
+  INVOKE_PASS(HoistGenericCheckBounds);
   INVOKE_PASS(RangeAnalysis);
   INVOKE_PASS(OptimizeBranches);
   INVOKE_PASS(TypePropagation);
@@ -351,10 +357,12 @@ FlowGraph* CompilerPass::RunPipeline(PipelineMode mode,
   INVOKE_PASS(Canonicalize);
   INVOKE_PASS(UseTableDispatch);
   INVOKE_PASS(EliminateStackOverflowChecks);
+  INVOKE_PASS(MayMoveWarnGenericCheckBounds);
   INVOKE_PASS(Canonicalize);
   INVOKE_PASS(AllocationSinking_DetachMaterializations);
   INVOKE_PASS(EliminateWriteBarriers);
   INVOKE_PASS(FinalizeGraph);
+  INVOKE_PASS(TailMerge);
 #if defined(DART_PRECOMPILER)
   if (mode == kAOT) {
     // If we are serializing the flow graph, do it now before we start
@@ -365,6 +373,11 @@ FlowGraph* CompilerPass::RunPipeline(PipelineMode mode,
   if (FLAG_late_round_trip_serialization) {
     INVOKE_PASS(RoundTripSerialization);
   }
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  if (FLAG_llvm_compiler) {
+    INVOKE_PASS(IRTranslate);
+  }
+#endif
   INVOKE_PASS(AllocateRegisters);
   INVOKE_PASS(ReorderBlocks);
   return pass_state->flow_graph();
@@ -406,6 +419,20 @@ COMPILER_PASS(ApplyClassIds, { state->call_specializer->ApplyClassIds(); });
 COMPILER_PASS(EliminateStackOverflowChecks, {
   if (!flow_graph->IsCompiledForOsr()) {
     CheckStackOverflowElimination::EliminateStackOverflow(flow_graph);
+  }
+});
+
+COMPILER_PASS(HoistGenericCheckBounds, {
+  if (!flow_graph->IsCompiledForOsr()) {
+    HoistGenericCheckBound::HoistGenericCheckBounds(
+        flow_graph, state->inline_id_to_function);
+  }
+});
+
+COMPILER_PASS(MayMoveWarnGenericCheckBounds, {
+  if (!flow_graph->IsCompiledForOsr()) {
+    GenericCheckBoundMayMoveWarn::MayWarn(flow_graph,
+                                          state->inline_id_to_function);
   }
 });
 
@@ -574,6 +601,19 @@ COMPILER_PASS(RoundTripSerialization, {
   ASSERT(state->flow_graph() != nullptr);
 })
 
+COMPILER_PASS(TailMerge, { flow_graph->TailMerge(); });
+
+#if defined(DART_ENABLE_LLVM_COMPILER)
+COMPILER_PASS(IRTranslate, {
+  bool should_compile_with_llvm =
+      flow_graph->graph_entry()->unchecked_entry() == nullptr;
+  if (should_compile_with_llvm) {
+    dart_llvm::IRTranslator ir_translator(flow_graph, state->precompiler);
+    ir_translator.Translate();
+  } else {
+  }
+})
+#endif
 }  // namespace dart
 
 #endif  // DART_PRECOMPILED_RUNTIME

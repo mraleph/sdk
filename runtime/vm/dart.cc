@@ -95,7 +95,10 @@ class ReadOnlyHandles {
 };
 
 static void CheckOffsets() {
-#if !defined(IS_SIMARM_X64)
+  // CodeLayout is slightly different between precompiler and precompiled
+  // runtime in PRODUCT mode (due to comments_ field) when we force DISASSEMBLER
+  // to be included meaning that this check fails.
+#if !(defined(PRODUCT) && defined(FORCE_INCLUDE_DISASSEMBLER)) && !defined(IS_SIMARM_X64)
   // These offsets are embedded in precompiled instructions. We need the
   // compiler and the runtime to agree.
   bool ok = true;

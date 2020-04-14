@@ -150,16 +150,17 @@ void PushArgumentInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   // where arguments are pushed by their definitions.
   if (compiler->is_optimizing()) {
     Location value = locs()->in(0);
+    compiler::Address dst(LocationToStackSlotAddress(locs()->out(0)));
     if (value.IsRegister()) {
-      __ pushq(value.reg());
+      __ movq(dst, value.reg());
     } else if (value.IsConstant()) {
-      __ PushObject(value.constant());
+      __ StoreObject(dst, value.constant());
     } else if (value.IsFpuRegister()) {
-      __ AddImmediate(RSP, compiler::Immediate(-kDoubleSize));
-      __ movsd(compiler::Address(RSP, 0), value.fpu_reg());
+      __ movsd(dst, value.fpu_reg());
     } else {
       ASSERT(value.IsStackSlot());
-      __ pushq(LocationToStackSlotAddress(value));
+      __ movq(TMP, LocationToStackSlotAddress(value));
+      __ movq(dst, TMP);
     }
   }
 }
@@ -1013,8 +1014,7 @@ void NativeCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
                            locs());
   }
   __ popq(result);
-
-  __ Drop(ArgumentCount());  // Drop the arguments.
+  if (!compiler->is_optimizing()) __ Drop(ArgumentCount());
 }
 
 void FfiCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {

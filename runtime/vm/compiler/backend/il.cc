@@ -4559,7 +4559,7 @@ void DispatchTableCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       compiler->AddNullCheck(token_pos(), function_name);
     }
   }
-  __ Drop(ArgumentsSize());
+  ASSERT(compiler->is_optimizing());
 
   compiler->AddDispatchTableCallTarget(selector());
 }

@@ -147,6 +147,20 @@ class CheckStackOverflowElimination : public AllStatic {
   static void EliminateStackOverflow(FlowGraph* graph);
 };
 
+class HoistGenericCheckBound : public AllStatic {
+ public:
+  static void HoistGenericCheckBounds(
+      FlowGraph* graph,
+      const GrowableArray<const Function*>& inline_id_to_function);
+};
+
+class GenericCheckBoundMayMoveWarn : public AllStatic {
+ public:
+  static void MayWarn(
+      FlowGraph* graph,
+      const GrowableArray<const Function*>& inline_id_to_function);
+};
+
 }  // namespace dart
 
 #endif  // RUNTIME_VM_COMPILER_BACKEND_REDUNDANCY_ELIMINATION_H_

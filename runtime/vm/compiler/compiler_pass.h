@@ -12,6 +12,9 @@
 #include "vm/growable_array.h"
 #include "vm/token_position.h"
 #include "vm/zone.h"
+#if defined(UC_BUILD_LLVM_COMPILER)
+#include "vm/compiler/backend/llvm/llvm_config.h"
+#endif
 
 namespace dart {
 
@@ -32,6 +35,8 @@ namespace dart {
   V(EliminateDeadPhis)                                                         \
   V(EliminateEnvironments)                                                     \
   V(EliminateStackOverflowChecks)                                              \
+  V(MayMoveWarnGenericCheckBounds)                                             \
+  V(HoistGenericCheckBounds)                                                   \
   V(FinalizeGraph)                                                             \
   V(IfConvert)                                                                 \
   V(Inlining)                                                                  \
@@ -45,12 +50,22 @@ namespace dart {
   V(SelectRepresentations)                                                     \
   V(SerializeGraph)                                                            \
   V(SetOuterInliningId)                                                        \
+  V(TailMerge)                                                                 \
   V(TryCatchOptimization)                                                      \
   V(TryOptimizePatterns)                                                       \
   V(TypePropagation)                                                           \
   V(UseTableDispatch)                                                          \
   V(WidenSmiToInt32)                                                           \
-  V(EliminateWriteBarriers)
+  V(EliminateWriteBarriers)                                                    \
+  DART_LLVM_PASS(V)
+
+#if defined(DART_ENABLE_LLVM_COMPILER)
+#define DART_LLVM_PASS(V) V(IRTranslate)
+
+#else
+#define DART_LLVM_PASS(V)
+#endif
+
 
 class AllocationSinking;
 class BlockScheduler;

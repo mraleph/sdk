@@ -2732,11 +2732,6 @@ void FlowGraphAllocator::ConnectSplitSiblings(LiveRange* parent,
   TRACE_ALLOC(THR_Print("Connect v%" Pd " on the edge B%" Pd " -> B%" Pd "\n",
                         parent->vreg(), source_block->block_id(),
                         target_block->block_id()));
-  if (parent->next_sibling() == NULL) {
-    // Nothing to connect. The whole range was allocated to the same location.
-    TRACE_ALLOC(THR_Print("range v%" Pd " has no siblings\n", parent->vreg()));
-    return;
-  }
 
   const intptr_t source_pos = source_block->end_pos() - 1;
   ASSERT(IsInstructionEndPosition(source_pos));
@@ -2795,6 +2790,16 @@ void FlowGraphAllocator::ConnectSplitSiblings(LiveRange* parent,
   }
 }
 
+LiveRange* FindCover(LiveRange* parent, intptr_t pos) {
+  for (LiveRange* range = parent; range != nullptr; range = range->next_sibling()) {
+    if (range->CanCover(pos)) {
+      return range;
+    }
+  }
+  UNREACHABLE();
+  return nullptr;
+}
+
 void FlowGraphAllocator::ResolveControlFlow() {
   // Resolve linear control flow between touching split siblings
   // inside basic blocks.
@@ -2823,14 +2828,114 @@ void FlowGraphAllocator::ResolveControlFlow() {
   }
 
   // Resolve non-linear control flow across branches.
+  GrowableArray<Location> src_locs(2);
+  GrowableArray<MoveOperands> pending(10);
+  GrowableArray<bool> can_emit(10);
   for (intptr_t i = 1; i < block_order_.length(); i++) {
     BlockEntryInstr* block = block_order_[i];
     BitVector* live = liveness_.GetLiveInSet(block);
     for (BitVector::Iterator it(live); !it.Done(); it.Advance()) {
       LiveRange* range = GetLiveRange(it.Current());
-      for (intptr_t j = 0; j < block->PredecessorCount(); j++) {
-        ConnectSplitSiblings(range, block->PredecessorAt(j), block);
+      if (range->next_sibling() == NULL) {
+        // Nothing to connect. The whole range was allocated to the same location.
+        TRACE_ALLOC(THR_Print("range v%" Pd " has no siblings\n", parent->vreg()));
+        continue;
       }
+
+      Location dst = FindCover(range, block->start_pos())->assigned_location();
+
+      // Values are eagerly spilled. Spill slot already contains appropriate value.
+      if (TargetLocationIsSpillSlot(range, dst)) {
+        continue;
+      }
+
+      src_locs.Clear();
+      for (intptr_t j = 0; j < block->PredecessorCount(); j++) {
+        src_locs.Add(FindCover(range, block->PredecessorAt(j)->end_pos() - 1)->assigned_location());
+      }
+
+      // Check if all source locations are the same for the range. Then
+      // emit a single move at the destination
+      if (src_locs.length() > 1) {
+        bool same = true;
+        for (intptr_t j = 1; j < src_locs.length(); j++) {
+          if (!src_locs[j].Equals(src_locs[0])) {
+            same = false;
+            break;
+          }
+        }
+
+        if (same) {
+          // Note: this would only work if src_locs is not clobbered by
+          // any move in the predecessors.
+          if (!dst.Equals(src_locs[0])) {
+            pending.Add(MoveOperands(dst, src_locs[0]));
+          }
+          continue;
+        }
+      }
+
+      for (intptr_t j = 0; j < block->PredecessorCount(); j++) {
+        BlockEntryInstr* pred = block->PredecessorAt(j);
+        Instruction* last = pred->last_instruction();
+        if (dst.Equals(src_locs[j])) {
+          continue;
+        }
+        if ((last->SuccessorCount() == 1) && !pred->IsGraphEntry()) {
+          ASSERT(last->IsGoto());
+          last->AsGoto()->GetParallelMove()->AddMove(dst, src_locs[j]);
+        } else {
+          block->GetParallelMove()->AddMove(dst, src_locs[j]);
+        }
+      }
+    }
+    // For each pending move we need to check if it can be emitted into the
+    // destination block (prerequisite for that is that predecessors should
+    // not destroy the value in the Goto move).
+    if (pending.length() > 0) {
+    can_emit.EnsureLength(pending.length(), true);
+
+    bool changed = false;
+    for (intptr_t j = 0; j < pending.length(); j++) {
+      Location src = pending[j].src();
+      for (intptr_t p = 0; p < block->PredecessorCount(); p++) {
+        BlockEntryInstr* pred = block->PredecessorAt(p);
+        for (auto move : pred->last_instruction()->AsGoto()->GetParallelMove()->moves()) {
+          if (!move->IsRedundant() && move->dest().Equals(src)) {
+            can_emit[j] = false;
+            changed = true;
+            break;
+          }
+        }
+      }
+    }
+    while (changed) {
+      changed = false;
+      for (intptr_t j = 0; j < pending.length(); j++) {
+        if (can_emit[j]) {
+          for (intptr_t k = 0; k < pending.length(); k++) {
+            if (!can_emit[k] && pending[k].dest().Equals(pending[j].src())) {
+              can_emit[j] = false;
+              changed = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    for (intptr_t j = 0; j < pending.length(); j++) {
+      const auto& move = pending[j];
+      if (can_emit[j]) {
+        block->GetParallelMove()->AddMove(move.dest(), move.src());
+      } else {
+        for (intptr_t p = 0; p < block->PredecessorCount(); p++) {
+          block->PredecessorAt(p)->last_instruction()->AsGoto()->GetParallelMove()->AddMove(move.dest(), move.src());
+        }
+      }
+    }
+
+    pending.Clear();
     }
   }
 
@@ -2917,6 +3022,51 @@ void FlowGraphAllocator::CollectRepresentations() {
   }
 }
 
+#if 1
+
+Location FlowGraphAllocator::ComputeParameterLocation(BlockEntryInstr* block,
+                                                      ParameterInstr* param,
+                                                      Register base_reg) {
+  const bool second_location_for_definition = false;  // TODO(vegorov) ARM32
+
+  // Only function entries may have unboxed parameters, possibly making the
+  // parameters size different from the number of parameters on 32-bit
+  // architectures.
+  const intptr_t parameters_size = block->IsFunctionEntry()
+                                       ? flow_graph_.direct_parameters_size()
+                                       : flow_graph_.num_direct_parameters();
+  intptr_t slot_index =
+      param->param_offset() + (second_location_for_definition ? -1 : 0);
+  ASSERT(slot_index >= 0);
+  if (base_reg == FPREG) {
+    // Slot index for the rightmost fixed parameter is -1.
+    slot_index -= parameters_size;
+  } else {
+    // Slot index for a "frameless" parameter is reversed.
+    ASSERT(base_reg == SPREG);
+    ASSERT(slot_index < parameters_size);
+    slot_index = parameters_size - 1 - slot_index;
+  }
+
+  if (base_reg == FPREG) {
+    slot_index =
+        compiler::target::frame_layout.FrameSlotForVariableIndex(-slot_index);
+  } else {
+    ASSERT(base_reg == SPREG);
+    slot_index += compiler::target::frame_layout.last_param_from_entry_sp;
+  }
+
+  if (param->representation() == kUnboxedInt64 ||
+      param->representation() == kTagged) {
+    return Location::StackSlot(slot_index, base_reg);
+  } else {
+    ASSERT(param->representation() == kUnboxedDouble);
+    return Location::DoubleStackSlot(slot_index, base_reg);
+  }
+}
+
+#endif
+
 void FlowGraphAllocator::AllocateRegisters() {
   CollectRepresentations();
 
@@ -2961,12 +3111,112 @@ void FlowGraphAllocator::AllocateRegisters() {
   PrepareForAllocation(Location::kFpuRegister, kNumberOfFpuRegisters,
                        unallocated_xmm_, fpu_regs_, blocked_fpu_registers_);
   AllocateUnallocatedRanges();
-  ResolveControlFlow();
 
   GraphEntryInstr* entry = block_order_[0]->AsGraphEntry();
   ASSERT(entry != NULL);
   intptr_t double_spill_slot_count = spill_slots_.length() * kDoubleSpillFactor;
-  entry->set_spill_slot_count(cpu_spill_slot_count_ + double_spill_slot_count);
+  const intptr_t total_spill_slots =  cpu_spill_slot_count_ + double_spill_slot_count + flow_graph_.max_argument_count_;
+  entry->set_spill_slot_count(total_spill_slots);
+
+  // Decide whether this function can be frameless. Outside of bare instructions
+  // mode we need to preserve caller PP - so all functions need a frame if they
+  // have their own pool - so we don't want to deal with that here.
+  if (FLAG_precompiled_mode && FLAG_use_bare_instructions && !intrinsic_mode_ &&
+      !flow_graph_.parsed_function().function().HasOptionalParameters() &&
+      (entry->spill_slot_count() == 0)) {
+    bool has_call = false;
+    bool has_store = false;
+    for (BlockIterator block_it = flow_graph_.reverse_postorder_iterator();
+         !block_it.Done(); block_it.Advance()) {
+      for (ForwardInstructionIterator instr_it(block_it.Current());
+           !instr_it.Done(); instr_it.Advance()) {
+        Instruction* instruction = instr_it.Current();
+        if (instruction->locs() != nullptr && instruction->locs()->can_call()) {
+          has_call = true;
+          break;
+        }
+#if defined(TARGET_ARCH_ARM64) || defined(TARGET_ARCH_ARM)
+        if (StoreInstanceFieldInstr* store_field =
+                instruction->AsStoreInstanceField()) {
+          if (store_field->ShouldEmitStoreBarrier()) {  // Clobbers LR
+            if (has_store) {
+              has_call = true;
+              break;
+            }
+            has_store = true;
+          }
+        }
+
+        if (StoreIndexedInstr* store_indexed = instruction->AsStoreIndexed()) {
+          if (store_indexed->ShouldEmitStoreBarrier()) {  // Clobbers LR
+            if (has_store) {
+              has_call = true;
+              break;
+            }
+            has_store = true;
+          }
+        }
+#endif
+      }
+    }
+
+    if (!has_call) {
+      // OS::PrintErr("Making %s frameless\n",
+      //             flow_graph_.parsed_function().function().ToCString());
+      entry->frameless_ = true;
+
+      // FlowGraphPrinter printer(flow_graph_, true);
+      // printer.PrintBlocks();
+
+      // Fix location of parameters to use SP as their base register instead of FP.
+      for (intptr_t i = 0; i < entry->SuccessorCount(); i++) {
+        BlockEntryInstr* block = entry->SuccessorAt(i);
+        if (FunctionEntryInstr* entry = block->AsFunctionEntry()) {
+          for (auto defn : *entry->initial_definitions()) {
+            if (auto param = defn->AsParameter()) {
+              auto original_location =
+                  ComputeParameterLocation(block, param, FPREG);
+              auto new_location = ComputeParameterLocation(block, param, SPREG);
+              for (LiveRange* range = GetLiveRange(param->ssa_temp_index());
+                   range != nullptr; range = range->next_sibling()) {
+                if (range->assigned_location().Equals(original_location)) {
+                  range->set_assigned_location(new_location);
+                  range->set_spill_slot(new_location);
+                  ConvertAllUses(range);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // printer.PrintBlocks();
+    }
+  }
+
+
+  ResolveControlFlow();
+
+  // Allocate push argument locations
+  for (BlockIterator block_it = flow_graph_.reverse_postorder_iterator(); !block_it.Done();
+       block_it.Advance()) {
+    for (ForwardInstructionIterator instr_it(block_it.Current());
+         !instr_it.Done(); instr_it.Advance()) {
+      if (auto push = instr_it.Current()->AsPushArgument()) {
+        Location loc;
+
+        const intptr_t spill_index = (total_spill_slots - 1)  - push->index();
+        const intptr_t slot_index =
+            compiler::target::frame_layout.FrameSlotForVariableIndex(-spill_index);
+        if (push->representation() == kUnboxedDouble) {
+          loc = Location::DoubleStackSlot(slot_index, FPREG);
+        } else {
+          loc = Location::StackSlot(slot_index, FPREG);
+        }
+        push->locs()->set_out(0, loc);
+      }
+    }
+  }
 
   if (FLAG_print_ssa_liveranges) {
     const Function& function = flow_graph_.function();

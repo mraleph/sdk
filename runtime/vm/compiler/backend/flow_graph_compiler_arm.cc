@@ -583,6 +583,7 @@ RawSubtypeTestCache* FlowGraphCompiler::GenerateInlineInstanceof(
     // function type) of a non-parameterized class or with a raw dst type of
     // a parameterized class.
     if (type_class.NumTypeArguments() > 0) {
+      if (FLAG_precompiled_mode) return SubtypeTestCache::New();
       return GenerateInstantiatedTypeWithArgumentsTest(
           token_pos, type, is_instance_lbl, is_not_instance_lbl);
       // Fall through to runtime call.
@@ -590,6 +591,7 @@ RawSubtypeTestCache* FlowGraphCompiler::GenerateInlineInstanceof(
     const bool has_fall_through = GenerateInstantiatedTypeNoArgumentsTest(
         token_pos, type, is_instance_lbl, is_not_instance_lbl);
     if (has_fall_through) {
+      if (FLAG_precompiled_mode) return SubtypeTestCache::New();
       // If test non-conclusive so far, try the inlined type-test cache.
       // 'type' is known at compile time.
       return GenerateSubtype1TestCacheLookup(
@@ -598,6 +600,7 @@ RawSubtypeTestCache* FlowGraphCompiler::GenerateInlineInstanceof(
       return SubtypeTestCache::null();
     }
   }
+  if (FLAG_precompiled_mode) return SubtypeTestCache::New();
   return GenerateUninstantiatedTypeTest(token_pos, type, is_instance_lbl,
                                         is_not_instance_lbl);
 }
@@ -617,6 +620,24 @@ void FlowGraphCompiler::GenerateInstanceOf(TokenPosition token_pos,
                                            intptr_t deopt_id,
                                            const AbstractType& type,
                                            LocationSummary* locs) {
+  if (FLAG_precompiled_mode) {
+    __ Comment("Call kInstanceofRuntimeEntry");
+    __ PushObject(Object::null_object());  // Make room for the result.
+    __ Push(TypeTestABI::kInstanceReg);    // Push the instance.
+    __ PushObject(type);                   // Push the type.
+    __ PushList((1 << TypeTestABI::kInstantiatorTypeArgumentsReg) |
+                (1 << TypeTestABI::kFunctionTypeArgumentsReg));
+    __ LoadUniqueObject(R0, SubtypeTestCache::Handle(SubtypeTestCache::New()));
+    __ Push(R0);
+    GenerateRuntimeCall(token_pos, deopt_id, kInstanceofRuntimeEntry, 5, locs);
+    // Pop the parameters supplied to the runtime entry. The result of the
+    // instanceof runtime call will be left as the result of the operation.
+    __ Drop(5);
+    __ Pop(R0);
+    return;
+  }
+
+
   ASSERT(type.IsFinalized());
   ASSERT(!type.IsTopType());  // Already checked.
   static_assert(TypeTestABI::kFunctionTypeArgumentsReg <
@@ -895,14 +916,17 @@ void FlowGraphCompiler::EmitFrameEntry() {
                   THR, compiler::target::Thread::optimize_entry_offset()),
               GE);
   }
-  __ Comment("Enter frame");
-  if (flow_graph().IsCompiledForOsr()) {
-    const intptr_t extra_slots = ExtraStackSlotsOnOsrEntry();
-    ASSERT(extra_slots >= 0);
-    __ EnterOsrFrame(extra_slots * compiler::target::kWordSize);
-  } else {
-    ASSERT(StackSize() >= 0);
-    __ EnterDartFrame(StackSize() * compiler::target::kWordSize);
+
+  if (!flow_graph().graph_entry()->frameless_) {
+    __ Comment("Enter frame");
+    if (flow_graph().IsCompiledForOsr()) {
+      const intptr_t extra_slots = ExtraStackSlotsOnOsrEntry();
+      ASSERT(extra_slots >= 0);
+      __ EnterOsrFrame(extra_slots * compiler::target::kWordSize);
+    } else {
+      ASSERT(StackSize() >= 0);
+      __ EnterDartFrame(StackSize() * compiler::target::kWordSize);
+    }
   }
 }
 
@@ -1061,6 +1085,14 @@ void FlowGraphCompiler::EmitEdgeCounter(intptr_t edge_id) {
 #endif  // DEBUG
 }
 
+void FlowGraphCompiler::DropArguments(intptr_t count) {
+  if (current_instruction()->ArgumentCount() == 0) {
+    __ Drop(count);  // OK
+  } else {
+    RELEASE_ASSERT(current_instruction()->ArgumentCount() == count);
+  }
+}
+
 void FlowGraphCompiler::EmitOptimizedInstanceCall(const Code& stub,
                                                   const ICData& ic_data,
                                                   intptr_t deopt_id,
@@ -1156,7 +1188,7 @@ void FlowGraphCompiler::EmitMegamorphicInstanceCall(
     AddCurrentDescriptor(RawPcDescriptors::kDeopt, deopt_id_after, token_pos);
   }
   RecordCatchEntryMoves(pending_deoptimization_env_, try_index);
-  __ Drop(args_desc.SizeWithTypeArgs());
+  DropArguments(args_desc.SizeWithTypeArgs());
 }
 
 void FlowGraphCompiler::EmitInstanceCallAOT(const ICData& ic_data,
@@ -1201,7 +1233,7 @@ void FlowGraphCompiler::EmitInstanceCallAOT(const ICData& ic_data,
 
   EmitCallsiteMetadata(token_pos, DeoptId::kNone, RawPcDescriptors::kOther,
                        locs);
-  __ Drop(ic_data.SizeWithTypeArgs());
+  DropArguments(ic_data.SizeWithTypeArgs());
 }
 
 void FlowGraphCompiler::EmitUnoptimizedStaticCall(intptr_t size_with_type_args,
@@ -1240,7 +1272,7 @@ void FlowGraphCompiler::EmitOptimizedStaticCall(
   // we can record the outgoing edges to other code.
   GenerateStaticDartCall(deopt_id, token_pos, RawPcDescriptors::kOther, locs,
                          function, entry_kind);
-  __ Drop(size_with_type_args);
+  DropArguments(size_with_type_args);
 }
 
 void FlowGraphCompiler::EmitDispatchTableCall(
