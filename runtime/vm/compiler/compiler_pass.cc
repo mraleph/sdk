@@ -26,6 +26,10 @@
 #endif
 #include "vm/timeline.h"
 
+#if defined(DART_ENABLE_LLVM_COMPILER)
+#include "vm/compiler/backend/llvm/liveness_analysis.h"
+#endif
+
 #define COMPILER_PASS_REPEAT(Name, Body)                                       \
   class CompilerPass_##Name : public CompilerPass {                            \
    public:                                                                     \
@@ -365,6 +369,11 @@ FlowGraph* CompilerPass::RunPipeline(PipelineMode mode,
   if (FLAG_late_round_trip_serialization) {
     INVOKE_PASS(RoundTripSerialization);
   }
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  if (FLAG_llvm_compiler) {
+    INVOKE_PASS(LivenessAnalysis);
+  }
+#endif
   INVOKE_PASS(AllocateRegisters);
   INVOKE_PASS(ReorderBlocks);
   return pass_state->flow_graph();
@@ -574,6 +583,12 @@ COMPILER_PASS(RoundTripSerialization, {
   ASSERT(state->flow_graph() != nullptr);
 })
 
+#if defined(DART_ENABLE_LLVM_COMPILER)
+COMPILER_PASS(LivenessAnalysis, {
+  dart_llvm::LivenessAnalysis liveness_analysis(flow_graph);
+  liveness_analysis.Analyze();
+})
+#endif
 }  // namespace dart
 
 #endif  // DART_PRECOMPILED_RUNTIME

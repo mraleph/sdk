@@ -171,6 +171,20 @@ compiler_sources = [
   "write_barrier_elimination.h",
 ]
 
+if (uc_build_llvm_compiler) {
+  compiler_sources += [
+    #"backend/llvm/abbreviated_types.h",
+    #"backend/llvm/abbreviations.h",
+    #"backend/llvm/common_values.cc",
+    #"backend/llvm/common_values.h",
+    "backend/llvm/liveness_analysis.cc",
+    "backend/llvm/liveness_analysis.h",
+    "backend/llvm/llvm_headers.h",
+    "backend/llvm/llvm_log.cc",
+    "backend/llvm/llvm_log.h",
+  ]
+}
+
 compiler_sources_tests = [
   "assembler/assembler_arm64_test.cc",
   "assembler/assembler_arm_test.cc",

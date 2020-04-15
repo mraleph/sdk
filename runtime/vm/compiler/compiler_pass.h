@@ -51,6 +51,15 @@ namespace dart {
   V(UseTableDispatch)                                                          \
   V(WidenSmiToInt32)                                                           \
   V(EliminateWriteBarriers)
+  DART_LLVM_PASS(V)
+
+#if defined(DART_ENABLE_LLVM_COMPILER)
+#define DART_LLVM_PASS(V) V(LivenessAnalysis)
+
+#else
+#define DART_LLVM_PASS(V)
+#endif
+
 
 class AllocationSinking;
 class BlockScheduler;
