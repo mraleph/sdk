@@ -12,6 +12,9 @@
 #include "vm/growable_array.h"
 #include "vm/token_position.h"
 #include "vm/zone.h"
+#if defined(UC_BUILD_LLVM_COMPILER)
+#include "vm/compiler/backend/llvm/llvm_config.h"
+#endif
 
 namespace dart {
 

@@ -19,7 +19,7 @@ LivenessAnalysis::LivenessAnalysis(FlowGraph* flow_graph)
 void LivenessAnalysis::Analyze() {
   liveness_.Analyze();
   AnalyzeCallOut();
-#if LLVMLOG_LEVEL >= 10
+#if LLVMLOG_LEVEL >= 20
   Dump();
 #endif
 }
@@ -33,11 +33,28 @@ void LivenessAnalysis::AnalyzeCallOut() {
     live->AddAll(liveness_.GetLiveOutSet(block));
     for (BackwardInstructionIterator it(block); !it.Done(); it.Advance()) {
       Instruction* current = it.Current();
+      // Handle define.
       Definition* current_def = current->AsDefinition();
       if ((current_def != nullptr) && current_def->HasSSATemp()) {
         live->Remove(current_def->ssa_temp_index());
         if (current_def->HasPairRepresentation())
           live->Remove(current_def->ssa_temp_index() + 1);
+      }
+      // Initialize location summary for instruction.
+      current->InitializeLocationSummary(zone(), true);  // opt
+
+      LocationSummary* locs = current->locs();
+      // Handle uses.
+      for (intptr_t j = 0; j < current->InputCount(); j++) {
+        Value* input = current->InputAt(j);
+
+        ASSERT(!locs->in(j).IsConstant() || input->BindsToConstant());
+        if (locs->in(j).IsConstant()) continue;
+
+        live->Add(input->definition()->ssa_temp_index());
+        if (input->definition()->HasPairRepresentation()) {
+          live->Add(input->definition()->ssa_temp_index() + 1);
+        }
       }
       // Recognize call site.
       if (current->IsInstanceCall() || current->IsStaticCall() ||

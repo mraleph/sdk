@@ -7,6 +7,7 @@
 
 #include "vm/compiler/backend/linearscan.h"
 #include "vm/compiler/backend/llvm/llvm_config.h"
+#ifdef DART_ENABLE_LLVM_COMPILER
 
 namespace dart {
 class FlowGraph;
@@ -44,4 +45,5 @@ class LivenessAnalysis final {
 }  // namespace dart_llvm
 }  // namespace dart
 
+#endif  // DART_ENABLE_LLVM_COMPILER
 #endif  // LIVENESS_ANALYSIS_H

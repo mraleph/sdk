@@ -26,7 +26,7 @@
 #endif
 #include "vm/timeline.h"
 
-#if defined(DART_ENABLE_LLVM_COMPILER)
+#if defined(UC_BUILD_LLVM_COMPILER)
 #include "vm/compiler/backend/llvm/liveness_analysis.h"
 #endif
 
