@@ -177,11 +177,21 @@ if (uc_build_llvm_compiler) {
     "backend/llvm/abbreviations.h",
     "backend/llvm/common_values.cc",
     "backend/llvm/common_values.h",
+    "backend/llvm/compile.cc",
+    "backend/llvm/compile.h",
+    "backend/llvm/compiler_state.cc",
+    "backend/llvm/compiler_state.h",
+    "backend/llvm/exception_table_parser.h",
+    "backend/llvm/exception_table_parser_arm.cc",
     "backend/llvm/liveness_analysis.cc",
     "backend/llvm/liveness_analysis.h",
     "backend/llvm/llvm_headers.h",
     "backend/llvm/llvm_log.cc",
     "backend/llvm/llvm_log.h",
+    "backend/llvm/stack_map_info.cc",
+    "backend/llvm/stack_map_info.h",
+    "backend/llvm/stack_maps.cc",
+    "backend/llvm/stack_maps.h",
   ]
 }
 
