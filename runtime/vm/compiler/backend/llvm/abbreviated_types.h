@@ -2,6 +2,7 @@
 #ifndef ABBREVIATED_TYPES_H
 #define ABBREVIATED_TYPES_H
 #include "vm/compiler/backend/llvm/llvm_headers.h"
+#if defined(DART_ENABLE_LLVM_COMPILER)
 namespace dart {
 namespace dart_llvm {
 typedef LLVMAtomicOrdering LAtomicOrdering;
@@ -18,4 +19,5 @@ typedef LLVMValueRef LValue;
 typedef LLVMMemoryBufferRef LMemoryBuffer;
 }  // namespace dart_llvm
 }  // namespace dart
+#endif  // DART_ENABLE_LLVM_COMPILER
 #endif  // ABBREVIATED_TYPES_H

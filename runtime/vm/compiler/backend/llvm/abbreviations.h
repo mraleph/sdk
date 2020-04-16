@@ -6,6 +6,7 @@
 
 #include "vm/compiler/backend/llvm/abbreviated_types.h"
 
+#if defined(DART_ENABLE_LLVM_COMPILER)
 // This file contains short-form calls into the LLVM C API. It is meant to
 // save typing and make the lowering code clearer. If we ever call an LLVM C API
 // function more than once in the FTL lowering code, we should add a shortcut
@@ -580,4 +581,5 @@ static inline LValue constInlineAsm(LType Ty,
 }
 }  // namespace dart_llvm
 }  // namespace dart
+#endif  // DART_ENABLE_LLVM_COMPILER
 #endif /* ABBREVIATIONS_H */

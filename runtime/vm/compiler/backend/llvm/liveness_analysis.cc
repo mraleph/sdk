@@ -1,6 +1,6 @@
 // Copyright 2019 UCWeb Co., Ltd.
-#ifdef DART_PRECOMPILER
 #include "vm/compiler/backend/llvm/liveness_analysis.h"
+#if defined(DART_ENABLE_LLVM_COMPILER)
 
 #include <algorithm>
 #include <deque>
@@ -97,4 +97,4 @@ Zone* LivenessAnalysis::zone() {
 }
 }  // namespace dart_llvm
 }  // namespace dart
-#endif  // DART_PRECOMPILER
+#endif  // DART_ENABLE_LLVM_COMPILER

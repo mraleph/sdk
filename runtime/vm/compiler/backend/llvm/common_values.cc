@@ -1,20 +1,21 @@
 // Copyright 2019 UCWeb Co., Ltd.
 
-#include "src/llvm/common-values.h"
+#include "vm/compiler/backend/llvm/common_values.h"
 
+#if defined(DART_ENABLE_LLVM_COMPILER)
 namespace dart {
 namespace dart_llvm {
 
 CommonValues::CommonValues(LContext context)
-    : voidType(voidType(context)),
+    : voidType(dart_llvm::voidType(context)),
       boolean(int1Type(context)),
       int8(int8Type(context)),
       int16(int16Type(context)),
       int32(int32Type(context)),
       int64(int64Type(context)),
       intPtr(intPtrType(context)),
-      floatType(floatType(context)),
-      doubleType(doubleType(context)),
+      floatType(dart_llvm::floatType(context)),
+      doubleType(dart_llvm::doubleType(context)),
       tokenType(LLVMTokenTypeInContext(context)),
       ref8(pointerType(int8)),
       ref16(pointerType(int16)),
@@ -48,3 +49,4 @@ CommonValues::CommonValues(LContext context)
       module_(0) {}
 }  // namespace dart_llvm
 }  // namespace dart
+#endif  // DART_ENABLE_LLVM_COMPILER

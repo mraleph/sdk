@@ -173,10 +173,10 @@ compiler_sources = [
 
 if (uc_build_llvm_compiler) {
   compiler_sources += [
-    #"backend/llvm/abbreviated_types.h",
-    #"backend/llvm/abbreviations.h",
-    #"backend/llvm/common_values.cc",
-    #"backend/llvm/common_values.h",
+    "backend/llvm/abbreviated_types.h",
+    "backend/llvm/abbreviations.h",
+    "backend/llvm/common_values.cc",
+    "backend/llvm/common_values.h",
     "backend/llvm/liveness_analysis.cc",
     "backend/llvm/liveness_analysis.h",
     "backend/llvm/llvm_headers.h",

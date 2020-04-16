@@ -4,6 +4,7 @@
 #define COMMON_VALUES_H
 #include "vm/compiler/backend/llvm/abbreviations.h"
 
+#if defined(DART_ENABLE_LLVM_COMPILER)
 namespace dart {
 namespace dart_llvm {
 
@@ -58,4 +59,5 @@ class CommonValues {
 };
 }  // namespace dart_llvm
 }  // namespace dart
+#endif  // DART_ENABLE_LLVM_COMPILER
 #endif  // COMMON_VALUES_H

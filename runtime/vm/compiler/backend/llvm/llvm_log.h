@@ -2,7 +2,6 @@
 #ifndef LLVM_LOG_H
 #define LLVM_LOG_H
 
-#define LLVMLOG_LEVEL 10
 #ifdef LLVMLOG_LEVEL
 // always print LOGE
 #define LOGE(...) __my_log('E', __VA_ARGS__)

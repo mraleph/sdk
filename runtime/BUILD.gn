@@ -57,6 +57,19 @@ config("dart_precompiled_runtime_config") {
 config("dart_precompiler_config") {
   defines = []
   defines += [ "DART_PRECOMPILER" ]
+  enable_llvm = false
+  if (uc_build_llvm_compiler) {
+    if (dart_target_arch == "arm") {
+      enable_llvm = true
+    }
+  }
+  if (enable_llvm) {
+    include_dirs = [ "vm/compiler/backend/llvm/include" ]
+    libs = [ "LLVM-8" ]
+    defines += [ "LLVMLOG_LEVEL=1" ]
+    ldflags = [ "-Wl,-rpath,\$ORIGIN/../../../third_party/dart/lib" ]
+    lib_dirs = [ "../lib/" ]
+  }
 }
 
 config("dart_os_config") {
