@@ -40,6 +40,11 @@ void LivenessAnalysis::AnalyzeCallOut() {
         if (current_def->HasPairRepresentation())
           live->Remove(current_def->ssa_temp_index() + 1);
       }
+      // Recognize call site.
+      if (current->IsInstanceCall() || current->IsStaticCall() ||
+          current->IsClosureCall()) {
+        SubmitCallsite(current, live);
+      }
       // Initialize location summary for instruction.
       current->InitializeLocationSummary(zone(), true);  // opt
 
@@ -55,11 +60,6 @@ void LivenessAnalysis::AnalyzeCallOut() {
         if (input->definition()->HasPairRepresentation()) {
           live->Add(input->definition()->ssa_temp_index() + 1);
         }
-      }
-      // Recognize call site.
-      if (current->IsInstanceCall() || current->IsStaticCall() ||
-          current->IsClosureCall()) {
-        SubmitCallsite(current, live);
       }
     }
   }
