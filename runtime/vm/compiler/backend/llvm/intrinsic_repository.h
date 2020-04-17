@@ -25,15 +25,15 @@
     macro(mulWithOverflow32, "llvm.smul.with.overflow.i32", functionType(structType(context_, int32, boolean), int32, int32)) \
     macro(mulWithOverflow64, "llvm.smul.with.overflow.i64", functionType(structType(context_, int64, boolean), int64, int64)) \
     macro(patchpointInt64, "llvm.experimental.patchpoint.i64", functionType(int64, int64, int32, ref8, int32, Variadic)) \
-    macro(patchpointVoid, "llvm.experimental.patchpoint.void", functionType(voidType, int64, int32, ref8, int32, Variadic)) \
-    macro(stackmap, "llvm.experimental.stackmap", functionType(voidType, int64, int32, Variadic)) \
-    macro(gcRelocate, "llvm.experimental.gc.relocate.p1s_TaggedStructs", functionType(taggedType, tokenType, int32, int32)) \
-    macro(gcException, "llvm.experimental.gc.exception.p1s_TaggedStructs", functionType(taggedType, tokenType)) \
+    macro(patchpointVoid, "llvm.experimental.patchpoint.void", functionType(void_type, int64, int32, ref8, int32, Variadic)) \
+    macro(stackmap, "llvm.experimental.stackmap", functionType(void_type, int64, int32, Variadic)) \
+    macro(gcRelocate, "llvm.experimental.gc.relocate.p1s_TaggedStructs", functionType(tagged_type, tokenType, int32, int32)) \
+    macro(gcException, "llvm.experimental.gc.exception.p1s_TaggedStructs", functionType(tagged_type, tokenType)) \
     macro(subWithOverflow32, "llvm.ssub.with.overflow.i32", functionType(structType(context_, int32, boolean), int32, int32)) \
     macro(subWithOverflow64, "llvm.ssub.with.overflow.i64", functionType(structType(context_, int64, boolean), int64, int64)) \
     macro(stackSave, "llvm.stacksave", functionType(ref8)) \
-    macro(fakePersonality, "fake_personality", functionType(voidType)) \
-    macro(trap, "llvm.trap", functionType(voidType)) \
+    macro(fakePersonality, "fake_personality", functionType(void_type)) \
+    macro(trap, "llvm.trap", functionType(void_type)) \
     macro(x86SSE2CvtTSD2SI, "llvm.x86.sse2.cvttsd2si", functionType(int32, vectorType(doubleType, 2))) \
     macro(expect, "llvm.expect.i1", functionType(boolean, boolean, boolean))
 

@@ -7,7 +7,7 @@ namespace dart {
 namespace dart_llvm {
 
 CommonValues::CommonValues(LContext context)
-    : voidType(dart_llvm::voidType(context)),
+    : void_type(dart_llvm::voidType(context)),
       boolean(int1Type(context)),
       int8(int8Type(context)),
       int16(int16Type(context)),
@@ -25,9 +25,9 @@ CommonValues::CommonValues(LContext context)
       refFloat(pointerType(floatType)),
       refDouble(pointerType(doubleType)),
       // address space 1 means gc recognizable.
-      taggedType(
+      tagged_type(
           LLVMPointerType(LLVMStructCreateNamed(context, "TaggedStruct"), 1)),
-      metaType(LLVMMetadataTypeInContext(context)),
+      meta_type(LLVMMetadataTypeInContext(context)),
       booleanTrue(constInt(boolean, true, ZeroExtend)),
       booleanFalse(constInt(boolean, false, ZeroExtend)),
       int8Zero(constInt(int8, 0, SignExtend)),

@@ -69,14 +69,14 @@ void LivenessAnalysis::SubmitCallsite(Instruction* instr, BitVector* live) {
   BitVector* call_out_live = new (zone())
       BitVector(zone(), flow_graph_->max_virtual_register_number());
   call_out_live->AddAll(live);
-  call_out_map.emplace(instr, call_out_live);
+  call_out_map_.emplace(instr, call_out_live);
 }
 
 void LivenessAnalysis::Dump() {
   THR_Print("Print liveness info for function %s\n",
             String::Handle(flow_graph_->function().name()).ToCString());
   liveness_.Dump();
-  for (auto& pair : call_out_map) {
+  for (auto& pair : call_out_map_) {
     Instruction* instr = pair.first;
     auto& values = pair.second;
 
@@ -94,6 +94,12 @@ void LivenessAnalysis::Dump() {
 
 Zone* LivenessAnalysis::zone() {
   return flow_graph_->zone();
+}
+
+BitVector* LivenessAnalysis::GetCallOutAt(Instruction* at) {
+  auto found = call_out_map_.find(at);
+  EMASSERT(found != call_out_map_.end());
+  return found->second;
 }
 }  // namespace dart_llvm
 }  // namespace dart

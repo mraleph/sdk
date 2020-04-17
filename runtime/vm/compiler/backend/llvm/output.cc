@@ -99,18 +99,17 @@ void Output::initializeBuild(const RegisterParameterDesc& registerParameters) {
 
 void Output::initializeFunction(
     const RegisterParameterDesc& registerParameters) {
-  LType tagged_type = taggedType();
-  std::vector<LType> params_types = {tagged_type,
-                                     tagged_type,
-                                     tagged_type,
-                                     tagged_type,
-                                     tagged_type,
-                                     tagged_type,
-                                     tagged_type,
-                                     tagged_type,
-                                     tagged_type,
-                                     tagged_type,
-                                     pointerType(tagged_type),
+  std::vector<LType> params_types = {tagged_type(),
+                                     tagged_type(),
+                                     tagged_type(),
+                                     tagged_type(),
+                                     tagged_type(),
+                                     tagged_type(),
+                                     tagged_type(),
+                                     tagged_type(),
+                                     tagged_type(),
+                                     tagged_type(),
+                                     pointerType(tagged_type()),
                                      pointerType(repo().ref8)};
   EMASSERT(params_types.size() == kV8CCRegisterParameterCount);
   std::vector<LType> float_point_parameter_types;
@@ -139,7 +138,7 @@ void Output::initializeFunction(
       int slot = -registerParameter.name;
       if (params_types.size() <
           static_cast<size_t>(slot + kV8CCRegisterParameterCount))
-        params_types.resize(slot + kV8CCRegisterParameterCount, tagged_type);
+        params_types.resize(slot + kV8CCRegisterParameterCount, tagged_type());
       params_types[slot - 1 + kV8CCRegisterParameterCount] =
           registerParameter.type;
     }
@@ -151,7 +150,7 @@ void Output::initializeFunction(
       std::make_move_iterator(float_point_parameter_types.end()));
   state_.function_ =
       addFunction(state_.function_name_.c_str(),
-                  functionType(taggedType(), params_types.data(),
+                  functionType(tagged_type(), params_types.data(),
                                params_types.size(), NotVariadic));
   setFunctionCallingConv(state_.function_, LLVMV8CallConv);
 
@@ -209,7 +208,7 @@ LValue Output::constIntPtr(intptr_t i) {
 
 LValue Output::constTagged(uintptr_t magic) {
   LValue intptr = constIntPtr(static_cast<intptr_t>(magic));
-  return buildCast(LLVMIntToPtr, intptr, taggedType());
+  return buildCast(LLVMIntToPtr, intptr, tagged_type());
 }
 
 LValue Output::buildStructGEP(LValue structVal, unsigned field) {

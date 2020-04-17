@@ -119,7 +119,7 @@ class Output {
 
   inline IntrinsicRepository& repo() { return repo_; }
   inline LBasicBlock prologue() const { return prologue_; }
-  inline LType taggedType() const { return repo_.taggedType; }
+  inline LType tagged_type() const { return repo_.tagged_type; }
   inline LValue parameter(int i) { return parameters_[i]; }
   inline LValue thread() { return thread_; }
   inline LValue fp() { return fp_; }

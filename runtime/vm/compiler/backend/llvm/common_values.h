@@ -16,7 +16,7 @@ class CommonValues {
 
   void initialize(LModule module) { module_ = module; }
 
-  const LType voidType;
+  const LType void_type;
   const LType boolean;
   const LType int8;
   const LType int16;
@@ -33,8 +33,8 @@ class CommonValues {
   const LType refPtr;
   const LType refFloat;
   const LType refDouble;
-  const LType taggedType;
-  const LType metaType;
+  const LType tagged_type;
+  const LType meta_type;
   const LValue booleanTrue;
   const LValue booleanFalse;
   const LValue int8Zero;

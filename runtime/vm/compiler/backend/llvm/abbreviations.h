@@ -33,7 +33,11 @@ static inline LType int64Type(LContext context) {
   return LLVMInt64TypeInContext(context);
 }
 static inline LType intPtrType(LContext context) {
+#if defined(TARGET_ARCH_IS_64_BIT)
+  return LLVMInt64TypeInContext(context);
+#else
   return LLVMInt32TypeInContext(context);
+#endif
 }
 static inline LType floatType(LContext context) {
   return LLVMFloatTypeInContext(context);

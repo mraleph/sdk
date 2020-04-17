@@ -185,6 +185,8 @@ if (uc_build_llvm_compiler) {
     "backend/llvm/exception_table_parser_arm.cc",
     "backend/llvm/intrinsic_repository.cc",
     "backend/llvm/intrinsic_repository.h",
+    "backend/llvm/ir_translator.cc",
+    "backend/llvm/ir_translator.h",
     "backend/llvm/liveness_analysis.cc",
     "backend/llvm/liveness_analysis.h",
     "backend/llvm/llvm_headers.h",
