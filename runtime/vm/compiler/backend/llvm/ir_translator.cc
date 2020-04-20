@@ -3,6 +3,7 @@
 #include <unordered_map>
 
 #include "vm/compiler/backend/llvm/compiler_state.h"
+#include "vm/compiler/backend/llvm/initialize_llvm.h"
 #include "vm/compiler/backend/llvm/liveness_analysis.h"
 #include "vm/compiler/backend/llvm/output.h"
 
@@ -31,6 +32,7 @@ enum class ValueType { LLVMValue, RelativeCallTarget };
 
 struct ValueDesc {
   ValueType type;
+  Definition* constant_def;
   union {
     LValue llvm_value;
     int64_t relative_call_target;
@@ -48,10 +50,11 @@ struct IRTranslatorBlockImpl {
 
   bool started = false;
   bool ended = false;
+  bool need_merge = false;
   bool exception_block = false;
 
   inline void SetLLVMValue(int nid, LValue value) {
-    values_[nid] = {ValueType::LLVMValue, {value}};
+    values_[nid] = {ValueType::LLVMValue, nullptr, {value}};
   }
 
   inline void SetValue(int nid, const ValueDesc& value) {
@@ -73,13 +76,13 @@ struct IRTranslatorBlockImpl {
 
   inline std::unordered_map<int, ValueDesc>& values() { return values_; }
 
-  inline void StartBuild() {
+  inline void StartTranslate() {
     EMASSERT(!started);
     EMASSERT(!ended);
     started = true;
   }
 
-  inline void EndBuild() {
+  inline void EndTranslate() {
     EMASSERT(started);
     EMASSERT(!ended);
     ended = true;
@@ -89,15 +92,32 @@ struct IRTranslatorBlockImpl {
 class AnonImpl {
  public:
   LBasicBlock GetNativeBB(BlockEntryInstr* bb);
-  void EnsureNativeBB(BlockEntryInstr* bb, Output& output);
+  void EnsureNativeBB(BlockEntryInstr* bb);
   IRTranslatorBlockImpl* GetTranslatorBlockImpl(BlockEntryInstr* bb);
   LBasicBlock GetNativeBBContinuation(BlockEntryInstr* bb);
-  bool IsBBStartedToBuild(BlockEntryInstr* bb);
-  bool IsBBEndedToBuild(BlockEntryInstr* bb);
-  void StartBuild(BlockEntryInstr* bb, Output& output);
+  bool IsBBStartedToTranslate(BlockEntryInstr* bb);
+  bool IsBBEndedToTranslate(BlockEntryInstr* bb);
+  void StartTranslate(BlockEntryInstr* bb);
+  void MergePredecessors(BlockEntryInstr* bb);
+  bool AllPredecessorStarted(BlockEntryInstr* bb, BlockEntryInstr** ref_pred);
+  void End();
+  void EndCurrentBlock();
+  void ProcessPhiWorkList();
+  LValue EnsurePhiInput(BlockEntryInstr* pred, int index, LType type);
+  void BuildPhiAndPushToWorkList(BlockEntryInstr* bb,
+                                 BlockEntryInstr* ref_pred);
 
- private:
+  inline CompilerState& compiler_state() { return *compiler_state_; }
+  inline LivenessAnalysis& liveness() { return *liveness_analysis_; }
+  inline Output& output() { return *output_; }
+
+  BlockEntryInstr* current_bb_;
+  FlowGraph* flow_graph_;
+  std::unique_ptr<CompilerState> compiler_state_;
+  std::unique_ptr<LivenessAnalysis> liveness_analysis_;
+  std::unique_ptr<Output> output_;
   std::unordered_map<BlockEntryInstr*, IRTranslatorBlockImpl> block_map_;
+  std::vector<BlockEntryInstr*> phi_rebuild_worklist_;
 };
 
 IRTranslatorBlockImpl* AnonImpl::GetTranslatorBlockImpl(BlockEntryInstr* bb) {
@@ -105,12 +125,12 @@ IRTranslatorBlockImpl* AnonImpl::GetTranslatorBlockImpl(BlockEntryInstr* bb) {
   return &ref;
 }
 
-void AnonImpl::EnsureNativeBB(BlockEntryInstr* bb, Output& output) {
+void AnonImpl::EnsureNativeBB(BlockEntryInstr* bb) {
   IRTranslatorBlockImpl* impl = GetTranslatorBlockImpl(bb);
   if (impl->native_bb) return;
   char buf[256];
   snprintf(buf, 256, "B%d", static_cast<int>(bb->block_id()));
-  LBasicBlock native_bb = output.appendBasicBlock(buf);
+  LBasicBlock native_bb = output_->appendBasicBlock(buf);
   impl->native_bb = native_bb;
   impl->continuation = native_bb;
 }
@@ -123,56 +143,261 @@ LBasicBlock AnonImpl::GetNativeBBContinuation(BlockEntryInstr* bb) {
   return GetTranslatorBlockImpl(bb)->continuation;
 }
 
-bool AnonImpl::IsBBStartedToBuild(BlockEntryInstr* bb) {
+bool AnonImpl::IsBBStartedToTranslate(BlockEntryInstr* bb) {
   auto impl = GetTranslatorBlockImpl(bb);
-  if (!impl) return false;
   return impl->started;
 }
 
-bool AnonImpl::IsBBEndedToBuild(BlockEntryInstr* bb) {
+bool AnonImpl::IsBBEndedToTranslate(BlockEntryInstr* bb) {
   auto impl = GetTranslatorBlockImpl(bb);
-  if (!impl) return false;
   return impl->ended;
 }
 
-void AnonImpl::StartBuild(BlockEntryInstr* bb, Output& output) {
-  EnsureNativeBB(bb, output);
-  GetTranslatorBlockImpl(bb)->StartBuild();
-  output.positionToBBEnd(GetNativeBB(bb));
+void AnonImpl::StartTranslate(BlockEntryInstr* bb) {
+  EnsureNativeBB(bb);
+  GetTranslatorBlockImpl(bb)->StartTranslate();
+  output_->positionToBBEnd(GetNativeBB(bb));
+}
+
+void AnonImpl::MergePredecessors(BlockEntryInstr* bb) {
+  intptr_t predecessor_count = bb->PredecessorCount();
+  if (predecessor_count == 0) return;
+  IRTranslatorBlockImpl* block_impl = GetTranslatorBlockImpl(bb);
+  if (predecessor_count == 1) {
+    // Don't use phi if only one predecessor.
+    BlockEntryInstr* pred = bb->PredecessorAt(0);
+    IRTranslatorBlockImpl* pred_block_impl = GetTranslatorBlockImpl(pred);
+    EMASSERT(IsBBStartedToTranslate(pred));
+    for (BitVector::Iterator it(liveness().GetLiveInSet(bb)); !it.Done();
+         it.Advance()) {
+      int live = it.Current();
+      auto& value = pred_block_impl->GetValue(live);
+      block_impl->SetValue(live, value);
+    }
+    if (block_impl->exception_block) {
+      LValue landing_pad = output().buildLandingPad();
+      LValue call_value = landing_pad;
+      PredecessorCallInfo& callinfo = block_impl->call_info;
+      auto& values = block_impl->values();
+      for (auto& gc_relocate : callinfo.gc_relocates) {
+        auto found = values.find(gc_relocate.value);
+        EMASSERT(found->second.type == ValueType::LLVMValue);
+        LValue relocated = output().buildCall(
+            output().repo().gcRelocateIntrinsic(), call_value,
+            output().constInt32(gc_relocate.where),
+            output().constInt32(gc_relocate.where));
+        found->second.llvm_value = relocated;
+      }
+      block_impl->landing_pad = landing_pad;
+    }
+    return;
+  }
+  BlockEntryInstr* ref_pred = nullptr;
+  if (!AllPredecessorStarted(bb, &ref_pred)) {
+    EMASSERT(!!ref_pred);
+    BuildPhiAndPushToWorkList(bb, ref_pred);
+    return;
+  }
+  // Use phi.
+  for (BitVector::Iterator it(liveness().GetLiveInSet(bb)); !it.Done();
+       it.Advance()) {
+    int live = it.Current();
+    auto& value = GetTranslatorBlockImpl(ref_pred)->GetValue(live);
+    if (value.type != ValueType::LLVMValue) {
+      block_impl->SetValue(live, value);
+      continue;
+    }
+    LValue ref_value = value.llvm_value;
+    LType ref_type = typeOf(ref_value);
+    if (ref_type != output().tagged_type()) {
+      // FIXME: Should add EMASSERT that all values are the same.
+      block_impl->SetLLVMValue(live, ref_value);
+      continue;
+    }
+    LValue phi = output().buildPhi(ref_type);
+    for (intptr_t i = 0; i < predecessor_count; ++i) {
+      BlockEntryInstr* pred = bb->PredecessorAt(i);
+      LValue value = GetTranslatorBlockImpl(pred)->GetLLVMValue(live);
+      LBasicBlock native = GetNativeBBContinuation(pred);
+      addIncoming(phi, &value, &native, 1);
+    }
+    block_impl->SetLLVMValue(live, phi);
+  }
+}
+
+bool AnonImpl::AllPredecessorStarted(BlockEntryInstr* bb,
+                                     BlockEntryInstr** ref_pred) {
+  bool ret_value = true;
+  intptr_t predecessor_count = bb->PredecessorCount();
+  for (intptr_t i = 0; i < predecessor_count; ++i) {
+    BlockEntryInstr* pred = bb->PredecessorAt(i);
+    if (IsBBStartedToTranslate(pred)) {
+      if (!*ref_pred) *ref_pred = pred;
+    } else {
+      ret_value = false;
+    }
+  }
+  return ret_value;
+}
+
+void AnonImpl::BuildPhiAndPushToWorkList(BlockEntryInstr* bb,
+                                         BlockEntryInstr* ref_pred) {
+  IRTranslatorBlockImpl* block_impl = GetTranslatorBlockImpl(bb);
+  IRTranslatorBlockImpl* ref_pred_impl = GetTranslatorBlockImpl(ref_pred);
+  for (BitVector::Iterator it(liveness().GetLiveInSet(bb)); !it.Done();
+       it.Advance()) {
+    int live = it.Current();
+    const ValueDesc& value_desc = ref_pred_impl->GetValue(live);
+    if (value_desc.type != ValueType::LLVMValue) {
+      block_impl->SetValue(live, value_desc);
+      continue;
+    }
+    LValue ref_value = value_desc.llvm_value;
+    LType ref_type = typeOf(ref_value);
+    if (ref_type != output().tagged_type()) {
+      block_impl->SetLLVMValue(live, ref_value);
+      continue;
+    }
+    LValue phi = output().buildPhi(ref_type);
+    block_impl->SetLLVMValue(live, phi);
+    intptr_t predecessor_count = bb->PredecessorCount();
+    for (intptr_t i = 0; i < predecessor_count; ++i) {
+      BlockEntryInstr* pred = bb->PredecessorAt(i);
+      if (!IsBBStartedToTranslate(pred)) {
+        block_impl->not_merged_phis.emplace_back();
+        NotMergedPhiDesc& not_merged_phi = block_impl->not_merged_phis.back();
+        not_merged_phi.phi = phi;
+        not_merged_phi.value = live;
+        not_merged_phi.pred = pred;
+        continue;
+      }
+      LValue value = GetTranslatorBlockImpl(pred)->GetLLVMValue(live);
+      LBasicBlock native = GetNativeBBContinuation(pred);
+      addIncoming(phi, &value, &native, 1);
+    }
+  }
+  phi_rebuild_worklist_.push_back(bb);
+}
+
+void AnonImpl::End() {
+  EMASSERT(!!current_bb_);
+  EndCurrentBlock();
+  ProcessPhiWorkList();
+  output().positionToBBEnd(output().prologue());
+  output().buildBr(GetNativeBB(flow_graph_->graph_entry()));
+  output().finalize();
+}
+
+void AnonImpl::EndCurrentBlock() {
+  GetTranslatorBlockImpl(current_bb_)->EndTranslate();
+  current_bb_ = nullptr;
+}
+
+void AnonImpl::ProcessPhiWorkList() {
+  for (BlockEntryInstr* bb : phi_rebuild_worklist_) {
+    auto impl = GetTranslatorBlockImpl(bb);
+    for (auto& e : impl->not_merged_phis) {
+      BlockEntryInstr* pred = e.pred;
+      EMASSERT(IsBBStartedToTranslate(pred));
+      LValue value = EnsurePhiInput(pred, e.value, typeOf(e.phi));
+      LBasicBlock native = GetNativeBBContinuation(pred);
+      addIncoming(e.phi, &value, &native, 1);
+    }
+    impl->not_merged_phis.clear();
+  }
+  phi_rebuild_worklist_.clear();
+}
+
+LValue AnonImpl::EnsurePhiInput(BlockEntryInstr* pred, int index, LType type) {
+  LValue val = GetTranslatorBlockImpl(pred)->GetLLVMValue(index);
+  LType value_type = typeOf(val);
+  if (value_type == type) return val;
+  LValue terminator =
+      LLVMGetBasicBlockTerminator(GetNativeBBContinuation(pred));
+  if ((value_type == output().repo().intPtr) &&
+      (type == output().tagged_type())) {
+    output().positionBefore(terminator);
+    LValue ret_val =
+        output().buildCast(LLVMIntToPtr, val, output().tagged_type());
+    return ret_val;
+  }
+  LLVMTypeKind value_type_kind = LLVMGetTypeKind(value_type);
+  if ((LLVMPointerTypeKind == value_type_kind) &&
+      (type == output().repo().intPtr)) {
+    output().positionBefore(terminator);
+    LValue ret_val =
+        output().buildCast(LLVMPtrToInt, val, output().repo().intPtr);
+    return ret_val;
+  }
+  if ((value_type == output().repo().boolean) &&
+      (type == output().repo().intPtr)) {
+    output().positionBefore(terminator);
+    LValue ret_val = output().buildCast(LLVMZExt, val, output().repo().intPtr);
+    return ret_val;
+  }
+  LLVMTypeKind type_kind = LLVMGetTypeKind(type);
+  if ((LLVMIntegerTypeKind == value_type_kind) &&
+      (value_type_kind == type_kind)) {
+    // handle both integer
+    output().positionBefore(terminator);
+    LValue ret_val;
+    if (LLVMGetIntTypeWidth(value_type) > LLVMGetIntTypeWidth(type)) {
+      ret_val = output().buildCast(LLVMTrunc, val, type);
+    } else {
+      ret_val = output().buildCast(LLVMZExt, val, type);
+    }
+    return ret_val;
+  }
+  __builtin_trap();
 }
 }  // namespace
 
 struct IRTranslator::Impl : public AnonImpl {};
 
 IRTranslator::IRTranslator(FlowGraph* flow_graph)
-    : FlowGraphVisitor(flow_graph->reverse_postorder()),
-      flow_graph_(flow_graph) {
-  compiler_state_.reset(new CompilerState(
+    : FlowGraphVisitor(flow_graph->reverse_postorder()) {
+  InitLLVM();
+  impl_.reset(new Impl);
+  impl().flow_graph_ = flow_graph;
+  impl().compiler_state_.reset(new CompilerState(
       String::Handle(flow_graph->zone(),
                      flow_graph->parsed_function().function().UserVisibleName())
           .ToCString()));
-  liveness_analysis_.reset(new LivenessAnalysis(flow_graph));
-  output_.reset(new Output(compiler_state()));
+  impl().liveness_analysis_.reset(new LivenessAnalysis(flow_graph));
+  impl().output_.reset(new Output(impl().compiler_state()));
   // init parameter desc
   RegisterParameterDesc parameter_desc;
-  LType tagged_type = output().repo().tagged_type;
+  LType tagged_type = impl().output().repo().tagged_type;
   for (int i = 1; i <= flow_graph->num_direct_parameters(); ++i) {
     parameter_desc.emplace_back(-i, tagged_type);
   }
   // init output.
-  output().initializeBuild(parameter_desc);
-  impl_.reset(new Impl);
+  impl().output().initializeBuild(parameter_desc);
 }
 
 IRTranslator::~IRTranslator() {}
 
 void IRTranslator::Translate() {
-  liveness_analysis().Analyze();
+  impl().liveness().Analyze();
   VisitBlocks();
 }
 
+void IRTranslator::VisitBlockEntry(BlockEntryInstr* block) {
+  impl().current_bb_ = block;
+  impl().StartTranslate(block);
+  impl().MergePredecessors(block);
+}
+
+void IRTranslator::VisitBlockEntryWithInitialDefs(
+    BlockEntryWithInitialDefs* block) {
+  VisitBlockEntry(block);
+  for (Definition* def : *block->initial_definitions()) {
+    def->Accept(this);
+  }
+}
+
 void IRTranslator::VisitGraphEntry(GraphEntryInstr* instr) {
-  UNREACHABLE();
+  VisitBlockEntryWithInitialDefs(instr);
 }
 
 void IRTranslator::VisitJoinEntry(JoinEntryInstr* instr) {
@@ -184,7 +409,7 @@ void IRTranslator::VisitTargetEntry(TargetEntryInstr* instr) {
 }
 
 void IRTranslator::VisitFunctionEntry(FunctionEntryInstr* instr) {
-  UNREACHABLE();
+  VisitBlockEntryWithInitialDefs(instr);
 }
 
 void IRTranslator::VisitNativeEntry(NativeEntryInstr* instr) {

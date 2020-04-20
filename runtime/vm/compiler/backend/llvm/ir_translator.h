@@ -7,10 +7,8 @@
 namespace dart {
 class FlowGraph;
 class BlockEntryInstr;
+class BlockEntryWithInitialDefs;
 namespace dart_llvm {
-struct CompilerState;
-class Output;
-class LivenessAnalysis;
 
 class IRTranslator : public FlowGraphVisitor {
  public:
@@ -20,9 +18,10 @@ class IRTranslator : public FlowGraphVisitor {
 
  private:
   struct Impl;
-  inline CompilerState& compiler_state() { return *compiler_state_; }
-  inline LivenessAnalysis& liveness_analysis() { return *liveness_analysis_; }
-  inline Output& output() { return *output_; }
+  inline Impl& impl() { return *impl_; }
+
+  void VisitBlockEntryWithInitialDefs(BlockEntryWithInitialDefs*);
+  void VisitBlockEntry(BlockEntryInstr*);
 #define DECLARE_VISIT_INSTRUCTION(ShortName, Attrs)                            \
   void Visit##ShortName(ShortName##Instr* instr) override;
 
@@ -30,10 +29,6 @@ class IRTranslator : public FlowGraphVisitor {
 
 #undef DECLARE_VISIT_INSTRUCTION
   DISALLOW_COPY_AND_ASSIGN(IRTranslator);
-  FlowGraph* flow_graph_;
-  std::unique_ptr<CompilerState> compiler_state_;
-  std::unique_ptr<LivenessAnalysis> liveness_analysis_;
-  std::unique_ptr<Output> output_;
   std::unique_ptr<Impl> impl_;
 };
 }  // namespace dart_llvm

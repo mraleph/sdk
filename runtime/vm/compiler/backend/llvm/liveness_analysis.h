@@ -25,10 +25,7 @@ class LivenessAnalysis final {
   ~LivenessAnalysis() = default;
   void Analyze();
 
-  BitVector* GetLiveInSetAt(intptr_t postorder_number) const {
-    return liveness_.GetLiveInSetAt(postorder_number);
-  }
-
+  BitVector* GetLiveInSet(BlockEntryInstr*) const;
   BitVector* GetCallOutAt(Instruction* at);
 
  private:

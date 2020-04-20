@@ -101,6 +101,10 @@ BitVector* LivenessAnalysis::GetCallOutAt(Instruction* at) {
   EMASSERT(found != call_out_map_.end());
   return found->second;
 }
+
+BitVector* LivenessAnalysis::GetLiveInSet(BlockEntryInstr* block) const {
+  return liveness_.GetLiveInSet(block);
+}
 }  // namespace dart_llvm
 }  // namespace dart
 #endif  // DART_ENABLE_LLVM_COMPILER
