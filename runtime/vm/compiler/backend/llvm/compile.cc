@@ -123,7 +123,7 @@ void Compile(State& state) {
       mmDestroy);
   if (LLVMCreateMCJITCompilerForModule(&engine, state.module_, &options,
                                        sizeof(options), &error)) {
-    LOGE("FATAL: Could not create LLVM execution engine: %s", error);
+    LLVMLOGE("FATAL: Could not create LLVM execution engine: %s", error);
     EMASSERT(false);
   }
   LLVMModuleRef module = state.module_;

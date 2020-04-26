@@ -30,12 +30,15 @@ class Output {
   LBasicBlock appendBasicBlock(LValue function, const char* name = "");
   void positionToBBEnd(LBasicBlock);
   void positionBefore(LValue);
+  LValue constInt16(int);
   LValue constInt32(int);
   LValue constIntPtr(intptr_t);
   LValue constInt64(long long);
+  LValue constDouble(double);
   LValue constTagged(uintptr_t);
   LValue buildStructGEP(LValue structVal, unsigned field);
   LValue buildGEPWithByteOffset(LValue base, LValue offset, LType dstType);
+  LValue buildGEPWithByteOffset(LValue base, int offset, LType dstType);
   LValue buildGEP(LValue base, LValue offset);
   LValue buildLoad(LValue toLoad);
   LValue buildInvariantLoad(LValue toLoad);
@@ -61,6 +64,7 @@ class Output {
   LValue buildAnd(LValue lhs, LValue rhs);
   LValue buildOr(LValue lhs, LValue rhs);
   LValue buildXor(LValue lhs, LValue rhs);
+  LValue buildNot(LValue v);
   LValue buildBr(LBasicBlock bb);
   LValue buildSwitch(LValue, LBasicBlock, unsigned);
   LValue buildCondBr(LValue condition, LBasicBlock taken, LBasicBlock notTaken);
@@ -113,7 +117,7 @@ class Output {
                                     unsigned key_len,
                                     const char* value,
                                     unsigned value_len);
-  void setDebugInfo(int linenum, const char* source_file_name);
+  void setDebugInfo(intptr_t linenum, const char* source_file_name);
   void finalize();
   LValue addFunction(const char* name, LType type);
 
@@ -122,7 +126,9 @@ class Output {
   inline LType tagged_type() const { return repo_.tagged_type; }
   inline LValue parameter(int i) { return parameters_[i]; }
   inline LValue thread() { return thread_; }
+  inline LValue args_desc() { return args_desc_; }
   inline LValue fp() { return fp_; }
+  inline LValue pp() { return pp_; }
   inline LValue bitcast_space() { return bitcast_space_; }
   inline int stack_parameter_count() const { return stack_parameter_count_; }
 
@@ -136,7 +142,9 @@ class Output {
   LLVMDIBuilderRef di_builder_;
   LBasicBlock prologue_;
   LValue thread_;
+  LValue args_desc_;
   LValue fp_;
+  LValue pp_;
   LValue bitcast_space_;
   LLVMMetadataRef subprogram_;
   size_t stack_parameter_count_;

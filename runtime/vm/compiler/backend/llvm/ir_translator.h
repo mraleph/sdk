@@ -6,19 +6,22 @@
 
 namespace dart {
 class FlowGraph;
+class Precompiler;
 class BlockEntryInstr;
 class BlockEntryWithInitialDefs;
 namespace dart_llvm {
+class Output;
 
 class IRTranslator : public FlowGraphVisitor {
  public:
-  explicit IRTranslator(FlowGraph*);
+  explicit IRTranslator(FlowGraph*, Precompiler*);
   ~IRTranslator();
   void Translate();
 
  private:
   struct Impl;
   inline Impl& impl() { return *impl_; }
+  Output& output();
 
   void VisitBlockEntryWithInitialDefs(BlockEntryWithInitialDefs*);
   void VisitBlockEntry(BlockEntryInstr*);

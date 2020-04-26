@@ -8,6 +8,7 @@
 #include "vm/compiler/backend/llvm/compiler_state.h"
 #include "vm/compiler/backend/llvm/llvm_log.h"
 #include "vm/compiler/backend/llvm/target_specific.h"
+#include "vm/constants.h"
 
 namespace dart {
 namespace dart_llvm {
@@ -18,7 +19,9 @@ Output::Output(CompilerState& state)
       di_builder_(nullptr),
       prologue_(nullptr),
       thread_(nullptr),
+      args_desc_(nullptr),
       fp_(nullptr),
+      pp_(nullptr),
       bitcast_space_(nullptr),
       subprogram_(nullptr),
       stack_parameter_count_(0) {}
@@ -40,12 +43,11 @@ void Output::initializeBuild(const RegisterParameterDesc& registerParameters) {
 
   prologue_ = appendBasicBlock("Prologue");
   positionToBBEnd(prologue_);
-#if defined(TARGET_ARCH_ARM) && defined(TARGET_OS_ANDROID)
-  thread_ = LLVMGetParam(state_.function_, 10);
-  fp_ = LLVMGetParam(state_.function_, 11);
-#else
-#error unknown platform.
-#endif
+  thread_ = LLVMGetParam(state_.function_, static_cast<int>(THR));
+  fp_ = LLVMGetParam(state_.function_, static_cast<int>(FP));
+  pp_ = LLVMGetParam(state_.function_, static_cast<int>(PP));
+  args_desc_ = LLVMGetParam(state_.function_, static_cast<int>(ARGS_DESC_REG));
+
   enum class LateParameterType { Stack, FloatPoint };
   // type, position in stack/double registers, position in parameters;
   std::vector<std::tuple<LateParameterType, int, int>> late_parameters;
@@ -99,6 +101,7 @@ void Output::initializeBuild(const RegisterParameterDesc& registerParameters) {
 
 void Output::initializeFunction(
     const RegisterParameterDesc& registerParameters) {
+#if 0
   std::vector<LType> params_types = {tagged_type(),
                                      tagged_type(),
                                      tagged_type(),
@@ -111,6 +114,13 @@ void Output::initializeFunction(
                                      tagged_type(),
                                      pointerType(tagged_type()),
                                      pointerType(repo().ref8)};
+#endif
+  std::vector<LType> params_types;
+  params_types.resize(kV8CCRegisterParameterCount, tagged_type());
+  params_types[static_cast<int>(PP)] = pointerType(tagged_type());
+  params_types[static_cast<int>(THR)] = repo().ref8;
+  params_types[static_cast<int>(FP)] = repo().ref8;
+  params_types[static_cast<int>(PP)] = repo().ref8;
   EMASSERT(params_types.size() == kV8CCRegisterParameterCount);
   std::vector<LType> float_point_parameter_types;
   LType double_type = repo().doubleType;
@@ -194,6 +204,10 @@ void Output::positionBefore(LValue value) {
   LLVMPositionBuilderBefore(builder_, value);
 }
 
+LValue Output::constInt16(int i) {
+  return dart_llvm::constInt(repo_.int16, i);
+}
+
 LValue Output::constInt32(int i) {
   return dart_llvm::constInt(repo_.int32, i);
 }
@@ -204,6 +218,10 @@ LValue Output::constInt64(long long l) {
 
 LValue Output::constIntPtr(intptr_t i) {
   return dart_llvm::constInt(repo_.intPtr, i);
+}
+
+LValue Output::constDouble(double d) {
+  return dart_llvm::constReal(repo_.doubleType, d);
 }
 
 LValue Output::constTagged(uintptr_t magic) {
@@ -316,6 +334,10 @@ LValue Output::buildXor(LValue lhs, LValue rhs) {
   return setInstrDebugLoc(LLVMBuildXor(builder_, lhs, rhs, ""));
 }
 
+LValue Output::buildNot(LValue v) {
+  return setInstrDebugLoc(LLVMBuildNot(builder_, v, ""));
+}
+
 LValue Output::buildBr(LBasicBlock bb) {
   return setInstrDebugLoc(dart_llvm::buildBr(builder_, bb));
 }
@@ -409,6 +431,10 @@ LValue Output::buildGEPWithByteOffset(LValue base,
   return buildBitCast(dst_ref8, dstType);
 }
 
+LValue Output::buildGEPWithByteOffset(LValue base, int offset, LType dstType) {
+  return buildGEPWithByteOffset(base, constInt32(offset), dstType);
+}
+
 LValue Output::buildGEP(LValue base, LValue offset) {
   LValue dst = LLVMBuildGEP(builder_, base, &offset, 1, "");
   return dst;
@@ -499,7 +525,7 @@ LValue Output::buildLandingPad() {
   return setInstrDebugLoc(landing_pad);
 }
 
-void Output::setDebugInfo(int linenum, const char* source_file_name) {
+void Output::setDebugInfo(intptr_t linenum, const char* source_file_name) {
 #if defined(FEATURE_DEBUG_INFO)
   LLVMMetadataRef scope = subprogram_;
   if (source_file_name) {

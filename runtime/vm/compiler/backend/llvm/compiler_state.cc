@@ -19,7 +19,7 @@ CompilerState::CompilerState(const char* function_name)
   context_ = LLVMContextCreate();
   module_ = LLVMModuleCreateWithNameInContext("main", context_);
 #if defined(TARGET_ARCH_ARM)
-  LLVMSetTarget(module_, "armv7-unknown-unknown-v8");
+  LLVMSetTarget(module_, "armv8-unknown-linux-v8");
 #else
 #error unsupported arch
 #endif

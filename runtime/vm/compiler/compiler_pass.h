@@ -57,7 +57,7 @@ namespace dart {
   DART_LLVM_PASS(V)
 
 #if defined(DART_ENABLE_LLVM_COMPILER)
-#define DART_LLVM_PASS(V) V(LivenessAnalysis)
+#define DART_LLVM_PASS(V) V(IRTranslate)
 
 #else
 #define DART_LLVM_PASS(V)

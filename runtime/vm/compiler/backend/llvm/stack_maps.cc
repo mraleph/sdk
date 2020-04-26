@@ -253,7 +253,7 @@ uint64_t DataViewULEB128::ReadULEB128(unsigned& offset, const uint8_t* end) {
   unsigned n;
   uint64_t result = DecodeULEB128(data_ + offset, &n, end, &error);
   if (error) {
-    LOGE("DecodeULEB128: %s\n", error);
+    LLVMLOGE("DecodeULEB128: %s\n", error);
     EMASSERT(!error);
   }
   offset += n;

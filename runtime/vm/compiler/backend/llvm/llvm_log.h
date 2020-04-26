@@ -3,8 +3,8 @@
 #define LLVM_LOG_H
 
 #ifdef LLVMLOG_LEVEL
-// always print LOGE
-#define LOGE(...) __my_log('E', __VA_ARGS__)
+// always print LLVMLOGE
+#define LLVMLOGE(...) __my_log('E', __VA_ARGS__)
 #define EMASSERT(p)                                                            \
   if (!(p)) {                                                                  \
     __my_assert_fail(#p, __FILE__, __LINE__);                                  \
@@ -36,8 +36,8 @@ void __my_assert_fail(const char* msg, const char* file_name, int lineno)
 #endif  //__cplusplus
 #endif  // LLVMLOG_LEVEL
 
-#ifndef LOGE
-#define LOGE(...)
+#ifndef LLVMLOGE
+#define LLVMLOGE(...)
 #endif
 
 #ifndef LOGV

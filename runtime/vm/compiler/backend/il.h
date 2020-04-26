@@ -11,6 +11,7 @@
 #include "vm/allocation.h"
 #include "vm/code_descriptors.h"
 #include "vm/compiler/backend/compile_type.h"
+#include "vm/compiler/backend/llvm/llvm_config.h"
 #include "vm/compiler/backend/locations.h"
 #include "vm/compiler/backend/slot.h"
 #include "vm/compiler/compiler_state.h"
@@ -62,6 +63,12 @@ namespace compiler {
 class BlockBuilder;
 struct TableSelector;
 }  // namespace compiler
+
+#if defined(DART_ENABLE_LLVM_COMPILER)
+namespace dart_llvm {
+class IRTranslator;
+}
+#endif
 
 class Value : public ZoneAllocated {
  public:
@@ -6659,6 +6666,9 @@ class UnboxInstr : public TemplateDefinition<1, NoThrow, Pure> {
   const SpeculativeMode speculative_mode_;
 
   DISALLOW_COPY_AND_ASSIGN(UnboxInstr);
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  friend class dart::dart_llvm::IRTranslator;
+#endif
 };
 
 class UnboxIntegerInstr : public UnboxInstr {
