@@ -22,6 +22,12 @@ struct NotMergedPhiDesc {
   LValue phi;
 };
 
+struct NotMergedArgDesc {
+  BlockEntryInstr* pred;
+  size_t index;
+  LValue phi;
+};
+
 struct GCRelocateDesc {
   int value;
   int where;
@@ -29,10 +35,6 @@ struct GCRelocateDesc {
 };
 
 using GCRelocateDescList = std::vector<GCRelocateDesc>;
-
-struct PredecessorCallInfo {
-  GCRelocateDescList gc_relocates;
-};
 
 enum class ValueType { LLVMValue, RelativeCallTarget };
 
@@ -47,13 +49,13 @@ struct ValueDesc {
 
 struct IRTranslatorBlockImpl {
   std::vector<NotMergedPhiDesc> not_merged_phis;
+  std::vector<NotMergedArgDesc> not_merged_args;
   std::unordered_map<int, ValueDesc> values_;
   // values for exception block.
   std::unordered_map<int, ValueDesc> exception_values_;
   // Call supports
   // ssa values pushed by PushArgumentInstr
-  std::vector<int> arguments_pushed_;
-  PredecessorCallInfo call_info;
+  std::vector<LValue> arguments_pushed_;
 
   LBasicBlock native_bb = nullptr;
   LBasicBlock continuation = nullptr;
@@ -137,8 +139,10 @@ class AnonImpl {
   void End();
   void EndCurrentBlock();
   void ProcessPhiWorkList();
+  void ProcessArgWorkList();
   void BuildPhiAndPushToWorkList(BlockEntryInstr* bb,
                                  BlockEntryInstr* ref_pred);
+  void BuildPushedArgumentsPhis(BlockEntryInstr* bb, BlockEntryInstr* ref_pred);
   // MaterializeDef
   void MaterializeDef(ValueDesc& desc);
   // Phis
@@ -208,6 +212,7 @@ class AnonImpl {
   std::unique_ptr<Output> output_;
   std::unordered_map<BlockEntryInstr*, IRTranslatorBlockImpl> block_map_;
   std::vector<BlockEntryInstr*> phi_rebuild_worklist_;
+  std::vector<BlockEntryInstr*> arguments_pushed_rebuild_worklist_;
   std::vector<LBasicBlock> catch_blocks_;
 
   // debug lines
@@ -313,9 +318,12 @@ void AnonImpl::MergePredecessors(BlockEntryInstr* bb) {
       auto& value = pred_block_impl->GetValue(live);
       block_impl->SetValue(live, value);
     }
+    // copy arguments_pushed_
+    block_impl->arguments_pushed_ = pred_block_impl->arguments_pushed_;
     // FIXME: need to build landing pad after invoke.
     // The following should only merge the value with phi.
     if (block_impl->exception_block) {
+#if 0
       LValue landing_pad = output().buildLandingPad();
       LValue call_value = landing_pad;
       PredecessorCallInfo& callinfo = block_impl->call_info;
@@ -330,6 +338,7 @@ void AnonImpl::MergePredecessors(BlockEntryInstr* bb) {
         found->second.llvm_value = relocated;
       }
       block_impl->landing_pad = landing_pad;
+#endif
     }
     return;
   }
@@ -337,8 +346,10 @@ void AnonImpl::MergePredecessors(BlockEntryInstr* bb) {
   if (!AllPredecessorStarted(bb, &ref_pred)) {
     EMASSERT(!!ref_pred);
     BuildPhiAndPushToWorkList(bb, ref_pred);
+    BuildPushedArgumentsPhis(bb, ref_pred);
     return;
   }
+  // FIXME: merge the following into BuildPhiAndPushToWorkList
   // Use phi.
   for (BitVector::Iterator it(liveness().GetLiveInSet(bb)); !it.Done();
        it.Advance()) {
@@ -371,6 +382,7 @@ void AnonImpl::MergePredecessors(BlockEntryInstr* bb) {
     }
     block_impl->SetLLVMValue(live, phi);
   }
+  BuildPushedArgumentsPhis(bb, ref_pred);
 }
 
 bool AnonImpl::AllPredecessorStarted(BlockEntryInstr* bb,
@@ -434,10 +446,61 @@ void AnonImpl::BuildPhiAndPushToWorkList(BlockEntryInstr* bb,
   phi_rebuild_worklist_.push_back(bb);
 }
 
+void AnonImpl::BuildPushedArgumentsPhis(BlockEntryInstr* bb,
+                                        BlockEntryInstr* ref_pred) {
+  // pushed arguments to phi
+  EMASSERT(IsBBStartedToTranslate(ref_pred));
+  IRTranslatorBlockImpl* ref_pred_impl = GetTranslatorBlockImpl(ref_pred);
+  if (ref_pred_impl->arguments_pushed_.empty())
+    return;
+
+  std::vector<LValue> work_list;
+  IRTranslatorBlockImpl* block_impl = GetTranslatorBlockImpl(bb);
+  for (auto value : ref_pred_impl->arguments_pushed_) {
+    LType type = typeOf(value);
+    LValue phi = output().buildPhi(type);
+    addIncoming(phi, &value, &ref_pred_impl->continuation, 1);
+    work_list.emplace_back(phi);
+  }
+  int predecessor_count = bb->PredecessorCount();
+  bool need_to_push = false;
+  for (intptr_t i = 0; i < predecessor_count; ++i) {
+    BlockEntryInstr* pred = bb->PredecessorAt(i);
+    // ref_pred has been handled.
+    if (pred == ref_pred) continue;
+    if (IsBBStartedToTranslate(pred)) {
+      IRTranslatorBlockImpl* pred_impl = GetTranslatorBlockImpl(pred);
+      EMASSERT(pred_impl->arguments_pushed_.size() == work_list.size());
+      for (size_t i = 0; i != pred_impl->arguments_pushed_.size(); ++i) {
+        LValue value = pred_impl->arguments_pushed_[i];
+        EMASSERT(typeOf(value) == typeOf(work_list[i]));
+        addIncoming(work_list[i], &value, &pred_impl->continuation, 1);
+      }
+    } else {
+      need_to_push = true;
+      for (size_t i = 0; i < work_list.size(); ++i) {
+        block_impl->not_merged_args.emplace_back();
+        LValue phi = work_list[i];
+        NotMergedArgDesc& not_merged_arg = block_impl->not_merged_args.back();
+        not_merged_arg.phi = phi;
+        not_merged_arg.index = i;
+        not_merged_arg.pred = pred;
+      }
+      continue;
+    }
+  }
+  if (need_to_push) arguments_pushed_rebuild_worklist_.push_back(bb);
+  // rebuild the arguments_pushed_ list for bb
+  for (LValue phi : work_list) {
+    block_impl->arguments_pushed_.emplace_back(phi);
+  }
+}
+
 void AnonImpl::End() {
   EMASSERT(!!current_bb_);
   EndCurrentBlock();
   ProcessPhiWorkList();
+  ProcessArgWorkList();
   output().positionToBBEnd(output().prologue());
   output().buildBr(GetNativeBB(flow_graph_->graph_entry()));
   output().finalize();
@@ -462,6 +525,24 @@ void AnonImpl::ProcessPhiWorkList() {
     impl->not_merged_phis.clear();
   }
   phi_rebuild_worklist_.clear();
+}
+
+void AnonImpl::ProcessArgWorkList() {
+  for (BlockEntryInstr* bb : arguments_pushed_rebuild_worklist_) {
+    auto impl = GetTranslatorBlockImpl(bb);
+    for (auto& e : impl->not_merged_args) {
+      BlockEntryInstr* pred = e.pred;
+      IRTranslatorBlockImpl* pred_block_impl = GetTranslatorBlockImpl(pred);
+      EMASSERT(IsBBStartedToTranslate(pred));
+      EMASSERT(pred_block_impl->arguments_pushed_.size() > e.index);
+      LValue value = pred_block_impl->arguments_pushed_[e.index];
+      EMASSERT(typeOf(e.phi) == typeOf(value));
+      LBasicBlock native = pred_block_impl->continuation;
+      addIncoming(e.phi, &value, &native, 1);
+    }
+    impl->not_merged_args.clear();
+  }
+  arguments_pushed_rebuild_worklist_.clear();
 }
 
 LValue AnonImpl::EnsurePhiInput(BlockEntryInstr* pred, int index, LType type) {
@@ -977,8 +1058,9 @@ void IRTranslator::VisitParallelMove(ParallelMoveInstr* instr) {
 }
 
 void IRTranslator::VisitPushArgument(PushArgumentInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  LValue value = impl().GetLLVMValue(instr->value());
+  impl().current_bb_impl().arguments_pushed_.emplace_back(value);
 }
 
 void IRTranslator::VisitReturn(ReturnInstr* instr) {
