@@ -51,8 +51,6 @@ struct IRTranslatorBlockImpl {
   // values for exception block.
   std::unordered_map<int, ValueDesc> exception_values_;
   // Call supports
-  // ssa values pushed by PushArgumentInstr
-  std::vector<int> arguments_pushed_;
   PredecessorCallInfo call_info;
 
   LBasicBlock native_bb = nullptr;
@@ -155,7 +153,7 @@ class AnonImpl {
   LValue BuildAccessPointer(LValue base, LValue offset, Representation rep);
   LValue BuildAccessPointer(LValue base, LValue offset, LType type);
   // Calls
-  void CheckPushArguments(BlockEntryInstr*);
+
   // Types
   LType GetMachineRepresentationType(Representation);
   LValue EnsureBoolean(LValue v);
@@ -217,21 +215,22 @@ class AnonImpl {
 
 class ContinuationResolver {
  protected:
-  explicit ContinuationResolver(AnonImpl& impl);
+  ContinuationResolver(AnonImpl& impl, int ssa_id);
   ~ContinuationResolver() = default;
   void CreateContination();
   inline AnonImpl& impl() { return impl_; }
   inline Output& output() { return impl().output(); }
   inline BlockEntryInstr* current_bb() { return impl().current_bb_; }
-  inline int id() { return current_bb()->block_id(); }
+  inline int ssa_id() const { return ssa_id_; }
 
  private:
   AnonImpl& impl_;
+  int ssa_id_;
 };
 
 class DiamondContinuationResolver : public ContinuationResolver {
  public:
-  explicit DiamondContinuationResolver(AnonImpl& impl, int ssa_id);
+  DiamondContinuationResolver(AnonImpl& impl, int ssa_id);
   ~DiamondContinuationResolver() = default;
   DiamondContinuationResolver& BuildCmp(std::function<LValue()>);
   DiamondContinuationResolver& BuildLeft(std::function<LValue()>);
@@ -239,12 +238,30 @@ class DiamondContinuationResolver : public ContinuationResolver {
   LValue End();
 
  private:
-  int ssa_id_;
   LBasicBlock blocks_[3];
   LValue values_[2];
 };
 
-LValue IRTranslatorBlockImpl::GetLLVMValue(int ssa_id) {
+class CallResolver : public ContinuationResolver {
+ public:
+  explicit CallResolver(AnonImpl& impl,
+                        int ssa_id,
+                        const std::vector<LValue>& parameters);
+  ~CallResolver() = default;
+
+  CallResolver& BuildCall();
+
+ private:
+  LValue GenerateStatePointFunction();
+  void EmitCall(LValue state_point_function);
+  void EmitRelocates();
+  void EmitExceptionBlockIfNeeded();
+
+  const std::vector<LValue>& parameters_;
+}
+
+LValue
+IRTranslatorBlockImpl::GetLLVMValue(int ssa_id) {
   auto found = values_.find(ssa_id);
   EMASSERT(found != values_.end());
   EMASSERT(found->second.type == ValueType::LLVMValue);
@@ -667,14 +684,6 @@ LValue AnonImpl::TstSmi(LValue v) {
                             output().constIntPtr(kSmiTagMask));
 }
 
-void AnonImpl::CheckPushArguments(BlockEntryInstr* block) {
-  // Must dominate
-  if (!current_bb_impl().arguments_pushed_.empty()) {
-    EMASSERT(current_bb_->Dominates(block));
-    EMASSERT(current_bb_->postorder_number() > block->postorder_number());
-  }
-}
-
 LValue AnonImpl::GetLLVMValue(int ssa_id) {
   return current_bb_impl().GetLLVMValue(ssa_id);
 }
@@ -755,11 +764,12 @@ LBasicBlock AnonImpl::NewBasicBlock(const char* fmt, ...) {
   return bb;
 }
 
-ContinuationResolver::ContinuationResolver(AnonImpl& impl) : impl_(impl) {}
+ContinuationResolver::ContinuationResolver(AnonImpl& impl, int ssa_id)
+    : impl_(impl), ssa_id_(ssa_id) {}
 
 DiamondContinuationResolver::DiamondContinuationResolver(AnonImpl& _impl,
                                                          int ssa_id)
-    : ContinuationResolver(_impl), ssa_id_(ssa_id) {
+    : ContinuationResolver(_impl, ssa_id) {
   blocks_[0] = impl().NewBasicBlock("left_for_%d", ssa_id);
   blocks_[1] = impl().NewBasicBlock("right_for_%d", ssa_id);
   blocks_[2] = impl().NewBasicBlock("continuation_for_%d", ssa_id);
@@ -977,8 +987,7 @@ void IRTranslator::VisitParallelMove(ParallelMoveInstr* instr) {
 }
 
 void IRTranslator::VisitPushArgument(PushArgumentInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  // don't need to handle.
 }
 
 void IRTranslator::VisitReturn(ReturnInstr* instr) {
@@ -1010,7 +1019,6 @@ void IRTranslator::VisitStop(StopInstr* instr) {
 void IRTranslator::VisitGoto(GotoInstr* instr) {
   impl().SetDebugLine(instr);
   JoinEntryInstr* successor = instr->successor();
-  impl().CheckPushArguments(successor);
   LBasicBlock bb = impl().EnsureNativeBB(successor);
   output().buildBr(bb);
   impl().EndCurrentBlock();
@@ -1025,8 +1033,6 @@ void IRTranslator::VisitBranch(BranchInstr* instr) {
   impl().SetDebugLine(instr);
   TargetEntryInstr* true_successor = instr->true_successor();
   TargetEntryInstr* false_successor = instr->false_successor();
-  impl().CheckPushArguments(true_successor);
-  impl().CheckPushArguments(false_successor);
   impl().EnsureNativeBB(true_successor);
   impl().EnsureNativeBB(false_successor);
   LValue cmp_val = impl().GetLLVMValue(instr->comparison());

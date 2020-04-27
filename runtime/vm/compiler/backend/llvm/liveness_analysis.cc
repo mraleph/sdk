@@ -24,44 +24,55 @@ void LivenessAnalysis::Analyze() {
 #endif
 }
 
+template <typename Functor>
+BitVector* LivenessAnalysis::CalculateBlock(BlockEntryInstr* block,
+                                            Functor& f) {
+  BitVector* live = new (zone())
+      BitVector(zone(), flow_graph_->max_virtual_register_number());
+  live->AddAll(liveness_.GetLiveOutSet(block));
+  for (BackwardInstructionIterator it(block); !it.Done(); it.Advance()) {
+    Instruction* current = it.Current();
+    // Handle define.
+    Definition* current_def = current->AsDefinition();
+    if ((current_def != nullptr) && current_def->HasSSATemp()) {
+      live->Remove(current_def->ssa_temp_index());
+      if (current_def->HasPairRepresentation())
+        live->Remove(current_def->ssa_temp_index() + 1);
+    }
+    if (f(current, live)) return live;
+    // Initialize location summary for instruction.
+    current->InitializeLocationSummary(zone(), true);  // opt
+
+    LocationSummary* locs = current->locs();
+    // Handle uses.
+    for (intptr_t j = 0; j < current->InputCount(); j++) {
+      Value* input = current->InputAt(j);
+
+      ASSERT(!locs->in(j).IsConstant() || input->BindsToConstant());
+      if (locs->in(j).IsConstant()) continue;
+
+      live->Add(input->definition()->ssa_temp_index());
+      if (input->definition()->HasPairRepresentation()) {
+        live->Add(input->definition()->ssa_temp_index() + 1);
+      }
+    }
+  }
+  return live;
+}
+
 void LivenessAnalysis::AnalyzeCallOut() {
   auto& postorder = flow_graph_->postorder();
   for (int i = 0; i < postorder.length(); ++i) {
     BlockEntryInstr* block = postorder[i];
-    BitVector* live = new (zone())
-        BitVector(zone(), flow_graph_->max_virtual_register_number());
-    live->AddAll(liveness_.GetLiveOutSet(block));
-    for (BackwardInstructionIterator it(block); !it.Done(); it.Advance()) {
-      Instruction* current = it.Current();
-      // Handle define.
-      Definition* current_def = current->AsDefinition();
-      if ((current_def != nullptr) && current_def->HasSSATemp()) {
-        live->Remove(current_def->ssa_temp_index());
-        if (current_def->HasPairRepresentation())
-          live->Remove(current_def->ssa_temp_index() + 1);
-      }
-      // Recognize call site.
+    // Recognize call site.
+    auto f = [&](Instruction* current, BitVector* live) {
       if (current->IsInstanceCall() || current->IsStaticCall() ||
           current->IsClosureCall()) {
         SubmitCallsite(current, live);
       }
-      // Initialize location summary for instruction.
-      current->InitializeLocationSummary(zone(), true);  // opt
-
-      LocationSummary* locs = current->locs();
-      // Handle uses.
-      for (intptr_t j = 0; j < current->InputCount(); j++) {
-        Value* input = current->InputAt(j);
-
-        ASSERT(!locs->in(j).IsConstant() || input->BindsToConstant());
-        if (locs->in(j).IsConstant()) continue;
-
-        live->Add(input->definition()->ssa_temp_index());
-        if (input->definition()->HasPairRepresentation()) {
-          live->Add(input->definition()->ssa_temp_index() + 1);
-        }
-      }
-    }
+      return false;
+    };
+    CalculateBlock(block, f);
   }
 }
 
@@ -96,14 +107,26 @@ Zone* LivenessAnalysis::zone() {
   return flow_graph_->zone();
 }
 
-BitVector* LivenessAnalysis::GetCallOutAt(Instruction* at) {
+BitVector* LivenessAnalysis::GetCallOutAt(Instruction* at) const {
   auto found = call_out_map_.find(at);
-  EMASSERT(found != call_out_map_.end());
+  // other il instruction may also need the liveness info.
+  if (found != call_out_map_.end()) {
+    return CalculateLiveness(at);
+  }
   return found->second;
 }
 
 BitVector* LivenessAnalysis::GetLiveInSet(BlockEntryInstr* block) const {
   return liveness_.GetLiveInSet(block);
+}
+
+BitVector* LivenessAnalysis::CalculateLiveness(Instruction* at) {
+  BlockEntryInstr* block = at->GetBlock();
+  auto f = [&](Instruction* current, BitVector* live) {
+    if (current == at) return true;
+    return false;
+  };
+  return CalculateBlock(block, f);
 }
 }  // namespace dart_llvm
 }  // namespace dart

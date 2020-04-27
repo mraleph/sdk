@@ -26,11 +26,14 @@ class LivenessAnalysis final {
   void Analyze();
 
   BitVector* GetLiveInSet(BlockEntryInstr*) const;
-  BitVector* GetCallOutAt(Instruction* at);
+  BitVector* GetCallOutAt(Instruction* at) const;
 
  private:
   void AnalyzeCallOut();
+  BitVector* CalculateLiveness(Instruction* at);
   void SubmitCallsite(Instruction*, BitVector*);
+  template <typename Functor>
+  void CalculateBlock(BlockEntryInstr* block, Functor& f);
   void Dump();
   Zone* zone();
 
