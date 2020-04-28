@@ -5,11 +5,13 @@
 
 namespace dart {
 namespace dart_llvm {
-StackMapInfo::StackMapInfo(StackMapInfoType type) : type_(type) {}
+StackMapInfo::StackMapInfo(StackMapInfoType type) : type_(type), patchid_(0) {}
 StackMapInfo::~StackMapInfo() {}
 
-CallInfo::CallInfo(LocationVector&& locations)
-    : StackMapInfo(StackMapInfoType::kCallInfo), is_tailcall_(false) {}
+CallInfo::CallInfo(const CallInfo::CallTarget& target)
+    : StackMapInfo(StackMapInfoType::kCallInfo),
+      target_(target),
+      is_tailcall_(false) {}
 
 }  // namespace dart_llvm
 }  // namespace dart

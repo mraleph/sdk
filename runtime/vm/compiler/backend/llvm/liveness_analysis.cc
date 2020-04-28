@@ -26,7 +26,7 @@ void LivenessAnalysis::Analyze() {
 
 template <typename Functor>
 BitVector* LivenessAnalysis::CalculateBlock(BlockEntryInstr* block,
-                                            Functor& f) {
+                                            Functor& f) const {
   BitVector* live = new (zone())
       BitVector(zone(), flow_graph_->max_virtual_register_number());
   live->AddAll(liveness_.GetLiveOutSet(block));
@@ -103,7 +103,7 @@ void LivenessAnalysis::Dump() {
   }
 }
 
-Zone* LivenessAnalysis::zone() {
+Zone* LivenessAnalysis::zone() const {
   return flow_graph_->zone();
 }
 
@@ -120,7 +120,7 @@ BitVector* LivenessAnalysis::GetLiveInSet(BlockEntryInstr* block) const {
   return liveness_.GetLiveInSet(block);
 }
 
-BitVector* LivenessAnalysis::CalculateLiveness(Instruction* at) {
+BitVector* LivenessAnalysis::CalculateLiveness(Instruction* at) const {
   BlockEntryInstr* block = at->GetBlock();
   auto f = [&](Instruction* current, BitVector* live) {
     if (current == at) return true;

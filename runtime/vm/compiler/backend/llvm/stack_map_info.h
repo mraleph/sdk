@@ -10,6 +10,7 @@
 
 #include "vm/compiler/backend/llvm/llvm_config.h"
 #if defined(DART_ENABLE_LLVM_COMPILER)
+#include "vm/object.h"
 
 namespace dart {
 namespace dart_llvm {
@@ -24,20 +25,36 @@ class StackMapInfo {
   virtual ~StackMapInfo();
 
   StackMapInfoType GetType() const { return type_; }
+  int patchid() const { return patchid_; }
+  void set_patchid(int _patchid) { patchid_ = _patchid; }
 
  private:
   const StackMapInfoType type_;
+  int patchid_;
 };
 
 class CallInfo final : public StackMapInfo {
  public:
-  typedef std::vector<int> LocationVector;
-  CallInfo(LocationVector&& locations);
+  enum class CallTargetType {
+    kReg,
+    kCodeRelative,
+    kCodeObject,
+  };
+  struct CallTarget {
+    CallTargetType type;
+    union {
+      RawCode* code;
+      int reg;
+    };
+  };
+  explicit CallInfo(const CallTarget&);
   ~CallInfo() override = default;
   bool is_tailcall() const { return is_tailcall_; }
   void set_is_tailcall(bool _tailcall) { is_tailcall_ = _tailcall; }
+  const CallTarget& target() const { return target_; }
 
  private:
+  CallTarget target_;
   bool is_tailcall_;
 };
 

@@ -29,6 +29,7 @@
     macro(stackmap, "llvm.experimental.stackmap", functionType(void_type, int64, int32, Variadic)) \
     macro(gcRelocate, "llvm.experimental.gc.relocate.p1s_TaggedStructs", functionType(tagged_type, tokenType, int32, int32)) \
     macro(gcException, "llvm.experimental.gc.exception.p1s_TaggedStructs", functionType(tagged_type, tokenType)) \
+    macro(gcExceptionData, "llvm.experimental.gc.exceptiondata.p1s_TaggedStructs", functionType(tagged_type, tokenType)) \
     macro(subWithOverflow32, "llvm.ssub.with.overflow.i32", functionType(structType(context_, int32, boolean), int32, int32)) \
     macro(subWithOverflow64, "llvm.ssub.with.overflow.i64", functionType(structType(context_, int64, boolean), int64, int64)) \
     macro(stackSave, "llvm.stacksave", functionType(ref8)) \

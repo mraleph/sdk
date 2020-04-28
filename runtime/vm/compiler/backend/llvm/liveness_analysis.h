@@ -30,12 +30,12 @@ class LivenessAnalysis final {
 
  private:
   void AnalyzeCallOut();
-  BitVector* CalculateLiveness(Instruction* at);
+  BitVector* CalculateLiveness(Instruction* at) const;
   void SubmitCallsite(Instruction*, BitVector*);
   template <typename Functor>
-  void CalculateBlock(BlockEntryInstr* block, Functor& f);
+  BitVector* CalculateBlock(BlockEntryInstr* block, Functor& f) const;
   void Dump();
-  Zone* zone();
+  Zone* zone() const;
 
  private:
   FlowGraph* flow_graph_;

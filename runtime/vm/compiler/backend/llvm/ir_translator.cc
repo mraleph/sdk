@@ -9,6 +9,7 @@
 #include "vm/compiler/backend/llvm/initialize_llvm.h"
 #include "vm/compiler/backend/llvm/liveness_analysis.h"
 #include "vm/compiler/backend/llvm/output.h"
+#include "vm/compiler/backend/llvm/stack_map_info.h"
 #include "vm/compiler/backend/llvm/target_specific.h"
 #include "vm/compiler/runtime_api.h"
 
@@ -23,18 +24,14 @@ struct NotMergedPhiDesc {
 };
 
 struct GCRelocateDesc {
-  int value;
+  int ssa_index;
   int where;
-  GCRelocateDesc(int v, int w) : value(v), where(w) {}
+  GCRelocateDesc(int _ssa_index, int w) : ssa_index(_ssa_index), where(w) {}
 };
 
 using GCRelocateDescList = std::vector<GCRelocateDesc>;
 
-struct PredecessorCallInfo {
-  GCRelocateDescList gc_relocates;
-};
-
-enum class ValueType { LLVMValue, RelativeCallTarget };
+enum class ValueType { LLVMValue };
 
 struct ValueDesc {
   ValueType type;
@@ -45,20 +42,28 @@ struct ValueDesc {
   };
 };
 
+using ExceptionBlockLiveInValueMap = std::unordered_map<int, ValueDesc>;
+
+struct ExceptionBlockLiveInEntry {
+  ExceptionBlockLiveInEntry(ExceptionBlockLiveInValueMap&& _live_in_value_map,
+                            LBasicBlock _from_block);
+  ExceptionBlockLiveInValueMap live_in_value_map;
+  LBasicBlock from_block;
+};
+
 struct IRTranslatorBlockImpl {
   std::vector<NotMergedPhiDesc> not_merged_phis;
   std::unordered_map<int, ValueDesc> values_;
   // values for exception block.
   std::unordered_map<int, ValueDesc> exception_values_;
-  // Call supports
-  PredecessorCallInfo call_info;
 
   LBasicBlock native_bb = nullptr;
   LBasicBlock continuation = nullptr;
   // exception vals
-  LValue landing_pad = nullptr;
   LValue exception_val = nullptr;
   LValue stacktrace_val = nullptr;
+  std::vector<ExceptionBlockLiveInEntry> exception_live_in_entries;
+
   AnonImpl* anon_impl;
   int try_index = kInvalidTryIndex;
 
@@ -131,6 +136,11 @@ class AnonImpl {
   bool IsBBEndedToTranslate(BlockEntryInstr* bb);
   void StartTranslate(BlockEntryInstr* bb);
   void MergePredecessors(BlockEntryInstr* bb);
+  void MergeExceptionVirtualPredecessors(BlockEntryInstr* bb);
+  // When called, the current builder position must point to the end of catch block's native bb.
+  void MergeExceptionLiveInEntries(const ExceptionBlockLiveInEntry& e,
+                                   BlockEntryInstr* catch_block,
+                                   IRTranslatorBlockImpl* catch_block_impl);
   bool AllPredecessorStarted(BlockEntryInstr* bb, BlockEntryInstr** ref_pred);
   void End();
   void EndCurrentBlock();
@@ -146,14 +156,16 @@ class AnonImpl {
                                    LType type);
   // Exception handling
   LBasicBlock EnsureNativeCatchBlock(int try_index);
-  void InitCatchBlock(CatchBlockEntryInstr* instr);
+  IRTranslatorBlockImpl* GetCatchBlockImplInitIfNeeded(
+      CatchBlockEntryInstr* instr);
   // Debug & line info.
   void SetDebugLine(Instruction*);
   // Access to memory.
   LValue BuildAccessPointer(LValue base, LValue offset, Representation rep);
   LValue BuildAccessPointer(LValue base, LValue offset, LType type);
   // Calls
-
+  int NextPatchPoint();
+  void SubmitStackMap(std::unique_ptr<StackMapInfo> info);
   // Types
   LType GetMachineRepresentationType(Representation);
   LValue EnsureBoolean(LValue v);
@@ -190,12 +202,14 @@ class AnonImpl {
 
   // Basic blocks continuation
   LBasicBlock NewBasicBlock(const char* fmt, ...);
+  void SetCurrentBlockContinuation(LBasicBlock continuation);
 
   inline CompilerState& compiler_state() { return *compiler_state_; }
   inline LivenessAnalysis& liveness() { return *liveness_analysis_; }
   inline Output& output() { return *output_; }
-  inline IRTranslatorBlockImpl& current_bb_impl() { return *current_bb_impl_; }
+  inline IRTranslatorBlockImpl* current_bb_impl() { return current_bb_impl_; }
   inline BlockEntryInstr* current_bb() { return current_bb_; }
+  inline FlowGraph* flow_graph() { return flow_graph_; }
 
   BlockEntryInstr* current_bb_;
   IRTranslatorBlockImpl* current_bb_impl_;
@@ -205,22 +219,23 @@ class AnonImpl {
   std::unique_ptr<LivenessAnalysis> liveness_analysis_;
   std::unique_ptr<Output> output_;
   std::unordered_map<BlockEntryInstr*, IRTranslatorBlockImpl> block_map_;
+  StackMapInfoMap stack_map_info_map;
   std::vector<BlockEntryInstr*> phi_rebuild_worklist_;
   std::vector<LBasicBlock> catch_blocks_;
 
   // debug lines
   std::vector<Instruction*> debug_instrs_;
   // Calls
+  int patch_point_id_ = 0;
 };
 
 class ContinuationResolver {
  protected:
   ContinuationResolver(AnonImpl& impl, int ssa_id);
   ~ContinuationResolver() = default;
-  void CreateContination();
   inline AnonImpl& impl() { return impl_; }
   inline Output& output() { return impl().output(); }
-  inline BlockEntryInstr* current_bb() { return impl().current_bb_; }
+  inline BlockEntryInstr* current_bb() { return impl().current_bb(); }
   inline int ssa_id() const { return ssa_id_; }
 
  private:
@@ -244,24 +259,52 @@ class DiamondContinuationResolver : public ContinuationResolver {
 
 class CallResolver : public ContinuationResolver {
  public:
+  struct CallResolverParameter {
+    Instruction* call_instruction;
+    size_t instruction_size;
+    std::vector<LValue> parameters;
+    CallInfo::CallTarget target;
+  };
   explicit CallResolver(AnonImpl& impl,
                         int ssa_id,
-                        const std::vector<LValue>& parameters);
+                        const CallResolverParameter& call_resolver_parameter);
   ~CallResolver() = default;
 
   CallResolver& BuildCall();
 
  private:
-  LValue GenerateStatePointFunction();
-  void EmitCall(LValue state_point_function);
-  void EmitRelocates();
+  void GenerateStatePointFunction();
+  void ExtractCallInfo();
+  void EmitCall();
+  void EmitRelocatesIfNeeded();
   void EmitExceptionBlockIfNeeded();
+  void EmitPatchPoint();
+  bool need_invoke() { return tail_call_ == false && catch_block_ != nullptr; }
 
-  const std::vector<LValue>& parameters_;
-}
+  const CallResolverParameter& call_resolver_parameter_;
 
-LValue
-IRTranslatorBlockImpl::GetLLVMValue(int ssa_id) {
+  // state in the middle.
+  LValue statepoint_function_ = nullptr;
+  LType callee_type_ = nullptr;
+  LValue call_value_ = nullptr;
+  // exception blocks
+  IRTranslatorBlockImpl* catch_block_impl_ = nullptr;
+  LBasicBlock continuation_block_ = nullptr;
+  CatchBlockEntryInstr* catch_block_ = nullptr;
+  BitVector* call_live_out_ = nullptr;
+  GCRelocateDescList gc_desc_list_;
+  ExceptionBlockLiveInValueMap exception_block_live_in_value_map_;
+  int patchid_ = 0;
+  bool tail_call_ = false;
+};
+
+ExceptionBlockLiveInEntry::ExceptionBlockLiveInEntry(
+    ExceptionBlockLiveInValueMap&& _live_in_value_map,
+    LBasicBlock _from_block)
+    : live_in_value_map(std::move(_live_in_value_map)),
+      from_block(_from_block) {}
+
+LValue IRTranslatorBlockImpl::GetLLVMValue(int ssa_id) {
   auto found = values_.find(ssa_id);
   EMASSERT(found != values_.end());
   EMASSERT(found->second.type == ValueType::LLVMValue);
@@ -310,7 +353,7 @@ bool AnonImpl::IsBBEndedToTranslate(BlockEntryInstr* bb) {
 void AnonImpl::StartTranslate(BlockEntryInstr* bb) {
   current_bb_ = bb;
   current_bb_impl_ = GetTranslatorBlockImpl(bb);
-  current_bb_impl().StartTranslate();
+  current_bb_impl()->StartTranslate();
   EnsureNativeBB(bb);
   output_->positionToBBEnd(GetNativeBB(bb));
 }
@@ -319,6 +362,7 @@ void AnonImpl::MergePredecessors(BlockEntryInstr* bb) {
   intptr_t predecessor_count = bb->PredecessorCount();
   if (predecessor_count == 0) return;
   IRTranslatorBlockImpl* block_impl = GetTranslatorBlockImpl(bb);
+  EMASSERT(!block_impl->exception_block);
   if (predecessor_count == 1) {
     // Don't use phi if only one predecessor.
     BlockEntryInstr* pred = bb->PredecessorAt(0);
@@ -329,24 +373,6 @@ void AnonImpl::MergePredecessors(BlockEntryInstr* bb) {
       int live = it.Current();
       auto& value = pred_block_impl->GetValue(live);
       block_impl->SetValue(live, value);
-    }
-    // FIXME: need to build landing pad after invoke.
-    // The following should only merge the value with phi.
-    if (block_impl->exception_block) {
-      LValue landing_pad = output().buildLandingPad();
-      LValue call_value = landing_pad;
-      PredecessorCallInfo& callinfo = block_impl->call_info;
-      auto& values = block_impl->values();
-      for (auto& gc_relocate : callinfo.gc_relocates) {
-        auto found = values.find(gc_relocate.value);
-        EMASSERT(found->second.type == ValueType::LLVMValue);
-        LValue relocated = output().buildCall(
-            output().repo().gcRelocateIntrinsic(), call_value,
-            output().constInt32(gc_relocate.where),
-            output().constInt32(gc_relocate.where));
-        found->second.llvm_value = relocated;
-      }
-      block_impl->landing_pad = landing_pad;
     }
     return;
   }
@@ -387,6 +413,62 @@ void AnonImpl::MergePredecessors(BlockEntryInstr* bb) {
       addIncoming(phi, &value, &native, 1);
     }
     block_impl->SetLLVMValue(live, phi);
+  }
+}
+
+void AnonImpl::MergeExceptionVirtualPredecessors(BlockEntryInstr* bb) {
+  IRTranslatorBlockImpl* block_impl = current_bb_impl();
+  LValue landing_pad = output().buildLandingPad();
+  for (auto& e : block_impl->exception_live_in_entries) {
+    MergeExceptionLiveInEntries(e, current_bb(), block_impl);
+  }
+  block_impl->exception_live_in_entries.clear();
+  block_impl->exception_val =
+      output().buildCall(output().repo().gcExceptionIntrinsic(), landing_pad);
+  block_impl->stacktrace_val = output().buildCall(
+      output().repo().gcExceptionDataIntrinsic(), landing_pad);
+}
+
+void AnonImpl::MergeExceptionLiveInEntries(
+    const ExceptionBlockLiveInEntry& e,
+    BlockEntryInstr* catch_block,
+    IRTranslatorBlockImpl* catch_block_impl) {
+  auto& values = catch_block_impl->values();
+  auto MergeNotExist = [&](int ssa_id, const ValueDesc& value_desc_incoming) {
+    if (value_desc_incoming.type != ValueType::LLVMValue ||
+        value_desc_incoming.def) {
+      values.emplace(ssa_id, value_desc_incoming);
+    } else {
+      LValue phi = output().buildPhi(typeOf(value_desc_incoming.llvm_value));
+      addIncoming(phi, &value_desc_incoming.llvm_value, &e.from_block, 1);
+      ValueDesc value_desc{ValueType::LLVMValue, nullptr, {phi}};
+      values.emplace(ssa_id, value_desc);
+    }
+  };
+  auto MergeExist = [&](int ssa_id, ValueDesc& value_desc,
+                        const ValueDesc& value_desc_incoming) {
+    if (value_desc_incoming.type != ValueType::LLVMValue ||
+        value_desc_incoming.def) {
+      EMASSERT(value_desc_incoming.def == value_desc.def);
+      EMASSERT(value_desc_incoming.type == value_desc.type);
+    } else {
+      LValue phi = value_desc.llvm_value;
+      EMASSERT(typeOf(phi) == typeOf(value_desc_incoming.llvm_value));
+      addIncoming(phi, &value_desc_incoming.llvm_value, &e.from_block, 1);
+    }
+  };
+  for (BitVector::Iterator it(liveness().GetLiveInSet(catch_block)); !it.Done();
+       it.Advance()) {
+    int live_ssa_index = it.Current();
+    auto found_incoming = e.live_in_value_map.find(live_ssa_index);
+    EMASSERT(found_incoming != e.live_in_value_map.end());
+    auto& value_desc_incoming = found_incoming->second;
+    auto found = values.find(live_ssa_index);
+    if (found == values.end()) {
+      MergeNotExist(live_ssa_index, value_desc_incoming);
+    } else {
+      MergeExist(live_ssa_index, found->second, value_desc_incoming);
+    }
   }
 }
 
@@ -570,12 +652,14 @@ LBasicBlock AnonImpl::EnsureNativeCatchBlock(int try_index) {
   return native_bb;
 }
 
-void AnonImpl::InitCatchBlock(CatchBlockEntryInstr* instr) {
-  LBasicBlock native_bb = EnsureNativeCatchBlock(instr->catch_try_index());
+IRTranslatorBlockImpl* AnonImpl::GetCatchBlockImplInitIfNeeded(
+    CatchBlockEntryInstr* instr) {
   IRTranslatorBlockImpl* block_impl = GetTranslatorBlockImpl(instr);
+  if (block_impl->native_bb) return block_impl;
+  LBasicBlock native_bb = EnsureNativeCatchBlock(instr->catch_try_index());
   block_impl->native_bb = native_bb;
   block_impl->exception_block = true;
-  output_->positionToBBEnd(native_bb);
+  return block_impl;
 }
 
 void AnonImpl::SetDebugLine(Instruction* instr) {
@@ -602,6 +686,16 @@ LValue AnonImpl::BuildAccessPointer(LValue base, LValue offset, LType type) {
   }
   LValue pointer = output().buildGEPWithByteOffset(base, offset, type);
   return pointer;
+}
+
+int AnonImpl::NextPatchPoint() {
+  return patch_point_id_++;
+}
+
+void AnonImpl::SubmitStackMap(std::unique_ptr<StackMapInfo> info) {
+  int patchid = info->patchid();
+  auto where = stack_map_info_map.emplace(patchid, std::move(info));
+  EMASSERT(where.second && "Submit overlapped patch id");
 }
 
 LType AnonImpl::GetMachineRepresentationType(Representation rep) {
@@ -685,20 +779,20 @@ LValue AnonImpl::TstSmi(LValue v) {
 }
 
 LValue AnonImpl::GetLLVMValue(int ssa_id) {
-  return current_bb_impl().GetLLVMValue(ssa_id);
+  return current_bb_impl()->GetLLVMValue(ssa_id);
 }
 
 void AnonImpl::SetLLVMValue(int ssa_id, LValue val) {
-  current_bb_impl().SetLLVMValue(ssa_id, val);
+  current_bb_impl()->SetLLVMValue(ssa_id, val);
 }
 
 void AnonImpl::SetLLVMValue(Definition* d, LValue val) {
-  current_bb_impl().SetLLVMValue(d, val);
+  current_bb_impl()->SetLLVMValue(d, val);
 }
 
 void AnonImpl::SetLazyValue(Definition* d) {
   ValueDesc desc = {ValueType::LLVMValue, d, {nullptr}};
-  current_bb_impl().SetValue(d->ssa_temp_index(), desc);
+  current_bb_impl()->SetValue(d->ssa_temp_index(), desc);
 }
 
 LValue AnonImpl::LoadFieldFromOffset(LValue base, int offset, LType type) {
@@ -764,6 +858,10 @@ LBasicBlock AnonImpl::NewBasicBlock(const char* fmt, ...) {
   return bb;
 }
 
+void AnonImpl::SetCurrentBlockContinuation(LBasicBlock continuation) {
+  current_bb_impl()->continuation = continuation;
+}
+
 ContinuationResolver::ContinuationResolver(AnonImpl& impl, int ssa_id)
     : impl_(impl), ssa_id_(ssa_id) {}
 
@@ -802,8 +900,157 @@ LValue DiamondContinuationResolver::End() {
   output().positionToBBEnd(blocks_[2]);
   LValue phi = output().buildPhi(typeOf(values_[0]));
   addIncoming(phi, values_, blocks_, 2);
-  impl().current_bb_impl().continuation = blocks_[2];
+  impl().SetCurrentBlockContinuation(blocks_[2]);
   return phi;
+}
+
+CallResolver::CallResolver(
+    AnonImpl& impl,
+    int ssa_id,
+    const CallResolver::CallResolverParameter& call_resolver_parameter)
+    : ContinuationResolver(impl, ssa_id),
+      call_resolver_parameter_(call_resolver_parameter) {
+  EMASSERT(call_resolver_parameter_.parameters.size() >=
+           kV8CCRegisterParameterCount);
+}
+
+CallResolver& CallResolver::BuildCall() {
+  ExtractCallInfo();
+  GenerateStatePointFunction();
+  EmitCall();
+  EmitExceptionBlockIfNeeded();
+
+  // reset to continuation.
+  if (need_invoke()) {
+    output().positionToBBEnd(continuation_block_);
+    impl().SetCurrentBlockContinuation(continuation_block_);
+  }
+  EmitRelocatesIfNeeded();
+  EmitPatchPoint();
+  return *this;
+}
+
+void CallResolver::ExtractCallInfo() {
+  call_live_out_ =
+      impl().liveness().GetCallOutAt(call_resolver_parameter_.call_instruction);
+  if (impl().current_bb()->try_index() != kInvalidTryIndex) {
+    catch_block_ = impl().flow_graph()->graph_entry()->GetCatchEntry(
+        impl().current_bb()->try_index());
+  }
+  if (call_resolver_parameter_.call_instruction->IsTailCall()) {
+    tail_call_ = true;
+  }
+}
+
+void CallResolver::GenerateStatePointFunction() {
+  LType return_type = output().tagged_type();
+  std::vector<LType> operand_value_types(
+      call_resolver_parameter_.parameters.size(), output().tagged_type());
+  LType callee_function_type =
+      functionType(return_type, operand_value_types.data(),
+                   operand_value_types.size(), NotVariadic);
+  callee_type_ = pointerType(callee_function_type);
+
+  statepoint_function_ = output().getStatePointFunction(callee_type_);
+}
+
+void CallResolver::EmitCall() {
+  std::vector<LValue> statepoint_operands;
+  patchid_ = impl().NextPatchPoint();
+  statepoint_operands.push_back(output().constInt64(patchid_));
+  statepoint_operands.push_back(
+      output().constInt32(call_resolver_parameter_.instruction_size));
+  statepoint_operands.push_back(constNull(callee_type_));
+  statepoint_operands.push_back(output().constInt32(
+      call_resolver_parameter_.parameters.size()));       // # call params
+  statepoint_operands.push_back(output().constInt32(0));  // flags
+  for (LValue parameter : call_resolver_parameter_.parameters)
+    statepoint_operands.push_back(parameter);
+  statepoint_operands.push_back(output().constInt32(0));  // # transition args
+  statepoint_operands.push_back(output().constInt32(0));  // # deopt arguments
+  // normal block
+  if (!tail_call_) {
+    for (BitVector::Iterator it(call_live_out_); !it.Done(); it.Advance()) {
+      int live_ssa_index = it.Current();
+      ValueDesc desc = impl().current_bb_impl()->GetValue(live_ssa_index);
+      if (desc.type != ValueType::LLVMValue) continue;
+      if (desc.def != nullptr) {
+        // constant values need to rematerialize after call.
+        desc.llvm_value = nullptr;
+        impl().current_bb_impl()->SetValue(live_ssa_index, desc);
+        continue;
+      }
+      gc_desc_list_.emplace_back(live_ssa_index, statepoint_operands.size());
+      statepoint_operands.emplace_back(desc.llvm_value);
+    }
+  }
+
+  if (need_invoke()) {
+    for (BitVector::Iterator it(impl().liveness().GetLiveInSet(catch_block_));
+         !it.Done(); it.Advance()) {
+      int live_ssa_index = it.Current();
+      ValueDesc desc = impl().current_bb_impl()->GetValue(live_ssa_index);
+      if (desc.def != nullptr) {
+        // constant value save directly, and need to rematerialize.
+        desc.llvm_value = nullptr;
+      }
+      exception_block_live_in_value_map_.emplace(live_ssa_index, desc);
+    }
+  }
+
+  if (!need_invoke()) {
+    call_value_ =
+        output().buildCall(statepoint_function_, statepoint_operands.data(),
+                           statepoint_operands.size());
+    if (tail_call_) output().buildReturnForTailCall();
+  } else {
+    catch_block_impl_ = impl().GetCatchBlockImplInitIfNeeded(catch_block_);
+    continuation_block_ =
+        impl().NewBasicBlock("continuation_block_for_%d", ssa_id());
+    call_value_ =
+        output().buildInvoke(statepoint_function_, statepoint_operands.data(),
+                             statepoint_operands.size(), continuation_block_,
+                             catch_block_impl_->native_bb);
+  }
+}
+
+void CallResolver::EmitRelocatesIfNeeded() {
+  if (tail_call_) return;
+  for (auto& gc_relocate : gc_desc_list_) {
+    LValue relocated =
+        output().buildCall(output().repo().gcRelocateIntrinsic(), call_value_,
+                           output().constInt32(gc_relocate.where),
+                           output().constInt32(gc_relocate.where));
+    impl().current_bb_impl()->SetLLVMValue(gc_relocate.ssa_index, relocated);
+  }
+
+  LType return_type = output().tagged_type();
+  LValue intrinsic = output().getGCResultFunction(return_type);
+  LValue ret = output().buildCall(intrinsic, call_value_);
+  impl().current_bb_impl()->SetLLVMValue(ssa_id(), ret);
+}
+
+void CallResolver::EmitPatchPoint() {
+  std::unique_ptr<CallInfo> callinfo(
+      new CallInfo(call_resolver_parameter_.target));
+  callinfo->set_patchid(patchid_);
+  callinfo->set_is_tailcall(tail_call_);
+  impl().SubmitStackMap(std::move(callinfo));
+}
+
+void CallResolver::EmitExceptionBlockIfNeeded() {
+  if (!need_invoke()) return;
+  if (!impl().IsBBStartedToTranslate(catch_block_)) {
+    catch_block_impl_->exception_live_in_entries.emplace_back(
+        std::move(exception_block_live_in_value_map_),
+        impl().current_bb_impl()->continuation);
+  } else {
+    ExceptionBlockLiveInEntry e = {
+        std::move(exception_block_live_in_value_map_),
+        impl().current_bb_impl()->continuation};
+    output().positionToBBEnd(catch_block_impl_->native_bb);
+    impl().MergeExceptionLiveInEntries(e, catch_block_, catch_block_impl_);
+  }
 }
 }  // namespace
 
@@ -849,9 +1096,12 @@ Output& IRTranslator::output() {
 void IRTranslator::VisitBlockEntry(BlockEntryInstr* block) {
   impl().SetDebugLine(block);
   impl().StartTranslate(block);
-  IRTranslatorBlockImpl* block_impl = impl().GetTranslatorBlockImpl(block);
+  IRTranslatorBlockImpl* block_impl = impl().current_bb_impl();
   block_impl->try_index = block->try_index();
-  impl().MergePredecessors(block);
+  if (!block_impl->exception_block)
+    impl().MergePredecessors(block);
+  else
+    impl().MergeExceptionVirtualPredecessors(block);
 }
 
 void IRTranslator::VisitBlockEntryWithInitialDefs(
@@ -897,7 +1147,9 @@ void IRTranslator::VisitIndirectEntry(IndirectEntryInstr* instr) {
 }
 
 void IRTranslator::VisitCatchBlockEntry(CatchBlockEntryInstr* instr) {
-  impl().InitCatchBlock(instr);
+  IRTranslatorBlockImpl* block_impl =
+      impl().GetCatchBlockImplInitIfNeeded(instr);
+  output().positionToBBEnd(block_impl->native_bb);
   VisitBlockEntryWithInitialDefs(instr);
 }
 
@@ -908,7 +1160,7 @@ void IRTranslator::VisitPhi(PhiInstr* instr) {
   LValue phi = output().buildPhi(phi_type);
   bool should_add_to_tf_phi_worklist = false;
   intptr_t predecessor_count = impl().current_bb_->PredecessorCount();
-  IRTranslatorBlockImpl& block_impl = impl().current_bb_impl();
+  IRTranslatorBlockImpl* block_impl = impl().current_bb_impl();
 
   for (intptr_t i = 0; i < predecessor_count; ++i) {
     BlockEntryInstr* pred = impl().current_bb()->PredecessorAt(i);
@@ -920,8 +1172,8 @@ void IRTranslator::VisitPhi(PhiInstr* instr) {
       addIncoming(phi, &value, &llvmbb, 1);
     } else {
       should_add_to_tf_phi_worklist = true;
-      block_impl.not_merged_phis.emplace_back();
-      auto& not_merged_phi = block_impl.not_merged_phis.back();
+      block_impl->not_merged_phis.emplace_back();
+      auto& not_merged_phi = block_impl->not_merged_phis.back();
       not_merged_phi.phi = phi;
       not_merged_phi.pred = pred;
       not_merged_phi.value = ssa_value;
@@ -929,7 +1181,7 @@ void IRTranslator::VisitPhi(PhiInstr* instr) {
   }
   if (should_add_to_tf_phi_worklist)
     impl().phi_rebuild_worklist_.push_back(impl().current_bb_);
-  block_impl.SetLLVMValue(instr->ssa_temp_index(), phi);
+  block_impl->SetLLVMValue(instr->ssa_temp_index(), phi);
 }
 
 void IRTranslator::VisitRedefinition(RedefinitionInstr* instr) {
@@ -1055,13 +1307,13 @@ void IRTranslator::VisitSpecialParameter(SpecialParameterInstr* instr) {
   if (kind == SpecialParameterInstr::kArgDescriptor) {
     val = output().args_desc();
   } else {
-    EMASSERT(impl().current_bb_impl().exception_block);
+    EMASSERT(impl().current_bb_impl()->exception_block);
     switch (kind) {
       case SpecialParameterInstr::kException:
-        val = impl().current_bb_impl().exception_val;
+        val = impl().current_bb_impl()->exception_val;
         break;
       case SpecialParameterInstr::kStackTrace:
-        val = impl().current_bb_impl().stacktrace_val;
+        val = impl().current_bb_impl()->stacktrace_val;
         break;
       default:
         UNREACHABLE();
@@ -2185,10 +2437,10 @@ static bool IsPowerOfTwoKind(intptr_t v1, intptr_t v2) {
 
 void IRTranslator::VisitIfThenElse(IfThenElseInstr* instr) {
   ComparisonInstr* compare = instr->comparison();
-  if (!impl().current_bb_impl().IsDefined(compare)) {
+  if (!impl().current_bb_impl()->IsDefined(compare)) {
     compare->Accept(this);
   }
-  EMASSERT(impl().current_bb_impl().IsDefined(compare));
+  EMASSERT(impl().current_bb_impl()->IsDefined(compare));
   impl().SetDebugLine(instr);
   LValue cmp_value = impl().GetLLVMValue(compare->ssa_temp_index());
 
