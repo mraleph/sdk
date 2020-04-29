@@ -62,6 +62,8 @@ class CallSiteInfo final : public StackMapInfo {
   V(intptr_t, try_index)                                                       \
   V(RawPcDescriptors::Kind, kind)                                              \
   V(int, reg)                                                                  \
+  V(const Function*, target)                                                   \
+  V(CodeEntryKind, entry_kind)                                                 \
   V(bool, is_tailcall)
 
 #define CALLSITE_WAPPER(type, name) DEFINE_ACCESSOR(type, name, CallSiteInfo)
@@ -82,6 +84,10 @@ class CallSiteInfo final : public StackMapInfo {
   RawPcDescriptors::Kind kind_;
   union {
     int reg_;
+    struct {
+      const Function* target_;
+      Code::EntryKind entry_kind_;
+    };
   };
   bool is_tailcall_;
 };

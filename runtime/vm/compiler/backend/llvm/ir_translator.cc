@@ -173,6 +173,16 @@ class AnonImpl {
                              const RuntimeEntry& entry,
                              intptr_t argument_count,
                              LocationSummary* locs);
+  LValue GenerateStaticCall(Instruction*,
+                            int ssa_index,
+                            const std::vector<LValue>& arguments,
+                            intptr_t deopt_id,
+                            TokenPosition token_pos,
+                            const Function& function,
+                            ArgumentsInfo args_info,
+                            LocationSummary* locs,
+                            const ICData& ic_data_in,
+                            Code::EntryKind entry_kind);
   // Types
   LType GetMachineRepresentationType(Representation);
   LValue EnsureBoolean(LValue v);
@@ -742,6 +752,51 @@ LValue AnonImpl::GenerateRuntimeCall(Instruction* instr,
     LValue argument = pushed_arguments_.back();
     pushed_arguments_.pop_back();
     resolver.AddStackParameter(argument);
+  }
+  return resolver.BuildCall();
+}
+
+LValue AnonImpl::GenerateStaticCall(Instruction* instr,
+                                    int ssa_index,
+                                    const std::vector<LValue>& arguments,
+                                    intptr_t deopt_id,
+                                    TokenPosition token_pos,
+                                    const Function& function,
+                                    ArgumentsInfo args_info,
+                                    LocationSummary* locs,
+                                    const ICData& ic_data_in,
+                                    Code::EntryKind entry_kind) {
+  const ICData& ic_data = ICData::ZoneHandle(ic_data_in.Original());
+  const Array& arguments_descriptor = Array::ZoneHandle(
+      flow_graph()->zone(), ic_data.IsNull() ? args_info.ToArgumentsDescriptor()
+                                             : ic_data.arguments_descriptor());
+  LValue argument_desc_val = LLVMGetUndef(output().tagged_type());
+  if (function.HasOptionalParameters() || function.IsGeneric()) {
+    argument_desc_val = LoadObject(arguments_descriptor);
+  } else {
+    if (!(FLAG_precompiled_mode && FLAG_use_bare_instructions)) {
+      argument_desc_val = output().constTagged(0);
+    }
+  }
+  size_t argument_count = args_info.count_with_type_args;
+  EMASSERT(argument_count == arguments.size());
+
+  std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
+  callsite_info->set_type(CallSiteInfo::CallTargetType::kCodeRelative);
+  callsite_info->set_token_pos(token_pos);
+  callsite_info->set_deopt_id(deopt_id);
+  callsite_info->set_locs(locs);
+  callsite_info->set_stack_parameter_count(argument_count);
+  callsite_info->set_target(&function);
+  callsite_info->set_entry_kind(entry_kind);
+  CallResolver::CallResolverParameter param = {instr, Instr::kInstrSize,
+                                               std::move(callsite_info)};
+  CallResolver resolver(*this, ssa_index, param);
+  resolver.SetGParameter(static_cast<int>(ARGS_DESC_REG), argument_desc_val);
+  // setup stack parameters
+  for (size_t i = argument_count - 1; i >= 0; --i) {
+    LValue param = arguments[i];
+    resolver.AddStackParameter(param);
   }
   return resolver.BuildCall();
 }
@@ -1509,13 +1564,138 @@ void IRTranslator::VisitInstanceCall(InstanceCallInstr* instr) {
 
 void IRTranslator::VisitPolymorphicInstanceCall(
     PolymorphicInstanceCallInstr* instr) {
+#if 0
+  impl().SetDebugLine(instr);
+  ArgumentsInfo args_info(instr->instance_call()->type_args_len(),
+                          instr->instance_call()->ArgumentCount(),
+                          instr->instance_call()->argument_names());
+  const Array& arguments_descriptor =
+      Array::ZoneHandle(impl().flow_graph()->zone(), args_info.ToArgumentsDescriptor());
+  const CallTargets& targets = instr->targets();
+
+  static const int kNoCase = -1;
+  int smi_case = kNoCase;
+  int which_case_to_skip = kNoCase;
+
+  const int length = targets.length();
+  ASSERT(length > 0);
+  int non_smi_length = length;
+
+  // Find out if one of the classes in one of the cases is the Smi class. We
+  // will be handling that specially.
+  for (int i = 0; i < length; i++) {
+    const intptr_t start = targets[i].cid_start;
+    if (start > kSmiCid) continue;
+    const intptr_t end = targets[i].cid_end;
+    if (end >= kSmiCid) {
+      smi_case = i;
+      if (start == kSmiCid && end == kSmiCid) {
+        // If this case has only the Smi class then we won't need to emit it at
+        // all later.
+        which_case_to_skip = i;
+        non_smi_length--;
+      }
+      break;
+    }
+  }
+
+  if (smi_case != kNoCase) {
+    compiler::Label after_smi_test;
+    // If the call is complete and there are no other possible receiver
+    // classes - then receiver can only be a smi value and we don't need
+    // to check if it is a smi.
+    if (!(complete && non_smi_length == 0)) {
+      EmitTestAndCallSmiBranch(non_smi_length == 0 ? failed : &after_smi_test,
+                               /* jump_if_smi= */ false);
+    }
+
+    // Do not use the code from the function, but let the code be patched so
+    // that we can record the outgoing edges to other code.
+    const Function& function = *targets.TargetAt(smi_case)->target;
+    GenerateStaticDartCall(deopt_id, token_index, RawPcDescriptors::kOther,
+                           locs, function, entry_kind);
+    __ Drop(args_info.count_with_type_args);
+    if (match_found != NULL) {
+      __ Jump(match_found);
+    }
+    __ Bind(&after_smi_test);
+  } else {
+    if (!complete) {
+      // Smi is not a valid class.
+      EmitTestAndCallSmiBranch(failed, /* jump_if_smi = */ true);
+    }
+  }
+
+  if (non_smi_length == 0) {
+    // If non_smi_length is 0 then only a Smi check was needed; the Smi check
+    // above will fail if there was only one check and receiver is not Smi.
+    return;
+  }
+
+  bool add_megamorphic_call = false;
+  int bias = 0;
+
+  // Value is not Smi.
+  EmitTestAndCallLoadCid(EmitTestCidRegister());
+
+  int last_check = which_case_to_skip == length - 1 ? length - 2 : length - 1;
+
+  for (intptr_t i = 0; i < length; i++) {
+    if (i == which_case_to_skip) continue;
+    const bool is_last_check = (i == last_check);
+    const int count = targets.TargetAt(i)->count;
+    if (!is_last_check && !complete && count < (total_ic_calls >> 5)) {
+      // This case is hit too rarely to be worth writing class-id checks inline
+      // for.  Note that we can't do this for calls with only one target because
+      // the type propagator may have made use of that and expects a deopt if
+      // a new class is seen at this calls site.  See IsMonomorphic.
+      add_megamorphic_call = true;
+      break;
+    }
+    compiler::Label next_test;
+    if (!complete || !is_last_check) {
+      bias = EmitTestAndCallCheckCid(assembler(),
+                                     is_last_check ? failed : &next_test,
+                                     EmitTestCidRegister(), targets[i], bias,
+                                     /*jump_on_miss =*/true);
+    }
+    // Do not use the code from the function, but let the code be patched so
+    // that we can record the outgoing edges to other code.
+    const Function& function = *targets.TargetAt(i)->target;
+    GenerateStaticDartCall(deopt_id, token_index, RawPcDescriptors::kOther,
+                           locs, function, entry_kind);
+    __ Drop(args_info.count_with_type_args);
+    if (!is_last_check || add_megamorphic_call) {
+      __ Jump(match_found);
+    }
+    __ Bind(&next_test);
+  }
+  if (add_megamorphic_call) {
+    int try_index = kInvalidTryIndex;
+    EmitMegamorphicInstanceCall(function_name, arguments_descriptor, deopt_id,
+                                token_index, locs, try_index);
+  }
+#else
   LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
   UNREACHABLE();
+#endif
 }
 
 void IRTranslator::VisitStaticCall(StaticCallInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  Zone* zone = impl().flow_graph()->zone();
+  ICData& ic_data = ICData::ZoneHandle(zone, instr->ic_data()->raw());
+  ArgumentsInfo args_info(instr->type_args_len(), instr->ArgumentCount(),
+                          instr->argument_names());
+  std::vector<LValue> arguments;
+  for (intptr_t i = 0; i < args_info.count_with_type_args; ++i) {
+    arguments.emplace_back(impl().GetLLVMValue(instr->PushArgumentAt(i)));
+  }
+  LValue result = impl().GenerateStaticCall(
+      instr, instr->ssa_temp_index(), arguments, instr->deopt_id(),
+      instr->token_pos(), instr->function(), args_info, instr->locs(), ic_data,
+      instr->entry_kind());
+  impl().SetLLVMValue(instr, result);
 }
 
 void IRTranslator::VisitLoadLocal(LoadLocalInstr* instr) {
