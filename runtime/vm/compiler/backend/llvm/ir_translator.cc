@@ -14,6 +14,12 @@
 #include "vm/compiler/runtime_api.h"
 
 namespace dart {
+#if defined(TARGET_ARCH_ARM)
+// Load arguments descriptor in R4.
+Register ICReg = R9;
+#else
+#error need reg info for call
+#endif
 namespace dart_llvm {
 namespace {
 class AnonImpl;
@@ -167,12 +173,12 @@ class AnonImpl {
   int NextPatchPoint();
   void SubmitStackMap(std::unique_ptr<StackMapInfo> info);
   void PushArgument(LValue v);
-  LValue CallRuntime(Instruction*,
-                     TokenPosition token_pos,
-                     intptr_t deopt_id,
-                     const RuntimeEntry& entry,
-                     intptr_t argument_count,
-                     LocationSummary* locs);
+  LValue GenerateRuntimeCall(Instruction*,
+                             TokenPosition token_pos,
+                             intptr_t deopt_id,
+                             const RuntimeEntry& entry,
+                             intptr_t argument_count,
+                             LocationSummary* locs);
   // Types
   LType GetMachineRepresentationType(Representation);
   LValue EnsureBoolean(LValue v);
@@ -279,6 +285,7 @@ class CallResolver : public ContinuationResolver {
   ~CallResolver() = default;
   void SetGParameter(int reg, LValue);
   void AddStackParameter(LValue);
+  LValue GetStackParameter(size_t i);
   LValue BuildCall();
 
  private:
@@ -714,12 +721,12 @@ void AnonImpl::PushArgument(LValue v) {
   pushed_arguments_.emplace_back(v);
 }
 
-LValue AnonImpl::CallRuntime(Instruction* instr,
-                             TokenPosition token_pos,
-                             intptr_t deopt_id,
-                             const RuntimeEntry& runtime_entry,
-                             intptr_t argument_count,
-                             LocationSummary* locs) {
+LValue AnonImpl::GenerateRuntimeCall(Instruction* instr,
+                                     TokenPosition token_pos,
+                                     intptr_t deopt_id,
+                                     const RuntimeEntry& runtime_entry,
+                                     intptr_t argument_count,
+                                     LocationSummary* locs) {
   EMASSERT(runtime_entry.is_leaf());
   LValue code_object =
       LoadFromOffset(output().thread(),
@@ -730,7 +737,6 @@ LValue AnonImpl::CallRuntime(Instruction* instr,
   callsite_info->set_token_pos(token_pos);
   callsite_info->set_deopt_id(deopt_id);
   callsite_info->set_locs(locs);
-  callsite_info->set_try_index(current_bb()->try_index());
   callsite_info->set_stack_parameter_count(argument_count);
   CallResolver::CallResolverParameter param = {instr, Instr::kInstrSize,
                                                std::move(callsite_info)};
@@ -968,6 +974,7 @@ CallResolver::CallResolver(
 
 void CallResolver::SetGParameter(int reg, LValue val) {
   EMASSERT(reg < kV8CCRegisterParameterCount);
+  EMASSERT(reg >= 0);
   parameters_[reg] = val;
 }
 
@@ -978,9 +985,18 @@ void CallResolver::AddStackParameter(LValue v) {
            call_resolver_parameter_.callsite_info->stack_parameter_count());
 }
 
+LValue CallResolver::GetStackParameter(size_t i) {
+  i += kV8CCRegisterParameterCount;
+  EMASSERT(parameters_.size() > i);
+  return parameters_[i];
+}
+
 LValue CallResolver::BuildCall() {
   EMASSERT(parameters_.size() - kV8CCRegisterParameterCount ==
            call_resolver_parameter_.callsite_info->stack_parameter_count());
+  EMASSERT(call_resolver_parameter_.callsite_info->type() !=
+               CallSiteInfo::CallTargetType::kCodeObject ||
+           !LLVMIsUndef(parameters_[static_cast<int>(CODE_REG)]));
   ExtractCallInfo();
   GenerateStatePointFunction();
   EmitCall();
@@ -1102,6 +1118,7 @@ void CallResolver::EmitPatchPoint() {
       std::move(call_resolver_parameter_.callsite_info));
   callsite_info->set_is_tailcall(tail_call_);
   callsite_info->set_patchid(patchid_);
+  callsite_info->set_try_index(impl().current_bb()->try_index());
   impl().SubmitStackMap(std::move(callsite_info));
 }
 
@@ -1127,11 +1144,6 @@ IRTranslator::IRTranslator(FlowGraph* flow_graph, Precompiler* precompiler)
     : FlowGraphVisitor(flow_graph->reverse_postorder()) {
   // dynamic function has multiple entry points
   // which LLVM does not suppport.
-  const Function& function = flow_graph->parsed_function().function();
-  const bool needs_args_descriptor =
-      function.HasOptionalParameters() || function.IsGeneric();
-
-  EMASSERT(!(function.IsDynamicFunction() && !needs_args_descriptor));
   InitLLVM();
   impl_.reset(new Impl);
   impl().flow_graph_ = flow_graph;
@@ -1160,7 +1172,7 @@ void IRTranslator::Translate() {
   VisitBlocks();
 #endif
 
-  FlowGraphPrinter::PrintGraph("IRTranslator", impl().flow_graph_);
+  // FlowGraphPrinter::PrintGraph("IRTranslator", impl().flow_graph_);
 }
 
 Output& IRTranslator::output() {
@@ -1270,7 +1282,8 @@ void IRTranslator::VisitRedefinition(RedefinitionInstr* instr) {
 void IRTranslator::VisitParameter(ParameterInstr* instr) {
   int param_index = instr->index();
   // only stack parameters
-  output().parameter(kV8CCRegisterParameterCount + param_index);
+  output().parameter(kV8CCRegisterParameterCount +
+                     output().stack_parameter_count() - param_index - 1);
 }
 
 void IRTranslator::VisitNativeParameter(NativeParameterInstr* instr) {
@@ -1345,14 +1358,16 @@ void IRTranslator::VisitNativeReturn(NativeReturnInstr* instr) {
 
 void IRTranslator::VisitThrow(ThrowInstr* instr) {
   impl().SetDebugLine(instr);
-  impl().CallRuntime(instr, instr->token_pos(), instr->deopt_id(),
-                     kThrowRuntimeEntry, 1, instr->locs());
+  impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
+                             kThrowRuntimeEntry, 1, instr->locs());
   output().buildCall(output().repo().trapIntrinsic());
 }
 
 void IRTranslator::VisitReThrow(ReThrowInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
+                             kReThrowRuntimeEntry, 2, instr->locs());
+  output().buildCall(output().repo().trapIntrinsic());
 }
 
 void IRTranslator::VisitStop(StopInstr* instr) {
@@ -1415,8 +1430,34 @@ void IRTranslator::VisitSpecialParameter(SpecialParameterInstr* instr) {
 }
 
 void IRTranslator::VisitClosureCall(ClosureCallInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  const intptr_t argument_count =
+      instr->ArgumentCount();  // Includes type args.
+  LValue function = impl().GetLLVMValue(instr->InputAt(0));
+  LValue code_object = impl().LoadFieldFromOffset(
+      function, compiler::target::Function::code_offset());
+
+  std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
+  callsite_info->set_type(CallSiteInfo::CallTargetType::kCodeObject);
+  callsite_info->set_token_pos(instr->token_pos());
+  callsite_info->set_deopt_id(instr->deopt_id());
+  callsite_info->set_locs(instr->locs());
+  callsite_info->set_stack_parameter_count(argument_count);
+  CallResolver::CallResolverParameter param = {instr, Instr::kInstrSize,
+                                               std::move(callsite_info)};
+  CallResolver resolver(impl(), instr->ssa_temp_index(), param);
+  const Array& arguments_descriptor = Array::ZoneHandle(
+      impl().flow_graph()->zone(), instr->GetArgumentsDescriptor());
+  LValue argument_descriptor_obj = impl().LoadObject(arguments_descriptor);
+  resolver.SetGParameter(ARGS_DESC_REG, argument_descriptor_obj);
+  resolver.SetGParameter(CODE_REG, code_object);
+  resolver.SetGParameter(ICReg, output().constTagged(0));
+  for (intptr_t i = argument_count - 1; i >= 0; --i) {
+    LValue param = impl().GetLLVMValue(instr->PushArgumentAt(i)->value());
+    resolver.AddStackParameter(param);
+  }
+  LValue result = resolver.BuildCall();
+  impl().SetLLVMValue(instr, result);
 }
 
 void IRTranslator::VisitFfiCall(FfiCallInstr* instr) {
@@ -1425,8 +1466,48 @@ void IRTranslator::VisitFfiCall(FfiCallInstr* instr) {
 }
 
 void IRTranslator::VisitInstanceCall(InstanceCallInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  EMASSERT(instr->ic_data() != NULL);
+  EMASSERT((FLAG_precompiled_mode && FLAG_use_bare_instructions));
+  Zone* zone = impl().flow_graph()->zone();
+  ICData& ic_data = ICData::ZoneHandle(zone, instr->ic_data()->raw());
+  ic_data = ic_data.AsUnaryClassChecks();
+
+  const intptr_t argument_count =
+      instr->ArgumentCount();  // Includes type args.
+
+  std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
+  // use kReg type, and use the first reg.
+  callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
+  callsite_info->set_token_pos(instr->token_pos());
+  callsite_info->set_deopt_id(instr->deopt_id());
+  callsite_info->set_locs(instr->locs());
+  callsite_info->set_stack_parameter_count(argument_count);
+  CallResolver::CallResolverParameter param = {instr, Instr::kInstrSize,
+                                               std::move(callsite_info)};
+  CallResolver resolver(impl(), instr->ssa_temp_index(), param);
+
+  const Code& initial_stub = StubCode::UnlinkedCall();
+  const UnlinkedCall& data =
+      UnlinkedCall::ZoneHandle(zone, ic_data.AsUnlinkedCall());
+  LValue data_val = impl().LoadObject(data, true);
+  LValue initial_stub_val = impl().LoadObject(initial_stub, true);
+  resolver.SetGParameter(ICReg, data_val);
+  // hard code to the first reg.
+  resolver.SetGParameter(0, initial_stub_val);
+  for (intptr_t i = argument_count - 1; i >= 0; --i) {
+    LValue param = impl().GetLLVMValue(instr->PushArgumentAt(i)->value());
+    resolver.AddStackParameter(param);
+  }
+#if 0
+  // unknown effect.
+  __ LoadFromOffset(
+      kWord, R0, SP,
+      (ic_data.CountWithoutTypeArgs() - 1) * compiler::target::kWordSize);
+#endif
+
+  LValue result = resolver.BuildCall();
+  impl().SetLLVMValue(instr, result);
 }
 
 void IRTranslator::VisitPolymorphicInstanceCall(

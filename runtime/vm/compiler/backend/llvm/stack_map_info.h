@@ -60,6 +60,7 @@ class CallSiteInfo final : public StackMapInfo {
   V(LocationSummary*, locs)                                                    \
   V(size_t, stack_parameter_count)                                             \
   V(intptr_t, try_index)                                                       \
+  V(RawPcDescriptors::Kind, kind)                                              \
   V(int, reg)                                                                  \
   V(bool, is_tailcall)
 
@@ -78,6 +79,7 @@ class CallSiteInfo final : public StackMapInfo {
   // for stack maps generate, we will mark the lowest stack_parameter_count's stack slot 1.
   size_t stack_parameter_count_;
   intptr_t try_index_;
+  RawPcDescriptors::Kind kind_;
   union {
     int reg_;
   };
