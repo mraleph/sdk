@@ -14,12 +14,6 @@
 #include "vm/compiler/runtime_api.h"
 
 namespace dart {
-#if defined(TARGET_ARCH_ARM)
-// Load arguments descriptor in R4.
-Register ICReg = R9;
-#else
-#error need reg info for call
-#endif
 namespace dart_llvm {
 namespace {
 class AnonImpl;
@@ -1451,7 +1445,7 @@ void IRTranslator::VisitClosureCall(ClosureCallInstr* instr) {
   LValue argument_descriptor_obj = impl().LoadObject(arguments_descriptor);
   resolver.SetGParameter(ARGS_DESC_REG, argument_descriptor_obj);
   resolver.SetGParameter(CODE_REG, code_object);
-  resolver.SetGParameter(ICReg, output().constTagged(0));
+  resolver.SetGParameter(kICReg, output().constTagged(0));
   for (intptr_t i = argument_count - 1; i >= 0; --i) {
     LValue param = impl().GetLLVMValue(instr->PushArgumentAt(i)->value());
     resolver.AddStackParameter(param);
@@ -1477,8 +1471,9 @@ void IRTranslator::VisitInstanceCall(InstanceCallInstr* instr) {
       instr->ArgumentCount();  // Includes type args.
 
   std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
-  // use kReg type, and use the first reg.
+  // use kReg type.
   callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
+  callsite_info->set_reg(kInstanceCallTargetReg);
   callsite_info->set_token_pos(instr->token_pos());
   callsite_info->set_deopt_id(instr->deopt_id());
   callsite_info->set_locs(instr->locs());
@@ -1492,13 +1487,15 @@ void IRTranslator::VisitInstanceCall(InstanceCallInstr* instr) {
       UnlinkedCall::ZoneHandle(zone, ic_data.AsUnlinkedCall());
   LValue data_val = impl().LoadObject(data, true);
   LValue initial_stub_val = impl().LoadObject(initial_stub, true);
-  resolver.SetGParameter(ICReg, data_val);
-  // hard code to the first reg.
-  resolver.SetGParameter(0, initial_stub_val);
+  resolver.SetGParameter(kICReg, data_val);
+  resolver.SetGParameter(kInstanceCallTargetReg, initial_stub_val);
   for (intptr_t i = argument_count - 1; i >= 0; --i) {
     LValue param = impl().GetLLVMValue(instr->PushArgumentAt(i)->value());
     resolver.AddStackParameter(param);
   }
+  LValue receiver =
+      resolver.GetStackParameter((ic_data.CountWithoutTypeArgs() - 1));
+  resolver.SetGParameter(kReceiverReg, receiver);
 #if 0
   // unknown effect.
   __ LoadFromOffset(
