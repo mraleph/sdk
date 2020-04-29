@@ -2,15 +2,22 @@
 
 #include "vm/compiler/backend/llvm/stack_map_info.h"
 #if defined(DART_ENABLE_LLVM_COMPILER)
+#include "vm/code_descriptors.h"
 
 namespace dart {
 namespace dart_llvm {
 StackMapInfo::StackMapInfo(StackMapInfoType type) : type_(type), patchid_(0) {}
 StackMapInfo::~StackMapInfo() {}
 
-CallInfo::CallInfo(const CallInfo::CallTarget& target)
+CallSiteInfo::CallSiteInfo()
     : StackMapInfo(StackMapInfoType::kCallInfo),
-      target_(target),
+      type_(CallTargetType::kUnspecify),
+      token_pos_(),
+      deopt_id_(0),
+      locs_(nullptr),
+      stack_parameter_count_(0),
+      try_index_(kInvalidTryIndex),
+      reg_(0),
       is_tailcall_(false) {}
 
 }  // namespace dart_llvm

@@ -166,6 +166,13 @@ class AnonImpl {
   // Calls
   int NextPatchPoint();
   void SubmitStackMap(std::unique_ptr<StackMapInfo> info);
+  void PushArgument(LValue v);
+  LValue CallRuntime(Instruction*,
+                     TokenPosition token_pos,
+                     intptr_t deopt_id,
+                     const RuntimeEntry& entry,
+                     intptr_t argument_count,
+                     LocationSummary* locs);
   // Types
   LType GetMachineRepresentationType(Representation);
   LValue EnsureBoolean(LValue v);
@@ -226,7 +233,9 @@ class AnonImpl {
   // debug lines
   std::vector<Instruction*> debug_instrs_;
   // Calls
+  std::vector<LValue> pushed_arguments_;
   int patch_point_id_ = 0;
+  bool visited_function_entry_ = false;
 };
 
 class ContinuationResolver {
@@ -262,15 +271,15 @@ class CallResolver : public ContinuationResolver {
   struct CallResolverParameter {
     Instruction* call_instruction;
     size_t instruction_size;
-    std::vector<LValue> parameters;
-    CallInfo::CallTarget target;
+    std::unique_ptr<CallSiteInfo> callsite_info;
   };
   explicit CallResolver(AnonImpl& impl,
                         int ssa_id,
-                        const CallResolverParameter& call_resolver_parameter);
+                        CallResolverParameter& call_resolver_parameter);
   ~CallResolver() = default;
-
-  CallResolver& BuildCall();
+  void SetGParameter(int reg, LValue);
+  void AddStackParameter(LValue);
+  LValue BuildCall();
 
  private:
   void GenerateStatePointFunction();
@@ -281,12 +290,13 @@ class CallResolver : public ContinuationResolver {
   void EmitPatchPoint();
   bool need_invoke() { return tail_call_ == false && catch_block_ != nullptr; }
 
-  const CallResolverParameter& call_resolver_parameter_;
+  CallResolverParameter& call_resolver_parameter_;
 
   // state in the middle.
   LValue statepoint_function_ = nullptr;
   LType callee_type_ = nullptr;
   LValue call_value_ = nullptr;
+  LValue statepoint_value_ = nullptr;
   // exception blocks
   IRTranslatorBlockImpl* catch_block_impl_ = nullptr;
   LBasicBlock continuation_block_ = nullptr;
@@ -294,6 +304,7 @@ class CallResolver : public ContinuationResolver {
   BitVector* call_live_out_ = nullptr;
   GCRelocateDescList gc_desc_list_;
   ExceptionBlockLiveInValueMap exception_block_live_in_value_map_;
+  std::vector<LValue> parameters_;
   int patchid_ = 0;
   bool tail_call_ = false;
 };
@@ -546,6 +557,7 @@ void AnonImpl::EndCurrentBlock() {
   GetTranslatorBlockImpl(current_bb_)->EndTranslate();
   current_bb_ = nullptr;
   current_bb_impl_ = nullptr;
+  pushed_arguments_.clear();
 }
 
 void AnonImpl::ProcessPhiWorkList() {
@@ -696,6 +708,42 @@ void AnonImpl::SubmitStackMap(std::unique_ptr<StackMapInfo> info) {
   int patchid = info->patchid();
   auto where = stack_map_info_map.emplace(patchid, std::move(info));
   EMASSERT(where.second && "Submit overlapped patch id");
+}
+
+void AnonImpl::PushArgument(LValue v) {
+  pushed_arguments_.emplace_back(v);
+}
+
+LValue AnonImpl::CallRuntime(Instruction* instr,
+                             TokenPosition token_pos,
+                             intptr_t deopt_id,
+                             const RuntimeEntry& runtime_entry,
+                             intptr_t argument_count,
+                             LocationSummary* locs) {
+  EMASSERT(runtime_entry.is_leaf());
+  LValue code_object =
+      LoadFromOffset(output().thread(),
+                     compiler::target::Thread::OffsetFromThread(&runtime_entry),
+                     pointerType(output().tagged_type()));
+  std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
+  callsite_info->set_type(CallSiteInfo::CallTargetType::kCodeObject);
+  callsite_info->set_token_pos(token_pos);
+  callsite_info->set_deopt_id(deopt_id);
+  callsite_info->set_locs(locs);
+  callsite_info->set_try_index(current_bb()->try_index());
+  callsite_info->set_stack_parameter_count(argument_count);
+  CallResolver::CallResolverParameter param = {instr, Instr::kInstrSize,
+                                               std::move(callsite_info)};
+  CallResolver resolver(*this, -1, param);
+  resolver.SetGParameter(static_cast<int>(CODE_REG), code_object);
+  // add stack parameters.
+  EMASSERT(static_cast<intptr_t>(pushed_arguments_.size()) >= argument_count);
+  for (intptr_t i = 0; i < argument_count; ++i) {
+    LValue argument = pushed_arguments_.back();
+    pushed_arguments_.pop_back();
+    resolver.AddStackParameter(argument);
+  }
+  return resolver.BuildCall();
 }
 
 LType AnonImpl::GetMachineRepresentationType(Representation rep) {
@@ -907,14 +955,32 @@ LValue DiamondContinuationResolver::End() {
 CallResolver::CallResolver(
     AnonImpl& impl,
     int ssa_id,
-    const CallResolver::CallResolverParameter& call_resolver_parameter)
+    CallResolver::CallResolverParameter& call_resolver_parameter)
     : ContinuationResolver(impl, ssa_id),
-      call_resolver_parameter_(call_resolver_parameter) {
-  EMASSERT(call_resolver_parameter_.parameters.size() >=
-           kV8CCRegisterParameterCount);
+      call_resolver_parameter_(call_resolver_parameter),
+      parameters_(kV8CCRegisterParameterCount,
+                  LLVMGetUndef(output().tagged_type())) {
+  // init parameters_.
+  parameters_[static_cast<int>(PP)] = output().pp();
+  parameters_[static_cast<int>(THR)] = LLVMGetUndef(output().repo().ref8);
+  parameters_[static_cast<int>(FP)] = LLVMGetUndef(output().repo().ref8);
 }
 
-CallResolver& CallResolver::BuildCall() {
+void CallResolver::SetGParameter(int reg, LValue val) {
+  EMASSERT(reg < kV8CCRegisterParameterCount);
+  parameters_[reg] = val;
+}
+
+void CallResolver::AddStackParameter(LValue v) {
+  EMASSERT(typeOf(v) == output().tagged_type());
+  parameters_.emplace_back(v);
+  EMASSERT(parameters_.size() - kV8CCRegisterParameterCount <=
+           call_resolver_parameter_.callsite_info->stack_parameter_count());
+}
+
+LValue CallResolver::BuildCall() {
+  EMASSERT(parameters_.size() - kV8CCRegisterParameterCount ==
+           call_resolver_parameter_.callsite_info->stack_parameter_count());
   ExtractCallInfo();
   GenerateStatePointFunction();
   EmitCall();
@@ -927,7 +993,7 @@ CallResolver& CallResolver::BuildCall() {
   }
   EmitRelocatesIfNeeded();
   EmitPatchPoint();
-  return *this;
+  return call_value_;
 }
 
 void CallResolver::ExtractCallInfo() {
@@ -944,8 +1010,10 @@ void CallResolver::ExtractCallInfo() {
 
 void CallResolver::GenerateStatePointFunction() {
   LType return_type = output().tagged_type();
-  std::vector<LType> operand_value_types(
-      call_resolver_parameter_.parameters.size(), output().tagged_type());
+  std::vector<LType> operand_value_types;
+  for (LValue param : parameters_) {
+    operand_value_types.emplace_back(typeOf(param));
+  }
   LType callee_function_type =
       functionType(return_type, operand_value_types.data(),
                    operand_value_types.size(), NotVariadic);
@@ -961,10 +1029,10 @@ void CallResolver::EmitCall() {
   statepoint_operands.push_back(
       output().constInt32(call_resolver_parameter_.instruction_size));
   statepoint_operands.push_back(constNull(callee_type_));
-  statepoint_operands.push_back(output().constInt32(
-      call_resolver_parameter_.parameters.size()));       // # call params
+  statepoint_operands.push_back(
+      output().constInt32(parameters_.size()));           // # call params
   statepoint_operands.push_back(output().constInt32(0));  // flags
-  for (LValue parameter : call_resolver_parameter_.parameters)
+  for (LValue parameter : parameters_)
     statepoint_operands.push_back(parameter);
   statepoint_operands.push_back(output().constInt32(0));  // # transition args
   statepoint_operands.push_back(output().constInt32(0));  // # deopt arguments
@@ -999,7 +1067,7 @@ void CallResolver::EmitCall() {
   }
 
   if (!need_invoke()) {
-    call_value_ =
+    statepoint_value_ =
         output().buildCall(statepoint_function_, statepoint_operands.data(),
                            statepoint_operands.size());
     if (tail_call_) output().buildReturnForTailCall();
@@ -1007,7 +1075,7 @@ void CallResolver::EmitCall() {
     catch_block_impl_ = impl().GetCatchBlockImplInitIfNeeded(catch_block_);
     continuation_block_ =
         impl().NewBasicBlock("continuation_block_for_%d", ssa_id());
-    call_value_ =
+    statepoint_value_ =
         output().buildInvoke(statepoint_function_, statepoint_operands.data(),
                              statepoint_operands.size(), continuation_block_,
                              catch_block_impl_->native_bb);
@@ -1017,25 +1085,24 @@ void CallResolver::EmitCall() {
 void CallResolver::EmitRelocatesIfNeeded() {
   if (tail_call_) return;
   for (auto& gc_relocate : gc_desc_list_) {
-    LValue relocated =
-        output().buildCall(output().repo().gcRelocateIntrinsic(), call_value_,
-                           output().constInt32(gc_relocate.where),
-                           output().constInt32(gc_relocate.where));
+    LValue relocated = output().buildCall(
+        output().repo().gcRelocateIntrinsic(), statepoint_value_,
+        output().constInt32(gc_relocate.where),
+        output().constInt32(gc_relocate.where));
     impl().current_bb_impl()->SetLLVMValue(gc_relocate.ssa_index, relocated);
   }
 
   LType return_type = output().tagged_type();
   LValue intrinsic = output().getGCResultFunction(return_type);
-  LValue ret = output().buildCall(intrinsic, call_value_);
-  impl().current_bb_impl()->SetLLVMValue(ssa_id(), ret);
+  call_value_ = output().buildCall(intrinsic, statepoint_value_);
 }
 
 void CallResolver::EmitPatchPoint() {
-  std::unique_ptr<CallInfo> callinfo(
-      new CallInfo(call_resolver_parameter_.target));
-  callinfo->set_patchid(patchid_);
-  callinfo->set_is_tailcall(tail_call_);
-  impl().SubmitStackMap(std::move(callinfo));
+  std::unique_ptr<CallSiteInfo> callsite_info(
+      std::move(call_resolver_parameter_.callsite_info));
+  callsite_info->set_is_tailcall(tail_call_);
+  callsite_info->set_patchid(patchid_);
+  impl().SubmitStackMap(std::move(callsite_info));
 }
 
 void CallResolver::EmitExceptionBlockIfNeeded() {
@@ -1058,6 +1125,13 @@ struct IRTranslator::Impl : public AnonImpl {};
 
 IRTranslator::IRTranslator(FlowGraph* flow_graph, Precompiler* precompiler)
     : FlowGraphVisitor(flow_graph->reverse_postorder()) {
+  // dynamic function has multiple entry points
+  // which LLVM does not suppport.
+  const Function& function = flow_graph->parsed_function().function();
+  const bool needs_args_descriptor =
+      function.HasOptionalParameters() || function.IsGeneric();
+
+  EMASSERT(!(function.IsDynamicFunction() && !needs_args_descriptor));
   InitLLVM();
   impl_.reset(new Impl);
   impl().flow_graph_ = flow_graph;
@@ -1128,6 +1202,10 @@ void IRTranslator::VisitTargetEntry(TargetEntryInstr* instr) {
 }
 
 void IRTranslator::VisitFunctionEntry(FunctionEntryInstr* instr) {
+  EMASSERT(!impl().visited_function_entry_);
+  impl().visited_function_entry_ = true;
+  LBasicBlock bb = impl().EnsureNativeBB(instr);
+  output().buildBr(bb);
   VisitBlockEntryWithInitialDefs(instr);
 }
 
@@ -1229,8 +1307,18 @@ void IRTranslator::VisitStoreIndexedUnsafe(StoreIndexedUnsafeInstr* instr) {
 }
 
 void IRTranslator::VisitTailCall(TailCallInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
+  callsite_info->set_type(CallSiteInfo::CallTargetType::kCodeObject);
+  CallResolver::CallResolverParameter param = {instr, Instr::kInstrSize,
+                                               std::move(callsite_info)};
+  CallResolver resolver(impl(), -1, param);
+  LValue code_object = impl().LoadObject(instr->code());
+  resolver.SetGParameter(static_cast<int>(CODE_REG), code_object);
+  // add register parameter.
+  EMASSERT(impl().GetLLVMValue(instr->InputAt(0)) == output().args_desc());
+  resolver.SetGParameter(static_cast<int>(ARGS_DESC_REG), output().args_desc());
+  resolver.BuildCall();
 }
 
 void IRTranslator::VisitParallelMove(ParallelMoveInstr* instr) {
@@ -1239,7 +1327,9 @@ void IRTranslator::VisitParallelMove(ParallelMoveInstr* instr) {
 }
 
 void IRTranslator::VisitPushArgument(PushArgumentInstr* instr) {
-  // don't need to handle.
+  impl().SetDebugLine(instr);
+  LValue value = impl().GetLLVMValue(instr->value());
+  impl().PushArgument(value);
 }
 
 void IRTranslator::VisitReturn(ReturnInstr* instr) {
@@ -1254,8 +1344,10 @@ void IRTranslator::VisitNativeReturn(NativeReturnInstr* instr) {
 }
 
 void IRTranslator::VisitThrow(ThrowInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  impl().CallRuntime(instr, instr->token_pos(), instr->deopt_id(),
+                     kThrowRuntimeEntry, 1, instr->locs());
+  output().buildCall(output().repo().trapIntrinsic());
 }
 
 void IRTranslator::VisitReThrow(ReThrowInstr* instr) {

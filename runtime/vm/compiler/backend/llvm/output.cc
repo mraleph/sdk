@@ -120,7 +120,6 @@ void Output::initializeFunction(
   params_types[static_cast<int>(PP)] = pointerType(tagged_type());
   params_types[static_cast<int>(THR)] = repo().ref8;
   params_types[static_cast<int>(FP)] = repo().ref8;
-  params_types[static_cast<int>(PP)] = repo().ref8;
   EMASSERT(params_types.size() == kV8CCRegisterParameterCount);
   std::vector<LType> float_point_parameter_types;
   LType double_type = repo().doubleType;

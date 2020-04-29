@@ -10,7 +10,9 @@
 
 #include "vm/compiler/backend/llvm/llvm_config.h"
 #if defined(DART_ENABLE_LLVM_COMPILER)
+#include "vm/compiler/backend/locations.h"
 #include "vm/object.h"
+#include "vm/token_position.h"
 
 namespace dart {
 namespace dart_llvm {
@@ -33,31 +35,56 @@ class StackMapInfo {
   int patchid_;
 };
 
-class CallInfo final : public StackMapInfo {
+#define DEFINE_ACCESSOR(type, name, class_name)                                \
+  type name() const { return name##_; }                                        \
+  class_name* set_##name(type _##name) {                                       \
+    name##_ = _##name;                                                         \
+    return this;                                                               \
+  }
+
+class CallSiteInfo final : public StackMapInfo {
  public:
   enum class CallTargetType {
+    kUnspecify,
     kReg,
     kCodeRelative,
+    // Code object call is the call that code object alreadly loaded to CODE_REG
     kCodeObject,
   };
-  struct CallTarget {
-    CallTargetType type;
-    union {
-      RawCode* code;
-      int reg;
-    };
-  };
-  explicit CallInfo(const CallTarget&);
-  ~CallInfo() override = default;
-  bool is_tailcall() const { return is_tailcall_; }
-  void set_is_tailcall(bool _tailcall) { is_tailcall_ = _tailcall; }
-  const CallTarget& target() const { return target_; }
+  explicit CallSiteInfo();
+  ~CallSiteInfo() override = default;
+#define CALLSITE_ACCESSOR(V)                                                   \
+  V(CallTargetType, type)                                                      \
+  V(TokenPosition, token_pos)                                                  \
+  V(intptr_t, deopt_id)                                                        \
+  V(LocationSummary*, locs)                                                    \
+  V(size_t, stack_parameter_count)                                             \
+  V(intptr_t, try_index)                                                       \
+  V(int, reg)                                                                  \
+  V(bool, is_tailcall)
+
+#define CALLSITE_WAPPER(type, name) DEFINE_ACCESSOR(type, name, CallSiteInfo)
+
+  CALLSITE_ACCESSOR(CALLSITE_WAPPER)
+
+#undef CALLSITE_WAPPER
+#undef CALLSITE_ACCESSOR
 
  private:
-  CallTarget target_;
+  CallTargetType type_;
+  TokenPosition token_pos_;
+  intptr_t deopt_id_;
+  LocationSummary* locs_;
+  // for stack maps generate, we will mark the lowest stack_parameter_count's stack slot 1.
+  size_t stack_parameter_count_;
+  intptr_t try_index_;
+  union {
+    int reg_;
+  };
   bool is_tailcall_;
 };
 
+#undef DEFINE_ACCESSOR
 // By zuojian.lzj, should be int64_t. But I believe there will not be any number
 // greater.
 typedef std::unordered_map<int, std::unique_ptr<StackMapInfo>> StackMapInfoMap;
