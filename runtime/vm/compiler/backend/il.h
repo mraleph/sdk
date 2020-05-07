@@ -5125,6 +5125,9 @@ class StoreInstanceFieldInstr : public TemplateInstruction<2, NoThrow> {
 
  private:
   friend class JitCallSpecializer;  // For ASSERT(initialization_).
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  friend class dart::dart_llvm::IRTranslator;
+#endif
 
   intptr_t OffsetInBytes() const { return slot().offset_in_bytes(); }
 
@@ -5289,6 +5292,9 @@ class StoreStaticFieldInstr : public TemplateDefinition<1, NoThrow> {
   PRINT_OPERANDS_TO_SUPPORT
 
  private:
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  friend class dart::dart_llvm::IRTranslator;
+#endif
   compiler::Assembler::CanBeSmi CanValueBeSmi() const {
     const intptr_t cid = value()->Type()->ToNullableCid();
     // Write barrier is skipped for nullable and non-nullable smis.
@@ -5593,6 +5599,9 @@ class StoreIndexedInstr : public TemplateInstruction<3, NoThrow> {
   ADD_EXTRA_INFO_TO_S_EXPRESSION_SUPPORT
 
  private:
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  friend class dart::dart_llvm::IRTranslator;
+#endif
   compiler::Assembler::CanBeSmi CanValueBeSmi() const {
     return compiler::Assembler::kValueCanBeSmi;
   }

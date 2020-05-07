@@ -30,6 +30,7 @@ class Output {
   LBasicBlock appendBasicBlock(LValue function, const char* name = "");
   void positionToBBEnd(LBasicBlock);
   void positionBefore(LValue);
+  LValue constInt8(int);
   LValue constInt16(int);
   LValue constInt32(int);
   LValue constIntPtr(intptr_t);

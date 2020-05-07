@@ -12,6 +12,7 @@
 #include "vm/compiler/backend/llvm/stack_map_info.h"
 #include "vm/compiler/backend/llvm/target_specific.h"
 #include "vm/compiler/runtime_api.h"
+#include "vm/object_store.h"
 
 namespace dart {
 namespace dart_llvm {
@@ -216,6 +217,18 @@ class AnonImpl {
 
   void StoreToOffset(LValue base, int offset, LValue v);
   void StoreToOffset(LValue base, LValue offset, LValue v);
+  void StoreIntoObject(Instruction* instruction,
+                       LValue object,  // Object we are storing into.
+                       LValue dest,    // Where we are storing into.
+                       LValue value,   // Value we are storing.
+                       compiler::Assembler::CanBeSmi can_value_be_smi =
+                           compiler::Assembler::kValueCanBeSmi);
+  void StoreIntoArray(Instruction* instruction,
+                      LValue object,  // Object we are storing into.
+                      LValue dest,    // Where we are storing into.
+                      LValue value,   // Value we are storing.
+                      compiler::Assembler::CanBeSmi can_value_be_smi =
+                          compiler::Assembler::kValueCanBeSmi);
 
   // Basic blocks continuation
   LBasicBlock NewBasicBlock(const char* fmt, ...);
@@ -227,6 +240,12 @@ class AnonImpl {
   inline IRTranslatorBlockImpl* current_bb_impl() { return current_bb_impl_; }
   inline BlockEntryInstr* current_bb() { return current_bb_; }
   inline FlowGraph* flow_graph() { return flow_graph_; }
+
+  // classes
+  const Class& mint_class() {
+    return Class::ZoneHandle(
+        flow_graph()->isolate()->object_store()->mint_class());
+  }
 
   BlockEntryInstr* current_bb_;
   IRTranslatorBlockImpl* current_bb_impl_;
@@ -282,6 +301,7 @@ class CallResolver : public ContinuationResolver {
     Instruction* call_instruction;
     size_t instruction_size;
     std::unique_ptr<CallSiteInfo> callsite_info;
+    LValue target;
   };
   explicit CallResolver(AnonImpl& impl,
                         int ssa_id,
@@ -318,6 +338,22 @@ class CallResolver : public ContinuationResolver {
   std::vector<LValue> parameters_;
   int patchid_ = 0;
   bool tail_call_ = false;
+};
+
+class BoxAllocationSlowPath {
+ public:
+  BoxAllocationSlowPath(Instruction* instruction,
+                        const Class& cls,
+                        AnonImpl& impl);
+  LValue Allocate();
+  AnonImpl& impl() { return impl_; }
+  Output& output() { return *impl_.output_; }
+
+ private:
+  LValue BuildSlowPath();
+  Instruction* instruction_;
+  const Class& cls_;
+  AnonImpl& impl_;
 };
 
 ExceptionBlockLiveInEntry::ExceptionBlockLiveInEntry(
@@ -742,8 +778,8 @@ LValue AnonImpl::GenerateRuntimeCall(Instruction* instr,
   callsite_info->set_deopt_id(deopt_id);
   callsite_info->set_locs(locs);
   callsite_info->set_stack_parameter_count(argument_count);
-  CallResolver::CallResolverParameter param = {instr, Instr::kInstrSize,
-                                               std::move(callsite_info)};
+  CallResolver::CallResolverParameter param = {
+      instr, Instr::kInstrSize, std::move(callsite_info), nullptr};
   CallResolver resolver(*this, -1, param);
   resolver.SetGParameter(static_cast<int>(CODE_REG), code_object);
   // add stack parameters.
@@ -782,15 +818,15 @@ LValue AnonImpl::GenerateStaticCall(Instruction* instr,
   EMASSERT(argument_count == arguments.size());
 
   std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
-  callsite_info->set_type(CallSiteInfo::CallTargetType::kCodeRelative);
+  callsite_info->set_type(CallSiteInfo::CallTargetType::kCallRelative);
   callsite_info->set_token_pos(token_pos);
   callsite_info->set_deopt_id(deopt_id);
   callsite_info->set_locs(locs);
   callsite_info->set_stack_parameter_count(argument_count);
   callsite_info->set_target(&function);
   callsite_info->set_entry_kind(entry_kind);
-  CallResolver::CallResolverParameter param = {instr, Instr::kInstrSize,
-                                               std::move(callsite_info)};
+  CallResolver::CallResolverParameter param = {
+      instr, Instr::kInstrSize, std::move(callsite_info), nullptr};
   CallResolver resolver(*this, ssa_index, param);
   resolver.SetGParameter(static_cast<int>(ARGS_DESC_REG), argument_desc_val);
   // setup stack parameters
@@ -951,6 +987,142 @@ void AnonImpl::StoreToOffset(LValue base, LValue offset, LValue v) {
   output().buildStore(v, gep);
 }
 
+void AnonImpl::StoreIntoObject(Instruction* instr,
+                               LValue object,  // Object we are storing into.
+                               LValue dest,    // Where we are storing into.
+                               LValue value,   // Value we are storing.
+                               compiler::Assembler::CanBeSmi can_value_be_smi) {
+  LValue gep =
+      BuildAccessPointer(object, dest, pointerType(output().tagged_type()));
+  output().buildStore(value, gep);
+  DiamondContinuationResolver diamond(*this, -1);
+  diamond.BuildCmp([&]() {
+    if (can_value_be_smi == compiler::Assembler::kValueCanBeSmi) {
+      return TstSmi(value);
+    }
+    return output().repo().booleanFalse;
+  });
+  diamond.BuildLeft([&]() {
+    // Smi case.
+    return value;
+  });
+  diamond.BuildRight([&]() {
+    // None Smi case
+    LValue object_tag = LoadFieldFromOffset(
+        object, compiler::target::Object::tags_offset(), output().repo().int8);
+    LValue value_tag = LoadFieldFromOffset(
+        value, compiler::target::Object::tags_offset(), output().repo().int8);
+    LValue and_value = output().buildAnd(
+        value_tag, output().buildShr(
+                       object_tag,
+                       output().constInt8(
+                           compiler::target::RawObject::kBarrierOverlapShift)));
+    and_value = output().buildCast(LLVMZExt, and_value, output().repo().intPtr);
+    LValue barrier_mask_gep = output().buildGEPWithByteOffset(
+        output().thread(),
+        output().constIntPtr(
+            compiler::target::Thread::write_barrier_mask_offset()),
+        pointerType(output().repo().intPtr));
+    LValue barrier_mask = output().buildLoad(barrier_mask_gep);
+    DiamondContinuationResolver resolver(*this, -1);
+    resolver.BuildCmp([&]() {
+      LValue test_value = output().buildAnd(and_value, barrier_mask);
+      return output().buildICmp(LLVMIntNE, test_value, output().constIntPtr(0));
+    });
+    resolver.BuildLeft([&]() {
+      // should emit
+      LValue entry_gep = output().buildGEPWithByteOffset(
+          output().thread(),
+          compiler::target::Thread::write_barrier_wrappers_thread_offset(
+              kWriteBarrierValueReg),
+          pointerType(output().repo().ref8));
+      LValue entry = output().buildLoad(entry_gep);
+      std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
+      // use kReg type.
+      CallResolver::CallResolverParameter param = {
+          instr, 0, std::move(callsite_info), entry};
+      CallResolver call_resolver(*this, -1, param);
+      call_resolver.SetGParameter(kWriteBarrierObjectReg, object);
+      call_resolver.SetGParameter(kWriteBarrierValueReg, value);
+      call_resolver.BuildCall();
+      return value;
+    });
+    resolver.BuildRight([&]() { return value; });
+    return resolver.End();
+  });
+  diamond.End();
+}
+
+void AnonImpl::StoreIntoArray(Instruction* instr,
+                              LValue object,  // Object we are storing into.
+                              LValue dest,    // Where we are storing into.
+                              LValue value,   // Value we are storing.
+                              compiler::Assembler::CanBeSmi can_value_be_smi) {
+  LValue gep =
+      BuildAccessPointer(object, dest, pointerType(output().tagged_type()));
+  output().buildStore(value, gep);
+  DiamondContinuationResolver diamond(*this, -1);
+  diamond.BuildCmp([&]() {
+    if (can_value_be_smi == compiler::Assembler::kValueCanBeSmi) {
+      return TstSmi(value);
+    }
+    return output().repo().booleanFalse;
+  });
+  diamond.BuildLeft([&]() {
+    // Smi case.
+    return value;
+  });
+  diamond.BuildRight([&]() {
+    // None Smi case
+    LValue object_tag = LoadFieldFromOffset(
+        object, compiler::target::Object::tags_offset(), output().repo().int8);
+    LValue value_tag = LoadFieldFromOffset(
+        value, compiler::target::Object::tags_offset(), output().repo().int8);
+    LValue and_value = output().buildAnd(
+        value_tag, output().buildShr(
+                       object_tag,
+                       output().constInt8(
+                           compiler::target::RawObject::kBarrierOverlapShift)));
+    and_value = output().buildCast(LLVMZExt, and_value, output().repo().intPtr);
+    LValue barrier_mask_gep = output().buildGEPWithByteOffset(
+        output().thread(),
+        output().constIntPtr(
+            compiler::target::Thread::write_barrier_mask_offset()),
+        pointerType(output().repo().intPtr));
+    LValue barrier_mask = output().buildLoad(barrier_mask_gep);
+    DiamondContinuationResolver resolver(*this, -1);
+    resolver.BuildCmp([&]() {
+      LValue test_value = output().buildAnd(and_value, barrier_mask);
+      return output().buildICmp(LLVMIntNE, test_value, output().constIntPtr(0));
+    });
+    resolver.BuildLeft([&]() {
+      // should emit
+      LValue entry_gep = output().buildGEPWithByteOffset(
+          output().thread(),
+          compiler::target::Thread::array_write_barrier_entry_point_offset(),
+          pointerType(output().repo().ref8));
+      LValue entry = output().buildLoad(entry_gep);
+      std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
+      // use kReg type.
+      CallResolver::CallResolverParameter param = {
+          instr, 0, std::move(callsite_info), entry};
+      CallResolver call_resolver(*this, -1, param);
+      LValue slot = output().buildAdd(
+          output().buildCast(LLVMPtrToInt, object, output().repo().intPtr),
+          dest);
+      slot = output().buildSub(slot, output().constIntPtr(kHeapObjectTag));
+      call_resolver.SetGParameter(kWriteBarrierObjectReg, object);
+      call_resolver.SetGParameter(kWriteBarrierValueReg, value);
+      call_resolver.SetGParameter(kWriteBarrierSlotReg, slot);
+      call_resolver.BuildCall();
+      return value;
+    });
+    resolver.BuildRight([&]() { return value; });
+    return resolver.End();
+  });
+  diamond.End();
+}
+
 LBasicBlock AnonImpl::NewBasicBlock(const char* fmt, ...) {
   va_list va;
   va_start(va, fmt);
@@ -1088,12 +1260,19 @@ void CallResolver::GenerateStatePointFunction() {
 }
 
 void CallResolver::EmitCall() {
+  EMASSERT(call_resolver_parameter_.instruction_size != 0 ||
+           call_resolver_parameter_.target != nullptr);
   std::vector<LValue> statepoint_operands;
   patchid_ = impl().NextPatchPoint();
   statepoint_operands.push_back(output().constInt64(patchid_));
   statepoint_operands.push_back(
       output().constInt32(call_resolver_parameter_.instruction_size));
-  statepoint_operands.push_back(constNull(callee_type_));
+  if (!call_resolver_parameter_.target) {
+    statepoint_operands.push_back(constNull(callee_type_));
+  } else {
+    statepoint_operands.push_back(output().buildCast(
+        LLVMBitCast, call_resolver_parameter_.target, callee_type_));
+  }
   statepoint_operands.push_back(
       output().constInt32(parameters_.size()));           // # call params
   statepoint_operands.push_back(output().constInt32(0));  // flags
@@ -1184,6 +1363,85 @@ void CallResolver::EmitExceptionBlockIfNeeded() {
     output().positionToBBEnd(catch_block_impl_->native_bb);
     impl().MergeExceptionLiveInEntries(e, catch_block_, catch_block_impl_);
   }
+}
+
+BoxAllocationSlowPath::BoxAllocationSlowPath(Instruction* instruction,
+                                             const Class& cls,
+                                             AnonImpl& impl)
+    : instruction_(instruction), cls_(cls), impl_(impl) {}
+
+LValue BoxAllocationSlowPath::Allocate() {
+  const intptr_t instance_size = compiler::target::Class::GetInstanceSize(cls_);
+  if (compiler::target::Heap::IsAllocatableInNewSpace(instance_size)) {
+    const classid_t cid = compiler::target::Class::GetId(cls_);
+    LValue top_offset = output().buildGEPWithByteOffset(
+        output().thread(), compiler::target::Thread::top_offset(),
+        pointerType(output().repo().intPtr));
+    LValue instance = output().buildLoad(top_offset);
+    // TODO(koda): Protect against unsigned overflow here.
+#if !defined(TARGET_ARCH_IS_64_BIT)
+    LValue uadd_overflow =
+        output().buildCall(output().repo().uaddWithOverflow32Intrinsic(),
+                           instance, output().constInt32(instance_size));
+#else
+    LValue uadd_overflow =
+        output().buildCall(output().repo().uaddWithOverflow64Intrinsic(),
+                           instance, output().constInt64(instance_size));
+#endif
+    LValue end_offset = output().buildGEPWithByteOffset(
+        output().thread(), compiler::target::Thread::end_offset(),
+        pointerType(output().repo().intPtr));
+    LValue end = output().buildLoad(end_offset);
+
+    DiamondContinuationResolver diamond(impl_, -1);
+    diamond.BuildCmp([&]() {
+      LValue icmp = output().buildICmp(
+          LLVMIntULE, end, output().buildExtractValue(uadd_overflow, 0));
+      LValue overflowed = output().buildExtractValue(uadd_overflow, 1);
+      LValue true_cond = output().buildOr(icmp, overflowed);
+      true_cond = output().buildCall(output().repo().expectIntrinsic(),
+                                     true_cond, output().repo().booleanFalse);
+      return true_cond;
+    });
+    diamond.BuildLeft([&]() { return BuildSlowPath(); });
+    diamond.BuildRight([&]() {
+      // Successfully allocated the object, now update top to point to
+      // next object start and store the class in the class field of object.
+      output().buildStore(output().buildExtractValue(uadd_overflow, 0),
+                          top_offset);
+      EMASSERT(instance_size >= kHeapObjectTag);
+      const uint32_t tags =
+          compiler::target::MakeTagWordForNewSpaceObject(cid, instance_size);
+      output().buildStore(
+          output().constIntPtr(tags),
+          impl().BuildAccessPointer(
+              instance,
+              output().constIntPtr(compiler::target::Object::tags_offset()),
+              pointerType(output().repo().intPtr)));
+      instance =
+          output().buildAdd(instance, output().constIntPtr(kHeapObjectTag));
+      return output().buildCast(LLVMIntToPtr, instance, output().tagged_type());
+    });
+    return diamond.End();
+  } else {
+    return BuildSlowPath();
+  }
+}
+
+LValue BoxAllocationSlowPath::BuildSlowPath() {
+  const Code& stub = Code::ZoneHandle(
+      impl().flow_graph()->zone(), StubCode::GetAllocationStubForClass(cls_));
+
+  std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
+  callsite_info->set_type(CallSiteInfo::CallTargetType::kStubRelative);
+  callsite_info->set_token_pos(instruction_->token_pos());
+  callsite_info->set_deopt_id(instruction_->deopt_id());
+  callsite_info->set_locs(instruction_->locs());
+  callsite_info->set_code(&stub);
+  CallResolver::CallResolverParameter param = {
+      instruction_, Instr::kInstrSize, std::move(callsite_info), nullptr};
+  CallResolver resolver(impl(), -1, param);
+  return resolver.BuildCall();
 }
 }  // namespace
 
@@ -1372,8 +1630,8 @@ void IRTranslator::VisitTailCall(TailCallInstr* instr) {
   impl().SetDebugLine(instr);
   std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
   callsite_info->set_type(CallSiteInfo::CallTargetType::kCodeObject);
-  CallResolver::CallResolverParameter param = {instr, Instr::kInstrSize,
-                                               std::move(callsite_info)};
+  CallResolver::CallResolverParameter param = {
+      instr, Instr::kInstrSize, std::move(callsite_info), nullptr};
   CallResolver resolver(impl(), -1, param);
   LValue code_object = impl().LoadObject(instr->code());
   resolver.SetGParameter(static_cast<int>(CODE_REG), code_object);
@@ -1492,8 +1750,8 @@ void IRTranslator::VisitClosureCall(ClosureCallInstr* instr) {
   callsite_info->set_deopt_id(instr->deopt_id());
   callsite_info->set_locs(instr->locs());
   callsite_info->set_stack_parameter_count(argument_count);
-  CallResolver::CallResolverParameter param = {instr, Instr::kInstrSize,
-                                               std::move(callsite_info)};
+  CallResolver::CallResolverParameter param = {
+      instr, Instr::kInstrSize, std::move(callsite_info), nullptr};
   CallResolver resolver(impl(), instr->ssa_temp_index(), param);
   const Array& arguments_descriptor = Array::ZoneHandle(
       impl().flow_graph()->zone(), instr->GetArgumentsDescriptor());
@@ -1533,8 +1791,8 @@ void IRTranslator::VisitInstanceCall(InstanceCallInstr* instr) {
   callsite_info->set_deopt_id(instr->deopt_id());
   callsite_info->set_locs(instr->locs());
   callsite_info->set_stack_parameter_count(argument_count);
-  CallResolver::CallResolverParameter param = {instr, Instr::kInstrSize,
-                                               std::move(callsite_info)};
+  CallResolver::CallResolverParameter param = {
+      instr, Instr::kInstrSize, std::move(callsite_info), nullptr};
   CallResolver resolver(impl(), instr->ssa_temp_index(), param);
 
   const Code& initial_stub = StubCode::UnlinkedCall();
@@ -1564,8 +1822,10 @@ void IRTranslator::VisitInstanceCall(InstanceCallInstr* instr) {
 
 void IRTranslator::VisitPolymorphicInstanceCall(
     PolymorphicInstanceCallInstr* instr) {
-#if 0
   impl().SetDebugLine(instr);
+#if 0
+  bool complete = instr->complete();
+  if (complete) {
   ArgumentsInfo args_info(instr->instance_call()->type_args_len(),
                           instr->instance_call()->ArgumentCount(),
                           instr->instance_call()->argument_names());
@@ -1578,7 +1838,7 @@ void IRTranslator::VisitPolymorphicInstanceCall(
   int which_case_to_skip = kNoCase;
 
   const int length = targets.length();
-  ASSERT(length > 0);
+  EMASSERT(length > 0);
   int non_smi_length = length;
 
   // Find out if one of the classes in one of the cases is the Smi class. We
@@ -1675,9 +1935,11 @@ void IRTranslator::VisitPolymorphicInstanceCall(
     EmitMegamorphicInstanceCall(function_name, arguments_descriptor, deopt_id,
                                 token_index, locs, try_index);
   }
+  } else {
+  }
 #else
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  // FIXME: implement the upper code.
+  VisitInstanceCall(instr->instance_call());
 #endif
 }
 
@@ -1720,14 +1982,28 @@ void IRTranslator::VisitStoreLocal(StoreLocalInstr* instr) {
 
 void IRTranslator::VisitStrictCompare(StrictCompareInstr* instr) {
   impl().SetDebugLine(instr);
-  if (instr->needs_number_check()) {
-    // FIXME: do it after call supports
-    UNREACHABLE();
-  }
+  LValue result;
   LValue left = impl().GetLLVMValue(instr->InputAt(0));
   LValue right = impl().GetLLVMValue(instr->InputAt(1));
-  LValue result = output().buildICmp(
-      instr->kind() == Token::kEQ_STRICT ? LLVMIntEQ : LLVMIntNE, left, right);
+  if (instr->needs_number_check()) {
+    std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
+    callsite_info->set_type(CallSiteInfo::CallTargetType::kStubRelative);
+    callsite_info->set_token_pos(instr->token_pos());
+    callsite_info->set_deopt_id(instr->deopt_id());
+    callsite_info->set_locs(instr->locs());
+    callsite_info->set_code(&StubCode::OptimizedIdenticalWithNumberCheck());
+    callsite_info->set_kind(RawPcDescriptors::kRuntimeCall);
+    CallResolver::CallResolverParameter param = {
+        instr, Instr::kInstrSize, std::move(callsite_info), nullptr};
+    CallResolver resolver(impl(), -1, param);
+    resolver.AddStackParameter(right);
+    resolver.AddStackParameter(left);
+    result = resolver.BuildCall();
+  } else {
+    result = output().buildICmp(
+        instr->kind() == Token::kEQ_STRICT ? LLVMIntEQ : LLVMIntNE, left,
+        right);
+  }
   impl().SetLLVMValue(instr, result);
 }
 
@@ -1822,8 +2098,29 @@ void IRTranslator::VisitRelationalOp(RelationalOpInstr* instr) {
 }
 
 void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  EMASSERT(static_cast<intptr_t>(impl().pushed_arguments_.size()) >=
+           instr->ArgumentCount());
+  EMASSERT(instr->link_lazily());
+  const intptr_t argument_count =
+      instr->ArgumentCount();  // Includes type args.
+
+  std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
+  // use kReg type.
+  callsite_info->set_type(CallSiteInfo::CallTargetType::kNative);
+  callsite_info->set_token_pos(instr->token_pos());
+  callsite_info->set_deopt_id(instr->deopt_id());
+  callsite_info->set_locs(instr->locs());
+  callsite_info->set_stack_parameter_count(argument_count);
+  CallResolver::CallResolverParameter param = {
+      instr, kNativeCallInstrSize, std::move(callsite_info), nullptr};
+  CallResolver resolver(impl(), instr->ssa_temp_index(), param);
+  for (intptr_t i = 0; i < argument_count; ++i) {
+    LValue argument = impl().pushed_arguments_.back();
+    impl().pushed_arguments_.pop_back();
+    resolver.AddStackParameter(argument);
+  }
+  impl().SetLLVMValue(instr, resolver.BuildCall());
 }
 
 void IRTranslator::VisitDebugStepCheck(DebugStepCheckInstr* instr) {
@@ -1882,53 +2179,69 @@ void IRTranslator::VisitLoadCodeUnits(LoadCodeUnitsInstr* instr) {
     value = output().buildCast(LLVMZExt, value_32, output().repo().int64);
   }
 #endif
-  if (instr->representation() == kTagged) {
-    EMASSERT(instr->representation() == kTagged);
-    LType type;
-    switch (instr->class_id()) {
-      case kOneByteStringCid:
-      case kExternalOneByteStringCid:
-        switch (instr->element_count()) {
-          case 1:
-            type = output().repo().int8;
-            break;
-          case 2:
-            type = output().repo().int16;
-            break;
-          case 4:
-            type = output().repo().int32;
-            break;
-          default:
-            UNREACHABLE();
-        }
-        break;
-      case kTwoByteStringCid:
-      case kExternalTwoByteStringCid:
-        switch (instr->element_count()) {
-          case 1:
-            type = output().repo().int16;
-            break;
-          case 2:
-            type = output().repo().int32;
-            break;
-          default:
-            UNREACHABLE();
-        }
-        break;
-      default:
-        UNREACHABLE();
-        break;
-    }
-    LValue gep =
-        impl().BuildAccessPointer(array, offset_value, pointerType(type));
-    LValue int_value = impl().EnsureIntPtr(output().buildLoad(gep));
-
-    if (instr->can_pack_into_smi()) {
-      value = impl().SmiTag(int_value);
-    } else {
-      // FIXME: implement after call support
+  EMASSERT(instr->representation() == kTagged);
+  LType type;
+  switch (instr->class_id()) {
+    case kOneByteStringCid:
+    case kExternalOneByteStringCid:
+      switch (instr->element_count()) {
+        case 1:
+          type = output().repo().int8;
+          break;
+        case 2:
+          type = output().repo().int16;
+          break;
+        case 4:
+          type = output().repo().int32;
+          break;
+        default:
+          UNREACHABLE();
+      }
+      break;
+    case kTwoByteStringCid:
+    case kExternalTwoByteStringCid:
+      switch (instr->element_count()) {
+        case 1:
+          type = output().repo().int16;
+          break;
+        case 2:
+          type = output().repo().int32;
+          break;
+        default:
+          UNREACHABLE();
+      }
+      break;
+    default:
       UNREACHABLE();
-    }
+      break;
+  }
+  LValue gep =
+      impl().BuildAccessPointer(array, offset_value, pointerType(type));
+  LValue int_value = impl().EnsureIntPtr(output().buildLoad(gep));
+
+  if (instr->can_pack_into_smi()) {
+    value = impl().SmiTag(int_value);
+  } else {
+#if defined(TARGET_ARCH_IS_32_BIT)
+    DiamondContinuationResolver diamond(impl(), instr->ssa_temp_index());
+    diamond.BuildCmp([&]() {
+      LValue and_value =
+          output().buildAnd(int_value, output().constIntPtr(0xC0000000));
+      LValue cmp =
+          output().buildICmp(LLVMIntEQ, and_value, output().constIntPtr(0));
+      cmp = output().buildCall(output().repo().expectIntrinsic(), cmp,
+                               output().repo().booleanTrue);
+      return cmp;
+    });
+    diamond.BuildLeft([&]() { return impl().SmiTag(int_value); });
+    diamond.BuildRight([&]() {
+      BoxAllocationSlowPath allocation(instr, impl().mint_class(), impl());
+      return allocation.Allocate();
+    });
+    value = diamond.End();
+#else
+    UNREACHABLE();
+#endif
   }
   impl().SetLLVMValue(instr, value);
 }
@@ -1955,8 +2268,8 @@ void IRTranslator::VisitStoreIndexed(StoreIndexedInstr* instr) {
   switch (instr->class_id()) {
     case kArrayCid:
       if (instr->ShouldEmitStoreBarrier()) {
-        // FIXME: implment after call support
-        UNREACHABLE();
+        impl().StoreIntoArray(instr, array, offset_value, value,
+                              instr->CanValueBeSmi());
       } else {
         LValue gep = impl().BuildAccessPointer(
             array, offset_value, pointerType(output().tagged_type()));

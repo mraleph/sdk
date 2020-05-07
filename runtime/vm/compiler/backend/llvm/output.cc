@@ -203,6 +203,10 @@ void Output::positionBefore(LValue value) {
   LLVMPositionBuilderBefore(builder_, value);
 }
 
+LValue Output::constInt8(int i) {
+  return dart_llvm::constInt(repo_.int8, i);
+}
+
 LValue Output::constInt16(int i) {
   return dart_llvm::constInt(repo_.int16, i);
 }

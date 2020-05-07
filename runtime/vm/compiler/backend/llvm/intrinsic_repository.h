@@ -12,6 +12,8 @@
     macro(ctlz64, "llvm.ctlz.i64", functionType(int64, int64, boolean)) \
     macro(addWithOverflow32, "llvm.sadd.with.overflow.i32", functionType(structType(context_, int32, boolean), int32, int32)) \
     macro(addWithOverflow64, "llvm.sadd.with.overflow.i64", functionType(structType(context_, int64, boolean), int64, int64)) \
+    macro(uaddWithOverflow32, "llvm.uadd.with.overflow.i32", functionType(structType(context_, int32, boolean), int32, int32)) \
+    macro(uaddWithOverflow64, "llvm.uadd.with.overflow.i64", functionType(structType(context_, int64, boolean), int64, int64)) \
     macro(doubleAbs, "llvm.fabs.f64", functionType(doubleType, doubleType)) \
     macro(floatAbs, "llvm.fabs.f32", functionType(floatType, floatType)) \
     macro(doubleSin, "llvm.sin.f64", functionType(doubleType, doubleType)) \

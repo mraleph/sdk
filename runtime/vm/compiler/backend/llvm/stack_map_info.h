@@ -47,9 +47,12 @@ class CallSiteInfo final : public StackMapInfo {
   enum class CallTargetType {
     kUnspecify,
     kReg,
-    kCodeRelative,
+    //
+    kCallRelative,
+    kStubRelative,
     // Code object call is the call that code object alreadly loaded to CODE_REG
     kCodeObject,
+    kNative,
   };
   explicit CallSiteInfo();
   ~CallSiteInfo() override = default;
@@ -63,6 +66,7 @@ class CallSiteInfo final : public StackMapInfo {
   V(RawPcDescriptors::Kind, kind)                                              \
   V(int, reg)                                                                  \
   V(const Function*, target)                                                   \
+  V(const Code*, code)                                                         \
   V(CodeEntryKind, entry_kind)                                                 \
   V(bool, is_tailcall)
 
@@ -88,6 +92,7 @@ class CallSiteInfo final : public StackMapInfo {
       const Function* target_;
       Code::EntryKind entry_kind_;
     };
+    const Code* code_;
   };
   bool is_tailcall_;
 };
