@@ -14,7 +14,6 @@ CallSiteInfo::CallSiteInfo()
       type_(CallTargetType::kUnspecify),
       token_pos_(),
       deopt_id_(0),
-      locs_(nullptr),
       stack_parameter_count_(0),
       try_index_(kInvalidTryIndex),
       kind_(RawPcDescriptors::kOther),

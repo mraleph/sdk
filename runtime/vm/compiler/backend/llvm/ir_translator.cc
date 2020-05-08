@@ -172,8 +172,7 @@ class AnonImpl {
                              TokenPosition token_pos,
                              intptr_t deopt_id,
                              const RuntimeEntry& entry,
-                             intptr_t argument_count,
-                             LocationSummary* locs);
+                             intptr_t argument_count);
   LValue GenerateStaticCall(Instruction*,
                             int ssa_index,
                             const std::vector<LValue>& arguments,
@@ -181,17 +180,26 @@ class AnonImpl {
                             TokenPosition token_pos,
                             const Function& function,
                             ArgumentsInfo args_info,
-                            LocationSummary* locs,
                             const ICData& ic_data_in,
                             Code::EntryKind entry_kind);
+  LValue GenerateMegamorphicInstanceCall(Instruction* instr,
+                                         const String& name,
+                                         const Array& arguments_descriptor,
+                                         intptr_t deopt_id,
+                                         TokenPosition token_pos);
   // Types
   LType GetMachineRepresentationType(Representation);
+  LValue TaggedToWord(LValue v);
+  LValue WordToTagged(LValue v);
   LValue EnsureBoolean(LValue v);
   LValue EnsureIntPtr(LValue v);
   LValue EnsureInt32(LValue v);
   LValue SmiTag(LValue v);
   LValue SmiUntag(LValue v);
   LValue TstSmi(LValue v);
+  LValue BooleanToObject(LValue boolean);
+  LValue LoadClassId(LValue o);
+  LValue CompareClassId(LValue o, intptr_t clsid);
 
   // Value helpers for current bb
   LValue GetLLVMValue(int ssa_id);
@@ -240,12 +248,15 @@ class AnonImpl {
   inline IRTranslatorBlockImpl* current_bb_impl() { return current_bb_impl_; }
   inline BlockEntryInstr* current_bb() { return current_bb_; }
   inline FlowGraph* flow_graph() { return flow_graph_; }
+  inline Thread* thread() { return thread_; }
 
   // classes
   const Class& mint_class() {
     return Class::ZoneHandle(
         flow_graph()->isolate()->object_store()->mint_class());
   }
+
+  Zone* zone() { return flow_graph_->zone(); }
 
   BlockEntryInstr* current_bb_;
   IRTranslatorBlockImpl* current_bb_impl_;
@@ -263,6 +274,7 @@ class AnonImpl {
   std::vector<Instruction*> debug_instrs_;
   // Calls
   std::vector<LValue> pushed_arguments_;
+  Thread* thread_;
   int patch_point_id_ = 0;
   bool visited_function_entry_ = false;
 };
@@ -289,10 +301,20 @@ class DiamondContinuationResolver : public ContinuationResolver {
   DiamondContinuationResolver& BuildLeft(std::function<LValue()>);
   DiamondContinuationResolver& BuildRight(std::function<LValue()>);
   LValue End();
+  void BranchToOtherLeafOnCondition(LValue cond);
+  LBasicBlock left_block() { return blocks_[0]; }
+  LBasicBlock right_block() { return blocks_[1]; }
+  void LeftHint() { hint_ = -1; }
+  void RightHint() { hint_ = 1; }
 
  private:
   LBasicBlock blocks_[3];
   LValue values_[2];
+  // 0 no hint
+  // -1 left hint
+  // 1 right hint
+  int hint_;
+  int building_block_index_;
 };
 
 class CallResolver : public ContinuationResolver {
@@ -354,6 +376,62 @@ class BoxAllocationSlowPath {
   Instruction* instruction_;
   const Class& cls_;
   AnonImpl& impl_;
+};
+
+class ComparisonResolver : public FlowGraphVisitor {
+ public:
+  explicit ComparisonResolver(AnonImpl& impl);
+  ~ComparisonResolver() = default;
+  AnonImpl& impl() { return impl_; }
+  Output& output() { return *impl_.output_; }
+  LValue result() {
+    EMASSERT(result_ != nullptr);
+    return result_;
+  }
+
+ private:
+  void VisitStrictCompare(StrictCompareInstr* instr) override;
+  void VisitEqualityCompare(EqualityCompareInstr* instr) override;
+  void VisitCheckedSmiComparison(CheckedSmiComparisonInstr* instr) override;
+  void VisitCaseInsensitiveCompare(CaseInsensitiveCompareInstr* instr) override;
+
+  AnonImpl& impl_;
+  LValue result_;
+};
+
+class Label {
+ public:
+  Label(const char* fmt, ...);
+
+ private:
+  void InitBBIfNeeded(AnonImpl& impl);
+  LBasicBlock basic_block() { return bb_; }
+  friend class AssemblerResolver;
+  std::string name_;
+  LBasicBlock bb_;
+};
+
+class AssemblerResolver {
+ public:
+  AssemblerResolver(AnonImpl&);
+  ~AssemblerResolver() = default;
+
+  void Branch(LValue cond, Label&);
+  void BranchIfNot(LValue cond, Label&);
+  void Bind(Label&);
+  LValue End();
+  void GotoMergeWithValue(LValue v);
+  void GotoMergeWithValueIf(LValue cond, LValue v);
+  void GotoMergeWithValueIfNot(LValue cond, LValue v);
+
+ private:
+  Output& output() { return impl_.output(); }
+  AnonImpl& impl() { return impl_; }
+  AnonImpl& impl_;
+  LBasicBlock current_;
+  LBasicBlock merge_;
+  std::vector<LBasicBlock> merge_blocks_;
+  std::vector<LValue> merge_values_;
 };
 
 ExceptionBlockLiveInEntry::ExceptionBlockLiveInEntry(
@@ -631,16 +709,14 @@ LValue AnonImpl::EnsurePhiInput(BlockEntryInstr* pred, int index, LType type) {
   if ((value_type == output().repo().intPtr) &&
       (type == output().tagged_type())) {
     output().positionBefore(terminator);
-    LValue ret_val =
-        output().buildCast(LLVMIntToPtr, val, output().tagged_type());
+    LValue ret_val = WordToTagged(val);
     return ret_val;
   }
   LLVMTypeKind value_type_kind = LLVMGetTypeKind(value_type);
   if ((LLVMPointerTypeKind == value_type_kind) &&
       (type == output().repo().intPtr)) {
     output().positionBefore(terminator);
-    LValue ret_val =
-        output().buildCast(LLVMPtrToInt, val, output().repo().intPtr);
+    LValue ret_val = TaggedToWord(val);
     return ret_val;
   }
   if ((value_type == output().repo().boolean) &&
@@ -736,12 +812,12 @@ LValue AnonImpl::BuildAccessPointer(LValue base,
 LValue AnonImpl::BuildAccessPointer(LValue base, LValue offset, LType type) {
   LLVMTypeKind kind = LLVMGetTypeKind(typeOf(base));
   if (kind == LLVMIntegerTypeKind) {
-    base = output().buildCast(LLVMIntToPtr, base, output().repo().ref8);
+    base = WordToTagged(base);
   }
   // For ElementOffsetFromIndex ignores BitcastTaggedToWord.
   if (typeOf(offset) == output().tagged_type()) {
     UNREACHABLE();
-    // offset = output().buildCast(LLVMPtrToInt, offset, output().repo().intPtr);
+    // offset = TaggedToWord(offset);
   }
   LValue pointer = output().buildGEPWithByteOffset(base, offset, type);
   return pointer;
@@ -765,8 +841,7 @@ LValue AnonImpl::GenerateRuntimeCall(Instruction* instr,
                                      TokenPosition token_pos,
                                      intptr_t deopt_id,
                                      const RuntimeEntry& runtime_entry,
-                                     intptr_t argument_count,
-                                     LocationSummary* locs) {
+                                     intptr_t argument_count) {
   EMASSERT(runtime_entry.is_leaf());
   LValue code_object =
       LoadFromOffset(output().thread(),
@@ -776,7 +851,6 @@ LValue AnonImpl::GenerateRuntimeCall(Instruction* instr,
   callsite_info->set_type(CallSiteInfo::CallTargetType::kCodeObject);
   callsite_info->set_token_pos(token_pos);
   callsite_info->set_deopt_id(deopt_id);
-  callsite_info->set_locs(locs);
   callsite_info->set_stack_parameter_count(argument_count);
   CallResolver::CallResolverParameter param = {
       instr, Instr::kInstrSize, std::move(callsite_info), nullptr};
@@ -799,13 +873,12 @@ LValue AnonImpl::GenerateStaticCall(Instruction* instr,
                                     TokenPosition token_pos,
                                     const Function& function,
                                     ArgumentsInfo args_info,
-                                    LocationSummary* locs,
                                     const ICData& ic_data_in,
                                     Code::EntryKind entry_kind) {
   const ICData& ic_data = ICData::ZoneHandle(ic_data_in.Original());
   const Array& arguments_descriptor = Array::ZoneHandle(
-      flow_graph()->zone(), ic_data.IsNull() ? args_info.ToArgumentsDescriptor()
-                                             : ic_data.arguments_descriptor());
+      zone(), ic_data.IsNull() ? args_info.ToArgumentsDescriptor()
+                               : ic_data.arguments_descriptor());
   LValue argument_desc_val = LLVMGetUndef(output().tagged_type());
   if (function.HasOptionalParameters() || function.IsGeneric()) {
     argument_desc_val = LoadObject(arguments_descriptor);
@@ -821,7 +894,6 @@ LValue AnonImpl::GenerateStaticCall(Instruction* instr,
   callsite_info->set_type(CallSiteInfo::CallTargetType::kCallRelative);
   callsite_info->set_token_pos(token_pos);
   callsite_info->set_deopt_id(deopt_id);
-  callsite_info->set_locs(locs);
   callsite_info->set_stack_parameter_count(argument_count);
   callsite_info->set_target(&function);
   callsite_info->set_entry_kind(entry_kind);
@@ -834,6 +906,44 @@ LValue AnonImpl::GenerateStaticCall(Instruction* instr,
     LValue param = arguments[i];
     resolver.AddStackParameter(param);
   }
+  return resolver.BuildCall();
+}
+
+LValue AnonImpl::GenerateMegamorphicInstanceCall(
+    Instruction* instr,
+    const String& name,
+    const Array& arguments_descriptor,
+    intptr_t deopt_id,
+    TokenPosition token_pos) {
+  const ArgumentsDescriptor args_desc(arguments_descriptor);
+  size_t argument_count = args_desc.Count();
+  EMASSERT(argument_count >= pushed_arguments_.size());
+  const MegamorphicCache& cache = MegamorphicCache::ZoneHandle(
+      zone(),
+      MegamorphicCacheTable::Lookup(thread(), name, arguments_descriptor));
+  LValue cache_value = LoadObject(cache);
+  LValue entry_gep = output().buildGEPWithByteOffset(
+      output().thread(),
+      compiler::target::Thread::megamorphic_call_checked_entry_offset(),
+      pointerType(output().repo().ref8));
+  LValue entry = output().buildLoad(entry_gep);
+
+  std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
+  callsite_info->set_type(CallSiteInfo::CallTargetType::kTarget);
+  callsite_info->set_token_pos(token_pos);
+  callsite_info->set_deopt_id(deopt_id);
+  callsite_info->set_stack_parameter_count(argument_count);
+  CallResolver::CallResolverParameter param = {instr, 0,
+                                               std::move(callsite_info), entry};
+  CallResolver resolver(*this, -1, param);
+  for (size_t i = 0; i < argument_count; ++i) {
+    LValue argument = pushed_arguments_.back();
+    pushed_arguments_.pop_back();
+    resolver.AddStackParameter(argument);
+  }
+  LValue receiver = resolver.GetStackParameter((argument_count - 1));
+  resolver.SetGParameter(kReceiverReg, receiver);
+  resolver.SetGParameter(kICReg, cache_value);
   return resolver.BuildCall();
 }
 
@@ -862,11 +972,20 @@ LType AnonImpl::GetMachineRepresentationType(Representation rep) {
   return type;
 }
 
+LValue AnonImpl::TaggedToWord(LValue v) {
+  EMASSERT(typeOf(v) == output().tagged_type());
+  return output().buildCast(LLVMPtrToInt, v, output().repo().intPtr);
+}
+
+LValue AnonImpl::WordToTagged(LValue v) {
+  EMASSERT(typeOf(v) == output().repo().intPtr);
+  return output().buildCast(LLVMIntToPtr, v, output().tagged_type());
+}
+
 LValue AnonImpl::EnsureBoolean(LValue v) {
   LType type = typeOf(v);
   LLVMTypeKind kind = LLVMGetTypeKind(type);
-  if (kind == LLVMPointerTypeKind)
-    v = output().buildCast(LLVMPtrToInt, v, output().repo().intPtr);
+  if (kind == LLVMPointerTypeKind) v = TaggedToWord(v);
   type = typeOf(v);
   if (LLVMGetIntTypeWidth(type) == 1) return v;
   v = output().buildICmp(LLVMIntNE, v, output().repo().intPtrZero);
@@ -899,22 +1018,42 @@ LValue AnonImpl::EnsureInt32(LValue v) {
 LValue AnonImpl::SmiTag(LValue v) {
   EMASSERT(typeOf(v) == output().repo().intPtr);
   v = output().buildShl(v, output().constIntPtr(kSmiTagSize));
-  return output().buildCast(LLVMIntToPtr, v, output().tagged_type());
+  return WordToTagged(v);
 }
 
 LValue AnonImpl::SmiUntag(LValue v) {
   EMASSERT(typeOf(v) == output().tagged_type());
-  v = output().buildCast(LLVMPtrToInt, v, output().repo().intPtr);
+  v = TaggedToWord(v);
   return output().buildShr(v, output().constIntPtr(kSmiTagSize));
 }
 
 LValue AnonImpl::TstSmi(LValue v) {
   EMASSERT(typeOf(v) == output().tagged_type());
-  LValue address = output().buildCast(LLVMPtrToInt, v, output().repo().intPtr);
+  LValue address = TaggedToWord(v);
   LValue and_value =
       output().buildAnd(address, output().constIntPtr(kSmiTagMask));
   return output().buildICmp(LLVMIntNE, and_value,
                             output().constIntPtr(kSmiTagMask));
+}
+
+LValue AnonImpl::BooleanToObject(LValue boolean) {
+  EMASSERT(typeOf(boolean) == output().repo().boolean);
+  return output().buildSelect(boolean, LoadObject(Bool::True()),
+                              LoadObject(Bool::False()));
+}
+
+LValue AnonImpl::LoadClassId(LValue o) {
+  const intptr_t class_id_offset =
+      compiler::target::Object::tags_offset() +
+      compiler::target::RawObject::kClassIdTagPos / kBitsPerByte;
+  return LoadFieldFromOffset(o, class_id_offset,
+                             pointerType(output().repo().int16));
+}
+
+LValue AnonImpl::CompareClassId(LValue o, intptr_t clsid) {
+  LValue clsid_val = LoadClassId(o);
+  clsid_val = output().buildCast(LLVMZExt, clsid_val, output().repo().intPtr);
+  return output().buildICmp(LLVMIntEQ, clsid_val, output().constIntPtr(clsid));
 }
 
 LValue AnonImpl::GetLLVMValue(int ssa_id) {
@@ -958,7 +1097,7 @@ LValue AnonImpl::LoadObject(const Object& object, bool is_unique) {
     LValue gep = output().buildGEPWithByteOffset(
         output().thread(), output().constIntPtr(offset),
         pointerType(output().tagged_type()));
-    return output().buildLoad(gep);
+    return output().buildInvariantLoad(gep);
   } else if (compiler::target::IsSmi(object)) {
     // Relocation doesn't apply to Smis.
     return output().constIntPtr(
@@ -973,7 +1112,7 @@ LValue AnonImpl::LoadObject(const Object& object, bool is_unique) {
     LValue gep = output().buildGEPWithByteOffset(
         output().pp(), output().constIntPtr(offset - kHeapObjectTag),
         pointerType(output().tagged_type()));
-    return output().buildLoad(gep);
+    return output().buildInvariantLoad(gep);
   }
 }
 
@@ -1038,7 +1177,8 @@ void AnonImpl::StoreIntoObject(Instruction* instr,
           pointerType(output().repo().ref8));
       LValue entry = output().buildLoad(entry_gep);
       std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
-      // use kReg type.
+      callsite_info->set_type(CallSiteInfo::CallTargetType::kTarget);
+
       CallResolver::CallResolverParameter param = {
           instr, 0, std::move(callsite_info), entry};
       CallResolver call_resolver(*this, -1, param);
@@ -1107,9 +1247,7 @@ void AnonImpl::StoreIntoArray(Instruction* instr,
       CallResolver::CallResolverParameter param = {
           instr, 0, std::move(callsite_info), entry};
       CallResolver call_resolver(*this, -1, param);
-      LValue slot = output().buildAdd(
-          output().buildCast(LLVMPtrToInt, object, output().repo().intPtr),
-          dest);
+      LValue slot = output().buildAdd(TaggedToWord(object), dest);
       slot = output().buildSub(slot, output().constIntPtr(kHeapObjectTag));
       call_resolver.SetGParameter(kWriteBarrierObjectReg, object);
       call_resolver.SetGParameter(kWriteBarrierValueReg, value);
@@ -1142,7 +1280,7 @@ ContinuationResolver::ContinuationResolver(AnonImpl& impl, int ssa_id)
 
 DiamondContinuationResolver::DiamondContinuationResolver(AnonImpl& _impl,
                                                          int ssa_id)
-    : ContinuationResolver(_impl, ssa_id) {
+    : ContinuationResolver(_impl, ssa_id), hint_(0), building_block_index_(-1) {
   blocks_[0] = impl().NewBasicBlock("left_for_%d", ssa_id);
   blocks_[1] = impl().NewBasicBlock("right_for_%d", ssa_id);
   blocks_[2] = impl().NewBasicBlock("continuation_for_%d", ssa_id);
@@ -1151,6 +1289,13 @@ DiamondContinuationResolver::DiamondContinuationResolver(AnonImpl& _impl,
 DiamondContinuationResolver& DiamondContinuationResolver::BuildCmp(
     std::function<LValue()> f) {
   LValue cmp_value = f();
+  if (hint_ < 0) {
+    cmp_value = output().buildCall(output().repo().expectIntrinsic(), cmp_value,
+                                   output().repo().booleanTrue);
+  } else if (hint_ > 0) {
+    cmp_value = output().buildCall(output().repo().expectIntrinsic(), cmp_value,
+                                   output().repo().booleanFalse);
+  }
   output().buildCondBr(cmp_value, blocks_[0], blocks_[1]);
   return *this;
 }
@@ -1158,6 +1303,7 @@ DiamondContinuationResolver& DiamondContinuationResolver::BuildCmp(
 DiamondContinuationResolver& DiamondContinuationResolver::BuildLeft(
     std::function<LValue()> f) {
   output().positionToBBEnd(blocks_[0]);
+  building_block_index_ = 0;
   values_[0] = f();
   output().buildBr(blocks_[2]);
   return *this;
@@ -1166,6 +1312,7 @@ DiamondContinuationResolver& DiamondContinuationResolver::BuildLeft(
 DiamondContinuationResolver& DiamondContinuationResolver::BuildRight(
     std::function<LValue()> f) {
   output().positionToBBEnd(blocks_[1]);
+  building_block_index_ = 1;
   values_[1] = f();
   output().buildBr(blocks_[2]);
   return *this;
@@ -1177,6 +1324,19 @@ LValue DiamondContinuationResolver::End() {
   addIncoming(phi, values_, blocks_, 2);
   impl().SetCurrentBlockContinuation(blocks_[2]);
   return phi;
+}
+
+void DiamondContinuationResolver::BranchToOtherLeafOnCondition(LValue cond) {
+  EMASSERT(building_block_index_ != -1);
+  int other_leaf_index = building_block_index_ ^ 1;
+  LBasicBlock diamond_continuation =
+      impl().NewBasicBlock("diamond_continuation");
+
+  cond = output().buildCall(output().repo().expectIntrinsic(), cond,
+                            output().repo().booleanFalse);
+  output().buildCondBr(cond, blocks_[other_leaf_index], diamond_continuation);
+  output().positionToBBEnd(diamond_continuation);
+  blocks_[building_block_index_] = diamond_continuation;
 }
 
 CallResolver::CallResolver(
@@ -1213,6 +1373,8 @@ LValue CallResolver::GetStackParameter(size_t i) {
 }
 
 LValue CallResolver::BuildCall() {
+  EMASSERT(call_resolver_parameter_.callsite_info->type() !=
+           CallSiteInfo::CallTargetType::kUnspecify);
   EMASSERT(parameters_.size() - kV8CCRegisterParameterCount ==
            call_resolver_parameter_.callsite_info->stack_parameter_count());
   EMASSERT(call_resolver_parameter_.callsite_info->type() !=
@@ -1261,6 +1423,9 @@ void CallResolver::GenerateStatePointFunction() {
 
 void CallResolver::EmitCall() {
   EMASSERT(call_resolver_parameter_.instruction_size != 0 ||
+           call_resolver_parameter_.target != nullptr);
+  EMASSERT(call_resolver_parameter_.callsite_info->type() !=
+               CallSiteInfo::CallTargetType::kTarget ||
            call_resolver_parameter_.target != nullptr);
   std::vector<LValue> statepoint_operands;
   patchid_ = impl().NextPatchPoint();
@@ -1394,13 +1559,12 @@ LValue BoxAllocationSlowPath::Allocate() {
     LValue end = output().buildLoad(end_offset);
 
     DiamondContinuationResolver diamond(impl_, -1);
+    diamond.RightHint();
     diamond.BuildCmp([&]() {
       LValue icmp = output().buildICmp(
           LLVMIntULE, end, output().buildExtractValue(uadd_overflow, 0));
       LValue overflowed = output().buildExtractValue(uadd_overflow, 1);
       LValue true_cond = output().buildOr(icmp, overflowed);
-      true_cond = output().buildCall(output().repo().expectIntrinsic(),
-                                     true_cond, output().repo().booleanFalse);
       return true_cond;
     });
     diamond.BuildLeft([&]() { return BuildSlowPath(); });
@@ -1420,7 +1584,7 @@ LValue BoxAllocationSlowPath::Allocate() {
               pointerType(output().repo().intPtr)));
       instance =
           output().buildAdd(instance, output().constIntPtr(kHeapObjectTag));
-      return output().buildCast(LLVMIntToPtr, instance, output().tagged_type());
+      return impl().WordToTagged(instance);
     });
     return diamond.End();
   } else {
@@ -1430,18 +1594,277 @@ LValue BoxAllocationSlowPath::Allocate() {
 
 LValue BoxAllocationSlowPath::BuildSlowPath() {
   const Code& stub = Code::ZoneHandle(
-      impl().flow_graph()->zone(), StubCode::GetAllocationStubForClass(cls_));
+      impl().zone(), StubCode::GetAllocationStubForClass(cls_));
 
   std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
   callsite_info->set_type(CallSiteInfo::CallTargetType::kStubRelative);
   callsite_info->set_token_pos(instruction_->token_pos());
   callsite_info->set_deopt_id(instruction_->deopt_id());
-  callsite_info->set_locs(instruction_->locs());
   callsite_info->set_code(&stub);
   CallResolver::CallResolverParameter param = {
       instruction_, Instr::kInstrSize, std::move(callsite_info), nullptr};
   CallResolver resolver(impl(), -1, param);
   return resolver.BuildCall();
+}
+
+ComparisonResolver::ComparisonResolver(AnonImpl& impl)
+    : FlowGraphVisitor(impl.flow_graph()->reverse_postorder()),
+      impl_(impl),
+      result_(nullptr) {}
+
+void ComparisonResolver::VisitStrictCompare(StrictCompareInstr* instr) {
+  LValue left = impl().GetLLVMValue(instr->InputAt(0));
+  LValue right = impl().GetLLVMValue(instr->InputAt(1));
+  if (instr->needs_number_check()) {
+    Label reference_compare("reference_compare_%d", instr->ssa_temp_index()),
+        check_mint("check_mint_%d", instr->ssa_temp_index());
+    AssemblerResolver resolver(impl());
+    LValue left_is_smi = impl().TstSmi(left);
+    resolver.Branch(left_is_smi, reference_compare);
+    LValue right_is_smi = impl().TstSmi(left);
+    resolver.Branch(right_is_smi, reference_compare);
+    LValue left_is_double = impl().CompareClassId(left, kDoubleCid);
+    resolver.BranchIfNot(left_is_double, check_mint);
+    LValue right_is_double = impl().CompareClassId(right, kDoubleCid);
+    resolver.GotoMergeWithValueIfNot(right_is_double,
+                                     output().repo().booleanFalse);
+    LValue left_double_bytes = impl().LoadFieldFromOffset(
+        left, compiler::target::Double::value_offset(), output().repo().int64);
+    LValue right_double_bytes = impl().LoadFieldFromOffset(
+        right, compiler::target::Double::value_offset(), output().repo().int64);
+    resolver.GotoMergeWithValue(
+        output().buildICmp(LLVMIntEQ, left_double_bytes, right_double_bytes));
+
+    resolver.Bind(check_mint);
+    LValue left_is_mint = impl().CompareClassId(left, kMintCid);
+    resolver.BranchIfNot(left_is_mint, reference_compare);
+    LValue right_is_mint = impl().CompareClassId(right, kMintCid);
+    resolver.GotoMergeWithValueIfNot(right_is_mint,
+                                     output().repo().booleanFalse);
+    LValue left_mint_val = impl().LoadFieldFromOffset(
+        left, compiler::target::Mint::value_offset(), output().repo().int64);
+    LValue right_mint_val = impl().LoadFieldFromOffset(
+        right, compiler::target::Mint::value_offset(), output().repo().int64);
+    resolver.GotoMergeWithValue(
+        output().buildICmp(LLVMIntEQ, left_mint_val, right_mint_val));
+
+    resolver.Bind(reference_compare);
+    LValue left_word = impl().TaggedToWord(left);
+    LValue right_word = impl().TaggedToWord(right);
+    resolver.GotoMergeWithValue(
+        output().buildICmp(LLVMIntEQ, left_word, right_word));
+
+    result_ = resolver.End();
+  } else {
+    result_ = output().buildICmp(
+        instr->kind() == Token::kEQ_STRICT ? LLVMIntEQ : LLVMIntNE, left,
+        right);
+  }
+}
+
+static LLVMIntPredicate TokenKindToSmiCondition(Token::Kind kind) {
+  switch (kind) {
+    case Token::kEQ:
+      return LLVMIntEQ;
+    case Token::kNE:
+      return LLVMIntNE;
+    case Token::kLT:
+      return LLVMIntSLT;
+    case Token::kGT:
+      return LLVMIntSGT;
+    case Token::kLTE:
+      return LLVMIntSLE;
+    case Token::kGTE:
+      return LLVMIntSGE;
+    default:
+      UNREACHABLE();
+  }
+}
+
+static LLVMRealPredicate TokenKindToDoubleCondition(Token::Kind kind) {
+  switch (kind) {
+    case Token::kEQ:
+      return LLVMRealOEQ;
+    case Token::kNE:
+      return LLVMRealONE;
+    case Token::kLT:
+      return LLVMRealOLT;
+    case Token::kGT:
+      return LLVMRealOGT;
+    case Token::kLTE:
+      return LLVMRealOLE;
+    case Token::kGTE:
+      return LLVMRealOGE;
+    default:
+      UNREACHABLE();
+  }
+}
+
+void ComparisonResolver::VisitEqualityCompare(EqualityCompareInstr* instr) {
+  LValue cmp_value;
+  LValue left = impl().GetLLVMValue(instr->InputAt(0));
+  LValue right = impl().GetLLVMValue(instr->InputAt(1));
+  if (instr->operation_cid() == kSmiCid) {
+    EMASSERT(typeOf(left) == output().tagged_type());
+    EMASSERT(typeOf(right) == output().tagged_type());
+    cmp_value =
+        output().buildICmp(TokenKindToSmiCondition(instr->kind()),
+                           impl().SmiUntag(left), impl().SmiUntag(right));
+  } else if (instr->operation_cid() == kMintCid) {
+    EMASSERT(typeOf(left) == output().repo().intPtr);
+    EMASSERT(typeOf(right) == output().repo().intPtr);
+    cmp_value =
+        output().buildICmp(TokenKindToSmiCondition(instr->kind()), left, right);
+  } else {
+    EMASSERT(instr->operation_cid() == kDoubleCid);
+    EMASSERT(typeOf(left) == output().repo().doubleType);
+    EMASSERT(typeOf(right) == output().repo().doubleType);
+    cmp_value = output().buildFCmp(TokenKindToDoubleCondition(instr->kind()),
+                                   left, right);
+  }
+  result_ = cmp_value;
+}
+
+void ComparisonResolver::VisitCheckedSmiComparison(
+    CheckedSmiComparisonInstr* instr) {
+  LValue left = impl().GetLLVMValue(instr->InputAt(0));
+  LValue right = impl().GetLLVMValue(instr->InputAt(1));
+
+  intptr_t left_cid = instr->left()->Type()->ToCid();
+  intptr_t right_cid = instr->right()->Type()->ToCid();
+  DiamondContinuationResolver diamond(impl(), instr->ssa_temp_index());
+  diamond.LeftHint();
+  diamond.BuildCmp([&] {
+    LValue is_smi;
+    if (instr->left()->definition() == instr->right()->definition()) {
+      is_smi = impl().TstSmi(left);
+    } else if (left_cid == kSmiCid) {
+      is_smi = impl().TstSmi(right);
+    } else if (right_cid == kSmiCid) {
+      is_smi = impl().TstSmi(left);
+    } else {
+      LValue left_address = impl().TaggedToWord(left);
+      LValue right_address = impl().TaggedToWord(right);
+      LValue orr_address = output().buildOr(left_address, right_address);
+      LValue and_value =
+          output().buildAnd(orr_address, output().constIntPtr(kSmiTagMask));
+      is_smi = output().buildICmp(LLVMIntNE, and_value,
+                                  output().constIntPtr(kSmiTagMask));
+    }
+    return is_smi;
+  });
+  diamond.BuildLeft([&] {
+    // both are smi
+    return output().buildICmp(TokenKindToSmiCondition(instr->kind()),
+                              impl().SmiUntag(left), impl().SmiUntag(right));
+  });
+  diamond.BuildRight([&] {
+    impl().PushArgument(left);
+    impl().PushArgument(right);
+    const auto& selector = String::Handle(instr->call()->Selector());
+    const auto& arguments_descriptor = Array::Handle(
+        ArgumentsDescriptor::New(/*type_args_len=*/0, /*num_arguments=*/2));
+    LValue boolean_object = impl().GenerateMegamorphicInstanceCall(
+        instr, selector, arguments_descriptor, instr->call()->deopt_id(),
+        instr->token_pos());
+    LValue true_object = impl().LoadObject(Bool::True());
+    return output().buildICmp(LLVMIntEQ, boolean_object, true_object);
+  });
+  result_ = diamond.End();
+}
+
+void ComparisonResolver::VisitCaseInsensitiveCompare(
+    CaseInsensitiveCompareInstr* instr) {
+  UNREACHABLE();
+}
+
+Label::Label(const char* fmt, ...) : bb_(nullptr) {
+  va_list va;
+  va_start(va, fmt);
+  char buf[256];
+  vsnprintf(buf, 256, fmt, va);
+  va_end(va);
+  name_.assign(buf);
+}
+
+void Label::InitBBIfNeeded(AnonImpl& impl) {
+  if (bb_) return;
+  bb_ = impl.NewBasicBlock(name_.c_str());
+}
+
+AssemblerResolver::AssemblerResolver(AnonImpl& impl)
+    : impl_(impl), current_(impl.current_bb_impl()->continuation) {
+  merge_ = impl.NewBasicBlock("AssemblerResolver::Merge");
+}
+
+void AssemblerResolver::Branch(LValue cond, Label& label) {
+  EMASSERT(current_);
+  LBasicBlock continuation = impl().NewBasicBlock("AssemblerResolver::Branch");
+  label.InitBBIfNeeded(impl());
+  output().buildCondBr(cond, label.basic_block(), continuation);
+  current_ = continuation;
+  output().positionToBBEnd(current_);
+}
+
+void AssemblerResolver::BranchIfNot(LValue cond, Label& label) {
+  EMASSERT(current_);
+  LBasicBlock continuation =
+      impl().NewBasicBlock("AssemblerResolver::BranchIfNot");
+  label.InitBBIfNeeded(impl());
+  output().buildCondBr(cond, continuation, label.basic_block());
+  current_ = continuation;
+  output().positionToBBEnd(current_);
+}
+
+void AssemblerResolver::Bind(Label& label) {
+  label.InitBBIfNeeded(impl());
+  current_ = label.basic_block();
+  output().positionToBBEnd(current_);
+}
+
+LValue AssemblerResolver::End() {
+  if (merge_values_.empty()) return nullptr;
+  EMASSERT(merge_values_.size() == merge_blocks_.size());
+  LType type = typeOf(merge_values_.front());
+  output().positionToBBEnd(merge_);
+  LValue phi = output().buildPhi(type);
+  for (LValue v : merge_values_) {
+    EMASSERT(type == typeOf(v));
+  }
+  addIncoming(phi, merge_values_.data(), merge_blocks_.data(),
+              merge_values_.size());
+  impl().SetCurrentBlockContinuation(merge_);
+  return phi;
+}
+
+void AssemblerResolver::GotoMergeWithValue(LValue v) {
+  EMASSERT(current_);
+  merge_values_.emplace_back(v);
+  merge_blocks_.emplace_back(current_);
+  output().buildBr(merge_);
+  current_ = nullptr;
+}
+
+void AssemblerResolver::GotoMergeWithValueIf(LValue cond, LValue v) {
+  EMASSERT(current_);
+  LBasicBlock continuation =
+      impl().NewBasicBlock("AssemblerResolver::GotoMergeWithValueIf");
+  merge_values_.emplace_back(v);
+  merge_blocks_.emplace_back(current_);
+  output().buildCondBr(cond, merge_, continuation);
+  current_ = continuation;
+  output().positionToBBEnd(current_);
+}
+
+void AssemblerResolver::GotoMergeWithValueIfNot(LValue cond, LValue v) {
+  EMASSERT(current_);
+  LBasicBlock continuation =
+      impl().NewBasicBlock("AssemblerResolver::GotoMergeWithValueIfNot");
+  merge_values_.emplace_back(v);
+  merge_blocks_.emplace_back(current_);
+  output().buildCondBr(cond, continuation, merge_);
+  current_ = continuation;
+  output().positionToBBEnd(current_);
 }
 }  // namespace
 
@@ -1455,6 +1878,7 @@ IRTranslator::IRTranslator(FlowGraph* flow_graph, Precompiler* precompiler)
   impl_.reset(new Impl);
   impl().flow_graph_ = flow_graph;
   impl().precompiler_ = precompiler;
+  impl().thread_ = Thread::Current();
   impl().compiler_state_.reset(new CompilerState(
       String::Handle(flow_graph->zone(),
                      flow_graph->parsed_function().function().UserVisibleName())
@@ -1666,14 +2090,14 @@ void IRTranslator::VisitNativeReturn(NativeReturnInstr* instr) {
 void IRTranslator::VisitThrow(ThrowInstr* instr) {
   impl().SetDebugLine(instr);
   impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
-                             kThrowRuntimeEntry, 1, instr->locs());
+                             kThrowRuntimeEntry, 1);
   output().buildCall(output().repo().trapIntrinsic());
 }
 
 void IRTranslator::VisitReThrow(ReThrowInstr* instr) {
   impl().SetDebugLine(instr);
   impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
-                             kReThrowRuntimeEntry, 2, instr->locs());
+                             kReThrowRuntimeEntry, 2);
   output().buildCall(output().repo().trapIntrinsic());
 }
 
@@ -1701,7 +2125,9 @@ void IRTranslator::VisitBranch(BranchInstr* instr) {
   TargetEntryInstr* false_successor = instr->false_successor();
   impl().EnsureNativeBB(true_successor);
   impl().EnsureNativeBB(false_successor);
-  LValue cmp_val = impl().GetLLVMValue(instr->comparison());
+  ComparisonResolver resolver(impl());
+  instr->comparison()->Accept(&resolver);
+  LValue cmp_val = resolver.result();
   cmp_val = impl().EnsureBoolean(cmp_val);
   output().buildCondBr(cmp_val, impl().GetNativeBB(true_successor),
                        impl().GetNativeBB(false_successor));
@@ -1748,13 +2174,12 @@ void IRTranslator::VisitClosureCall(ClosureCallInstr* instr) {
   callsite_info->set_type(CallSiteInfo::CallTargetType::kCodeObject);
   callsite_info->set_token_pos(instr->token_pos());
   callsite_info->set_deopt_id(instr->deopt_id());
-  callsite_info->set_locs(instr->locs());
   callsite_info->set_stack_parameter_count(argument_count);
   CallResolver::CallResolverParameter param = {
       instr, Instr::kInstrSize, std::move(callsite_info), nullptr};
   CallResolver resolver(impl(), instr->ssa_temp_index(), param);
-  const Array& arguments_descriptor = Array::ZoneHandle(
-      impl().flow_graph()->zone(), instr->GetArgumentsDescriptor());
+  const Array& arguments_descriptor =
+      Array::ZoneHandle(impl().zone(), instr->GetArgumentsDescriptor());
   LValue argument_descriptor_obj = impl().LoadObject(arguments_descriptor);
   resolver.SetGParameter(ARGS_DESC_REG, argument_descriptor_obj);
   resolver.SetGParameter(CODE_REG, code_object);
@@ -1776,7 +2201,7 @@ void IRTranslator::VisitInstanceCall(InstanceCallInstr* instr) {
   impl().SetDebugLine(instr);
   EMASSERT(instr->ic_data() != NULL);
   EMASSERT((FLAG_precompiled_mode && FLAG_use_bare_instructions));
-  Zone* zone = impl().flow_graph()->zone();
+  Zone* zone = impl().zone();
   ICData& ic_data = ICData::ZoneHandle(zone, instr->ic_data()->raw());
   ic_data = ic_data.AsUnaryClassChecks();
 
@@ -1789,7 +2214,6 @@ void IRTranslator::VisitInstanceCall(InstanceCallInstr* instr) {
   callsite_info->set_reg(kInstanceCallTargetReg);
   callsite_info->set_token_pos(instr->token_pos());
   callsite_info->set_deopt_id(instr->deopt_id());
-  callsite_info->set_locs(instr->locs());
   callsite_info->set_stack_parameter_count(argument_count);
   CallResolver::CallResolverParameter param = {
       instr, Instr::kInstrSize, std::move(callsite_info), nullptr};
@@ -1945,7 +2369,7 @@ void IRTranslator::VisitPolymorphicInstanceCall(
 
 void IRTranslator::VisitStaticCall(StaticCallInstr* instr) {
   impl().SetDebugLine(instr);
-  Zone* zone = impl().flow_graph()->zone();
+  Zone* zone = impl().zone();
   ICData& ic_data = ICData::ZoneHandle(zone, instr->ic_data()->raw());
   ArgumentsInfo args_info(instr->type_args_len(), instr->ArgumentCount(),
                           instr->argument_names());
@@ -1955,7 +2379,7 @@ void IRTranslator::VisitStaticCall(StaticCallInstr* instr) {
   }
   LValue result = impl().GenerateStaticCall(
       instr, instr->ssa_temp_index(), arguments, instr->deopt_id(),
-      instr->token_pos(), instr->function(), args_info, instr->locs(), ic_data,
+      instr->token_pos(), instr->function(), args_info, ic_data,
       instr->entry_kind());
   impl().SetLLVMValue(instr, result);
 }
@@ -1982,93 +2406,18 @@ void IRTranslator::VisitStoreLocal(StoreLocalInstr* instr) {
 
 void IRTranslator::VisitStrictCompare(StrictCompareInstr* instr) {
   impl().SetDebugLine(instr);
-  LValue result;
-  LValue left = impl().GetLLVMValue(instr->InputAt(0));
-  LValue right = impl().GetLLVMValue(instr->InputAt(1));
-  if (instr->needs_number_check()) {
-    std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
-    callsite_info->set_type(CallSiteInfo::CallTargetType::kStubRelative);
-    callsite_info->set_token_pos(instr->token_pos());
-    callsite_info->set_deopt_id(instr->deopt_id());
-    callsite_info->set_locs(instr->locs());
-    callsite_info->set_code(&StubCode::OptimizedIdenticalWithNumberCheck());
-    callsite_info->set_kind(RawPcDescriptors::kRuntimeCall);
-    CallResolver::CallResolverParameter param = {
-        instr, Instr::kInstrSize, std::move(callsite_info), nullptr};
-    CallResolver resolver(impl(), -1, param);
-    resolver.AddStackParameter(right);
-    resolver.AddStackParameter(left);
-    result = resolver.BuildCall();
-  } else {
-    result = output().buildICmp(
-        instr->kind() == Token::kEQ_STRICT ? LLVMIntEQ : LLVMIntNE, left,
-        right);
-  }
-  impl().SetLLVMValue(instr, result);
-}
-
-static LLVMIntPredicate TokenKindToSmiCondition(Token::Kind kind) {
-  switch (kind) {
-    case Token::kEQ:
-      return LLVMIntEQ;
-    case Token::kNE:
-      return LLVMIntNE;
-    case Token::kLT:
-      return LLVMIntSLT;
-    case Token::kGT:
-      return LLVMIntSGT;
-    case Token::kLTE:
-      return LLVMIntSLE;
-    case Token::kGTE:
-      return LLVMIntSGE;
-    default:
-      UNREACHABLE();
-  }
-}
-
-static LLVMRealPredicate TokenKindToDoubleCondition(Token::Kind kind) {
-  switch (kind) {
-    case Token::kEQ:
-      return LLVMRealOEQ;
-    case Token::kNE:
-      return LLVMRealONE;
-    case Token::kLT:
-      return LLVMRealOLT;
-    case Token::kGT:
-      return LLVMRealOGT;
-    case Token::kLTE:
-      return LLVMRealOLE;
-    case Token::kGTE:
-      return LLVMRealOGE;
-    default:
-      UNREACHABLE();
-  }
+  ComparisonResolver resolver(impl());
+  instr->Accept(&resolver);
+  LValue result = resolver.result();
+  ;
+  impl().SetLLVMValue(instr, impl().BooleanToObject(result));
 }
 
 void IRTranslator::VisitEqualityCompare(EqualityCompareInstr* instr) {
   impl().SetDebugLine(instr);
-  LValue cmp_value;
-  LValue left = impl().GetLLVMValue(instr->InputAt(0));
-  LValue right = impl().GetLLVMValue(instr->InputAt(1));
-  if (instr->operation_cid() == kSmiCid) {
-    EMASSERT(typeOf(left) == output().tagged_type());
-    EMASSERT(typeOf(right) == output().tagged_type());
-    cmp_value =
-        output().buildICmp(TokenKindToSmiCondition(instr->kind()),
-                           impl().SmiUntag(left), impl().SmiUntag(right));
-  } else if (instr->operation_cid() == kMintCid) {
-    EMASSERT(typeOf(left) == output().repo().intPtr);
-    EMASSERT(typeOf(right) == output().repo().intPtr);
-    cmp_value =
-        output().buildICmp(TokenKindToSmiCondition(instr->kind()), left, right);
-  } else {
-    EMASSERT(instr->operation_cid() == kDoubleCid);
-    EMASSERT(typeOf(left) == output().repo().doubleType);
-    EMASSERT(typeOf(right) == output().repo().doubleType);
-    cmp_value = output().buildFCmp(TokenKindToDoubleCondition(instr->kind()),
-                                   left, right);
-  }
-  impl().SetLLVMValue(instr, cmp_value);
+  ComparisonResolver resolver(impl());
+  instr->Accept(&resolver);
+  impl().SetLLVMValue(instr, impl().BooleanToObject(resolver.result()));
 }
 
 void IRTranslator::VisitRelationalOp(RelationalOpInstr* instr) {
@@ -2110,7 +2459,6 @@ void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
   callsite_info->set_type(CallSiteInfo::CallTargetType::kNative);
   callsite_info->set_token_pos(instr->token_pos());
   callsite_info->set_deopt_id(instr->deopt_id());
-  callsite_info->set_locs(instr->locs());
   callsite_info->set_stack_parameter_count(argument_count);
   CallResolver::CallResolverParameter param = {
       instr, kNativeCallInstrSize, std::move(callsite_info), nullptr};
@@ -2224,13 +2572,12 @@ void IRTranslator::VisitLoadCodeUnits(LoadCodeUnitsInstr* instr) {
   } else {
 #if defined(TARGET_ARCH_IS_32_BIT)
     DiamondContinuationResolver diamond(impl(), instr->ssa_temp_index());
+    diamond.LeftHint();
     diamond.BuildCmp([&]() {
       LValue and_value =
           output().buildAnd(int_value, output().constIntPtr(0xC0000000));
       LValue cmp =
           output().buildICmp(LLVMIntEQ, and_value, output().constIntPtr(0));
-      cmp = output().buildCall(output().repo().expectIntrinsic(), cmp,
-                               output().repo().booleanTrue);
       return cmp;
     });
     diamond.BuildLeft([&]() { return impl().SmiTag(int_value); });
@@ -2469,23 +2816,17 @@ void IRTranslator::VisitLoadClassId(LoadClassIdInstr* instr) {
   const AbstractType& value_type = *instr->object()->Type()->ToAbstractType();
   LValue object = impl().GetLLVMValue(instr->object());
   LValue value;
-  const intptr_t class_id_offset =
-      compiler::target::Object::tags_offset() +
-      compiler::target::RawObject::kClassIdTagPos / kBitsPerByte;
   if (CompileType::Smi().IsAssignableTo(value_type) ||
       value_type.IsTypeParameter()) {
     DiamondContinuationResolver diamond(impl(), instr->ssa_temp_index());
     diamond.BuildCmp([&]() { return impl().TstSmi(object); })
         .BuildLeft([&]() { return output().constInt16(kSmiCid); })
-        .BuildRight([&]() {
-          return impl().LoadFieldFromOffset(object, class_id_offset,
-                                            pointerType(output().repo().int16));
-        });
+        .BuildRight([&]() { return impl().LoadClassId(object); });
 
     value = diamond.End();
   } else {
-    value = impl().LoadFromOffset(object, class_id_offset - kHeapObjectTag,
-                                  pointerType(output().repo().int16));
+    value = impl().LoadClassId(object);
+    ;
   }
   value = impl().SmiTag(value);
   impl().SetLLVMValue(instr, value);
@@ -2558,18 +2899,140 @@ void IRTranslator::VisitBinarySmiOp(BinarySmiOpInstr* instr) {
 
 void IRTranslator::VisitCheckedSmiComparison(CheckedSmiComparisonInstr* instr) {
   impl().SetDebugLine(instr);
-  // FIXME: implment slow path code after call supported.
-  LValue left = impl().GetLLVMValue(instr->InputAt(0));
-  LValue right = impl().GetLLVMValue(instr->InputAt(1));
-  LValue cmp_value =
-      output().buildICmp(TokenKindToSmiCondition(instr->kind()),
-                         impl().SmiUntag(left), impl().SmiUntag(right));
-  impl().SetLLVMValue(instr, cmp_value);
+  ComparisonResolver resolver(impl());
+  instr->Accept(&resolver);
+  impl().SetLLVMValue(instr, impl().BooleanToObject(resolver.result()));
 }
 
 void IRTranslator::VisitCheckedSmiOp(CheckedSmiOpInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  LValue left = impl().GetLLVMValue(instr->InputAt(0));
+  LValue right = impl().GetLLVMValue(instr->InputAt(1));
+
+  intptr_t left_cid = instr->left()->Type()->ToCid();
+  intptr_t right_cid = instr->right()->Type()->ToCid();
+  DiamondContinuationResolver diamond(impl(), instr->ssa_temp_index());
+  diamond.LeftHint();
+  diamond.BuildCmp([&] {
+    LValue is_smi;
+    if (instr->left()->definition() == instr->right()->definition()) {
+      is_smi = impl().TstSmi(left);
+    } else if (left_cid == kSmiCid) {
+      is_smi = impl().TstSmi(right);
+    } else if (right_cid == kSmiCid) {
+      is_smi = impl().TstSmi(left);
+    } else {
+      LValue left_address = impl().TaggedToWord(left);
+      LValue right_address = impl().TaggedToWord(right);
+      LValue orr_address = output().buildOr(left_address, right_address);
+      LValue and_value =
+          output().buildAnd(orr_address, output().constIntPtr(kSmiTagMask));
+      is_smi = output().buildICmp(LLVMIntNE, and_value,
+                                  output().constIntPtr(kSmiTagMask));
+    }
+    return is_smi;
+  });
+  diamond.BuildLeft([&] {
+    LValue result;
+    switch (instr->op_kind()) {
+      case Token::kADD: {
+#if defined(TARGET_ARCH_IS_32_BIT)
+        LValue add_result = output().buildCall(
+            output().repo().addWithOverflow32Intrinsic(),
+            impl().TaggedToWord(left), impl().TaggedToWord(right));
+#else
+        LValue add_result = output().buildCall(
+            output().repo().addWithOverflow64Intrinsic(),
+            impl().TaggedToWord(left), impl().TaggedToWord(right));
+#endif
+        diamond.BranchToOtherLeafOnCondition(
+            output().buildExtractValue(add_result, 1));
+        result = impl().WordToTagged(output().buildExtractValue(add_result, 0));
+      } break;
+      case Token::kSUB: {
+#if defined(TARGET_ARCH_IS_32_BIT)
+        LValue sub_result = output().buildCall(
+            output().repo().subWithOverflow32Intrinsic(),
+            impl().TaggedToWord(left), impl().TaggedToWord(right));
+#else
+        LValue sub_result = output().buildCall(
+            output().repo().subWithOverflow64Intrinsic(),
+            impl().TaggedToWord(left), impl().TaggedToWord(right));
+#endif
+        diamond.BranchToOtherLeafOnCondition(
+            output().buildExtractValue(sub_result, 1));
+        result = impl().WordToTagged(output().buildExtractValue(sub_result, 0));
+      } break;
+      case Token::kMUL: {
+#if defined(TARGET_ARCH_IS_32_BIT)
+        LValue mul_result = output().buildCall(
+            output().repo().mulWithOverflow32Intrinsic(), impl().SmiUntag(left),
+            impl().TaggedToWord(right));
+#else
+        LValue mul_result = output().buildCall(
+            output().repo().mulWithOverflow64Intrinsic(), impl().SmiUntag(left),
+            impl().TaggedToWord(right));
+#endif
+        diamond.BranchToOtherLeafOnCondition(
+            output().buildExtractValue(mul_result, 1));
+        result = impl().WordToTagged(output().buildExtractValue(mul_result, 0));
+      } break;
+      case Token::kBIT_OR:
+        result = output().buildOr(impl().TaggedToWord(left),
+                                  impl().TaggedToWord(right));
+        result = impl().WordToTagged(result);
+        break;
+      case Token::kBIT_AND:
+        result = output().buildAnd(impl().TaggedToWord(left),
+                                   impl().TaggedToWord(right));
+        result = impl().WordToTagged(result);
+        break;
+      case Token::kBIT_XOR:
+        result = output().buildXor(impl().TaggedToWord(left),
+                                   impl().TaggedToWord(right));
+        result = impl().WordToTagged(result);
+        break;
+      case Token::kSHL: {
+        LValue right_int = impl().SmiUntag(right);
+        LValue overflow = output().buildICmp(
+            LLVMIntUGT, right_int,
+            output().constIntPtr(compiler::target::kSmiBits));
+        diamond.BranchToOtherLeafOnCondition(overflow);
+        LValue left_int = impl().TaggedToWord(left);
+        result = output().buildShl(left_int, right_int);
+        LValue check_for_overflow = output().buildSar(result, right_int);
+        diamond.BranchToOtherLeafOnCondition(
+            output().buildICmp(LLVMIntEQ, check_for_overflow, result));
+        result = impl().WordToTagged(result);
+      } break;
+      case Token::kSHR: {
+        LValue right_int = impl().SmiUntag(right);
+        LValue overflow = output().buildICmp(
+            LLVMIntUGT, right_int,
+            output().constIntPtr(compiler::target::kSmiBits));
+        diamond.BranchToOtherLeafOnCondition(overflow);
+
+        LValue left_int = impl().SmiUntag(left);
+        result = output().buildSar(left_int, right_int);
+        result = impl().SmiTag(result);
+      } break;
+      default:
+        UNREACHABLE();
+    }
+    return result;
+  });
+  diamond.BuildRight([&] {
+    impl().PushArgument(left);
+    impl().PushArgument(right);
+    const auto& selector = String::Handle(instr->call()->Selector());
+    const auto& arguments_descriptor = Array::Handle(
+        ArgumentsDescriptor::New(/*type_args_len=*/0, /*num_arguments=*/2));
+    return impl().GenerateMegamorphicInstanceCall(
+        instr, selector, arguments_descriptor, instr->call()->deopt_id(),
+        instr->token_pos());
+  });
+  LValue final_result = diamond.End();
+  impl().SetLLVMValue(instr, final_result);
 }
 
 void IRTranslator::VisitBinaryInt32Op(BinaryInt32OpInstr* instr) {
@@ -3148,7 +3611,7 @@ void IRTranslator::VisitIfThenElse(IfThenElseInstr* instr) {
           output().constIntPtr(compiler::target::ToRawSmi(false_value)));
     }
   }
-  result = output().buildCast(LLVMIntToPtr, result, output().tagged_type());
+  result = impl().WordToTagged(result);
   impl().SetLLVMValue(instr, result);
 }
 

@@ -46,9 +46,13 @@ class CallSiteInfo final : public StackMapInfo {
  public:
   enum class CallTargetType {
     kUnspecify,
+    // target passed in the statepoint
+    kTarget,
+    // target passed in the GP reg.
     kReg,
-    //
+    // relative call target in the function
     kCallRelative,
+    // relative call target in the code
     kStubRelative,
     // Code object call is the call that code object alreadly loaded to CODE_REG
     kCodeObject,
@@ -60,7 +64,6 @@ class CallSiteInfo final : public StackMapInfo {
   V(CallTargetType, type)                                                      \
   V(TokenPosition, token_pos)                                                  \
   V(intptr_t, deopt_id)                                                        \
-  V(LocationSummary*, locs)                                                    \
   V(size_t, stack_parameter_count)                                             \
   V(intptr_t, try_index)                                                       \
   V(RawPcDescriptors::Kind, kind)                                              \
@@ -81,7 +84,6 @@ class CallSiteInfo final : public StackMapInfo {
   CallTargetType type_;
   TokenPosition token_pos_;
   intptr_t deopt_id_;
-  LocationSummary* locs_;
   // for stack maps generate, we will mark the lowest stack_parameter_count's stack slot 1.
   size_t stack_parameter_count_;
   intptr_t try_index_;
