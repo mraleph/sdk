@@ -11,6 +11,17 @@ static const Register kReceiverReg = R0;
 static const Register kICReg = R9;
 static const size_t kInstanceCallTargetReg = R1;
 static const size_t kNativeCallInstrSize = 12 * Instr::kInstrSize;
+static const size_t kRuntimeCallInstrSize = Instr::kInstrSize;
+static const size_t kRuntimeCallReturnOnStackInstrSize = 2 * Instr::kInstrSize;
+
+// instance of
+static const Register kInstanceOfInstanceReg = R0;
+static const Register kInstanceOfFunctionTypeReg = R1;
+static const Register kInstanceOfInstantiatorTypeReg = R2;
+
+// array
+static const Register kCreateArrayLengthReg = R2;
+static const Register kCreateArrayElementTypeReg = R1;
 #else
 #error unsupported arch
 #endif

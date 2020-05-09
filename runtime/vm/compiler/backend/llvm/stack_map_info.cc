@@ -17,7 +17,8 @@ CallSiteInfo::CallSiteInfo()
       stack_parameter_count_(0),
       try_index_(kInvalidTryIndex),
       kind_(RawPcDescriptors::kOther),
-      is_tailcall_(false) {}
+      is_tailcall_(false),
+      return_on_stack_(false) {}
 
 }  // namespace dart_llvm
 }  // namespace dart

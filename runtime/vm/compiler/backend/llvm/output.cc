@@ -195,6 +195,10 @@ LBasicBlock Output::appendBasicBlock(LValue function, const char* name) {
   return dart_llvm::appendBasicBlock(state_.context_, function, name);
 }
 
+LBasicBlock Output::getInsertionBlock() {
+  return LLVMGetInsertBlock(builder_);
+}
+
 void Output::positionToBBEnd(LBasicBlock bb) {
   LLVMPositionBuilderAtEnd(builder_, bb);
 }
@@ -578,6 +582,10 @@ LValue Output::addFunction(const char* name, LType type) {
   LValue function = dart_llvm::addFunction(state_.module_, name, type);
   AddFunctionCommonAttr(function);
   return function;
+}
+
+LType Output::tagged_pair() const {
+  return structType(state_.context_, repo_.tagged_type, repo_.tagged_type);
 }
 
 void Output::AddFunctionCommonAttr(LValue function) {

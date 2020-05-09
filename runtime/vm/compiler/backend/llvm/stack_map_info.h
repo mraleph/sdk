@@ -71,7 +71,8 @@ class CallSiteInfo final : public StackMapInfo {
   V(const Function*, target)                                                   \
   V(const Code*, code)                                                         \
   V(CodeEntryKind, entry_kind)                                                 \
-  V(bool, is_tailcall)
+  V(bool, is_tailcall)                                                         \
+  V(bool, return_on_stack)
 
 #define CALLSITE_WAPPER(type, name) DEFINE_ACCESSOR(type, name, CallSiteInfo)
 
@@ -97,6 +98,7 @@ class CallSiteInfo final : public StackMapInfo {
     const Code* code_;
   };
   bool is_tailcall_;
+  bool return_on_stack_;
 };
 
 #undef DEFINE_ACCESSOR

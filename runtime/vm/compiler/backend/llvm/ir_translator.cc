@@ -18,6 +18,7 @@ namespace dart {
 namespace dart_llvm {
 namespace {
 class AnonImpl;
+class Label;
 struct NotMergedPhiDesc {
   BlockEntryInstr* pred;
   int value;
@@ -129,6 +130,8 @@ struct IRTranslatorBlockImpl {
 
 class AnonImpl {
  public:
+  AnonImpl() = default;
+  ~AnonImpl() = default;
   LBasicBlock GetNativeBB(BlockEntryInstr* bb);
   LBasicBlock EnsureNativeBB(BlockEntryInstr* bb);
   IRTranslatorBlockImpl* GetTranslatorBlockImpl(BlockEntryInstr* bb);
@@ -168,11 +171,20 @@ class AnonImpl {
   int NextPatchPoint();
   void SubmitStackMap(std::unique_ptr<StackMapInfo> info);
   void PushArgument(LValue v);
+  LValue GenerateCall(
+      Instruction*,
+      TokenPosition token_pos,
+      intptr_t deopt_id,
+      const Code& stub,
+      RawPcDescriptors::Kind kind,
+      size_t stack_argument_count,
+      const std::vector<std::pair<Register, LValue>>& gp_parameters);
   LValue GenerateRuntimeCall(Instruction*,
                              TokenPosition token_pos,
                              intptr_t deopt_id,
                              const RuntimeEntry& entry,
-                             intptr_t argument_count);
+                             intptr_t argument_count,
+                             bool return_on_stack = true);
   LValue GenerateStaticCall(Instruction*,
                             int ssa_index,
                             const std::vector<LValue>& arguments,
@@ -187,6 +199,18 @@ class AnonImpl {
                                          const Array& arguments_descriptor,
                                          intptr_t deopt_id,
                                          TokenPosition token_pos);
+  // InstanceOf
+#if 0
+  RawSubtypeTestCache* GenerateInlineInstanceof(
+      LValue value,
+      LValue instantiator_type_arguments, 
+      LValue function_type_arguments,
+      AssemblerResolver& resolver,
+      TokenPosition token_pos,
+      const AbstractType& type,
+      Label& is_instance_lbl,
+      Label& is_not_instance_lbl);
+#endif
   // Types
   LType GetMachineRepresentationType(Representation);
   LValue TaggedToWord(LValue v);
@@ -200,6 +224,11 @@ class AnonImpl {
   LValue BooleanToObject(LValue boolean);
   LValue LoadClassId(LValue o);
   LValue CompareClassId(LValue o, intptr_t clsid);
+  LValue CompareObject(LValue, const Object&);
+
+  // expect
+  LValue ExpectTrue(LValue);
+  LValue ExpectFalse(LValue);
 
   // Value helpers for current bb
   LValue GetLLVMValue(int ssa_id);
@@ -277,6 +306,7 @@ class AnonImpl {
   Thread* thread_;
   int patch_point_id_ = 0;
   bool visited_function_entry_ = false;
+  DISALLOW_COPY_AND_ASSIGN(AnonImpl);
 };
 
 class ContinuationResolver {
@@ -291,6 +321,7 @@ class ContinuationResolver {
  private:
   AnonImpl& impl_;
   int ssa_id_;
+  DISALLOW_COPY_AND_ASSIGN(ContinuationResolver);
 };
 
 class DiamondContinuationResolver : public ContinuationResolver {
@@ -320,10 +351,16 @@ class DiamondContinuationResolver : public ContinuationResolver {
 class CallResolver : public ContinuationResolver {
  public:
   struct CallResolverParameter {
+    CallResolverParameter(Instruction*, size_t, std::unique_ptr<CallSiteInfo>);
+    ~CallResolverParameter() = default;
+    void set_target(LValue);
+    void set_second_return(bool);
     Instruction* call_instruction;
     size_t instruction_size;
     std::unique_ptr<CallSiteInfo> callsite_info;
     LValue target;
+    bool second_return;
+    DISALLOW_COPY_AND_ASSIGN(CallResolverParameter);
   };
   explicit CallResolver(AnonImpl& impl,
                         int ssa_id,
@@ -348,6 +385,7 @@ class CallResolver : public ContinuationResolver {
   // state in the middle.
   LValue statepoint_function_ = nullptr;
   LType callee_type_ = nullptr;
+  LType return_type_ = nullptr;
   LValue call_value_ = nullptr;
   LValue statepoint_value_ = nullptr;
   // exception blocks
@@ -360,6 +398,7 @@ class CallResolver : public ContinuationResolver {
   std::vector<LValue> parameters_;
   int patchid_ = 0;
   bool tail_call_ = false;
+  DISALLOW_COPY_AND_ASSIGN(CallResolver);
 };
 
 class BoxAllocationSlowPath {
@@ -376,6 +415,7 @@ class BoxAllocationSlowPath {
   Instruction* instruction_;
   const Class& cls_;
   AnonImpl& impl_;
+  DISALLOW_COPY_AND_ASSIGN(BoxAllocationSlowPath);
 };
 
 class ComparisonResolver : public FlowGraphVisitor {
@@ -416,10 +456,14 @@ class AssemblerResolver {
   AssemblerResolver(AnonImpl&);
   ~AssemblerResolver() = default;
 
-  void Branch(LValue cond, Label&);
+  void Branch(Label&);
+  void BranchIf(LValue cond, Label&);
   void BranchIfNot(LValue cond, Label&);
   void Bind(Label&);
   LValue End();
+  void GotoMerge();
+  void GotoMergeIf(LValue cond);
+  void GotoMergeIfNot(LValue cond);
   void GotoMergeWithValue(LValue v);
   void GotoMergeWithValueIf(LValue cond, LValue v);
   void GotoMergeWithValueIfNot(LValue cond, LValue v);
@@ -837,11 +881,73 @@ void AnonImpl::PushArgument(LValue v) {
   pushed_arguments_.emplace_back(v);
 }
 
+LValue AnonImpl::GenerateCall(
+    Instruction* instr,
+    TokenPosition token_pos,
+    intptr_t deopt_id,
+    const Code& stub,
+    RawPcDescriptors::Kind kind,
+    size_t stack_argument_count,
+    const std::vector<std::pair<Register, LValue>>& gp_parameters) {
+  if (!stub.InVMIsolateHeap()) {
+    std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
+    callsite_info->set_type(CallSiteInfo::CallTargetType::kStubRelative);
+    callsite_info->set_token_pos(token_pos);
+    callsite_info->set_code(&stub);
+    callsite_info->set_kind(kind);
+    callsite_info->set_deopt_id(deopt_id);
+    callsite_info->set_stack_parameter_count(stack_argument_count);
+    CallResolver::CallResolverParameter param(instr, Instr::kInstrSize,
+                                              std::move(callsite_info));
+    CallResolver resolver(*this, -1, param);
+    for (size_t i = 0; i < stack_argument_count; ++i) {
+      LValue argument = pushed_arguments_.back();
+      pushed_arguments_.pop_back();
+      resolver.AddStackParameter(argument);
+    }
+    for (auto p : gp_parameters) {
+      resolver.SetGParameter(p.first, p.second);
+    }
+    return resolver.BuildCall();
+  } else {
+    const int32_t offset = compiler::target::ObjectPool::element_offset(
+        object_pool_builder().FindObject(
+            compiler::ToObject(stub),
+            compiler::ObjectPoolBuilderEntry::kNotPatchable));
+
+    LValue gep = output().buildGEPWithByteOffset(
+        output().pp(), output().constIntPtr(offset - kHeapObjectTag),
+        pointerType(output().tagged_type()));
+    LValue code_object = output().buildInvariantLoad(gep);
+
+    std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
+    callsite_info->set_type(CallSiteInfo::CallTargetType::kCodeObject);
+    callsite_info->set_token_pos(token_pos);
+    callsite_info->set_code(&stub);
+    callsite_info->set_kind(kind);
+    callsite_info->set_stack_parameter_count(stack_argument_count);
+    CallResolver::CallResolverParameter param(instr, Instr::kInstrSize,
+                                              std::move(callsite_info));
+    CallResolver resolver(*this, -1, param);
+    resolver.SetGParameter(static_cast<int>(CODE_REG), code_object);
+    for (size_t i = 0; i < stack_argument_count; ++i) {
+      LValue argument = pushed_arguments_.back();
+      pushed_arguments_.pop_back();
+      resolver.AddStackParameter(argument);
+    }
+    for (auto p : gp_parameters) {
+      resolver.SetGParameter(p.first, p.second);
+    }
+    return resolver.BuildCall();
+  }
+}
+
 LValue AnonImpl::GenerateRuntimeCall(Instruction* instr,
                                      TokenPosition token_pos,
                                      intptr_t deopt_id,
                                      const RuntimeEntry& runtime_entry,
-                                     intptr_t argument_count) {
+                                     intptr_t argument_count,
+                                     bool return_on_stack) {
   EMASSERT(runtime_entry.is_leaf());
   LValue code_object =
       LoadFromOffset(output().thread(),
@@ -852,8 +958,12 @@ LValue AnonImpl::GenerateRuntimeCall(Instruction* instr,
   callsite_info->set_token_pos(token_pos);
   callsite_info->set_deopt_id(deopt_id);
   callsite_info->set_stack_parameter_count(argument_count);
-  CallResolver::CallResolverParameter param = {
-      instr, Instr::kInstrSize, std::move(callsite_info), nullptr};
+  callsite_info->set_return_on_stack(return_on_stack);
+  CallResolver::CallResolverParameter param(
+      instr,
+      return_on_stack ? kRuntimeCallReturnOnStackInstrSize
+                      : kRuntimeCallInstrSize,
+      std::move(callsite_info));
   CallResolver resolver(*this, -1, param);
   resolver.SetGParameter(static_cast<int>(CODE_REG), code_object);
   // add stack parameters.
@@ -897,8 +1007,8 @@ LValue AnonImpl::GenerateStaticCall(Instruction* instr,
   callsite_info->set_stack_parameter_count(argument_count);
   callsite_info->set_target(&function);
   callsite_info->set_entry_kind(entry_kind);
-  CallResolver::CallResolverParameter param = {
-      instr, Instr::kInstrSize, std::move(callsite_info), nullptr};
+  CallResolver::CallResolverParameter param(instr, Instr::kInstrSize,
+                                            std::move(callsite_info));
   CallResolver resolver(*this, ssa_index, param);
   resolver.SetGParameter(static_cast<int>(ARGS_DESC_REG), argument_desc_val);
   // setup stack parameters
@@ -933,8 +1043,8 @@ LValue AnonImpl::GenerateMegamorphicInstanceCall(
   callsite_info->set_token_pos(token_pos);
   callsite_info->set_deopt_id(deopt_id);
   callsite_info->set_stack_parameter_count(argument_count);
-  CallResolver::CallResolverParameter param = {instr, 0,
-                                               std::move(callsite_info), entry};
+  CallResolver::CallResolverParameter param(instr, 0, std::move(callsite_info));
+  param.set_target(entry);
   CallResolver resolver(*this, -1, param);
   for (size_t i = 0; i < argument_count; ++i) {
     LValue argument = pushed_arguments_.back();
@@ -946,6 +1056,106 @@ LValue AnonImpl::GenerateMegamorphicInstanceCall(
   resolver.SetGParameter(kICReg, cache_value);
   return resolver.BuildCall();
 }
+
+#if 0
+RawSubtypeTestCache* AnonImpl::GenerateInlineInstanceof(
+    LValue value,
+    LValue instantiator_type_arguments, 
+    LValue function_type_arguments,
+    AssemblerResolver& resolver,
+    TokenPosition token_pos,
+    const AbstractType& type,
+    Label& is_instance,
+    Label& is_not_instance) {
+  enum TypeTestStubKind {
+    kTestTypeOneArg,
+    kTestTypeTwoArgs,
+    kTestTypeFourArgs,
+    kTestTypeSixArgs,
+  };
+ auto GenerateBoolToJump = [&] (LValue v,
+                                           Label& is_true,
+                                           Label& is_false) {
+  Label fall_through("fall_through");
+  LValue equal_to_null = CompareObject(v, Object::null_object());
+  resolver.BranchIf(equal_to_null, fall_through);
+  LValue equal_to_true = CompareObject(v, Bool::True());
+  resolver.BranchIf(equal_to_true, is_true);
+  resolver.Branch(is_false);
+  resolver.Bind(&fall_through);
+}
+  auto GenerateCallSubtypeTestStub = [&] (TypeTestStubKind test_kind) {
+    const SubtypeTestCache& type_test_cache =
+      SubtypeTestCache::ZoneHandle(zone(), SubtypeTestCache::New());
+    LValue type_test_cache_obj_val = LoadObject(type_test_cache, true);
+    std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
+    callsite_info->set_type(CallSiteInfo::CallTargetType::kCodeObject);
+    callsite_info->set_token_pos(token_pos);
+    callsite_info->set_deopt_id(deopt_id);
+    callsite_info->set_stack_parameter_count(argument_count);
+    callsite_info->set_return_on_stack(return_on_stack);
+    CallResolver::CallResolverParameter param(instr, return_on_stack ? kRuntimeCallReturnOnStackInstrSize : kRuntimeCallInstrSize, std::move(callsite_info));
+    param.set_second_return(true);
+    CallResolver call_resolver(*this, -1, param);
+    LValue code_object;
+    call_resolver.SetGParameter(kInstanceOfInstanceReg, value);
+
+    if (test_kind == kTestTypeOneArg) {
+      code_object = LoadObject(StubCode::Subtype1TestCache());
+    } else if (test_kind == kTestTypeTwoArgs) {
+      code_object = LoadObject(StubCode::Subtype2TestCache());
+    } else if (test_kind == kTestTypeFourArgs) {
+      call_resolver.SetGParameter(kInstanceOfFunctionTypeReg, function_type_arguments);
+      call_resolver.SetGParameter(kInstanceOfInstantiatorTypeReg, instantiator_type_arguments);
+      __ BranchLink(StubCode::Subtype4TestCache());
+      code_object = LoadObject(StubCode::Subtype4TestCache());
+    } else if (test_kind == kTestTypeSixArgs) {
+      call_resolver.SetGParameter(kInstanceOfFunctionTypeReg, function_type_arguments);
+      call_resolver.SetGParameter(kInstanceOfInstantiatorTypeReg, instantiator_type_arguments);
+      code_object = LoadObject(StubCode::Subtype6TestCache());
+    } else {
+      UNREACHABLE();
+    }
+    call_resolver.SetGParameter(static_cast<int>(CODE_REG), code_object);
+    LValue compose = call_resolver.BuildCall();
+    LValue result = output().buildExtractValue(compose, 1);
+    // Result is in R1: null -> not found, otherwise Bool::True or Bool::False.
+    GenerateBoolToJump(R1, is_instance_lbl, is_not_instance_lbl);
+    return type_test_cache.raw();
+  };
+
+  auto GenerateFunctionTypeTest = [&] {
+    resolver.BranchIf(TstSmi(value), is_not_instance);
+    return GenerateCallSubtypeTestStub(kTestTypeSixArgs);
+  };
+  if (type.IsFunctionType()) {
+    return GenerateFunctionTypeTest();
+  }
+  if (type.IsInstantiated()) {
+    const Class& type_class = Class::ZoneHandle(zone(), type.type_class());
+    // A class equality check is only applicable with a dst type (not a
+    // function type) of a non-parameterized class or with a raw dst type of
+    // a parameterized class.
+    if (type_class.NumTypeArguments() > 0) {
+      return GenerateInstantiatedTypeWithArgumentsTest(
+          token_pos, type, is_instance_lbl, is_not_instance_lbl);
+      // Fall through to runtime call.
+    }
+    const bool has_fall_through = GenerateInstantiatedTypeNoArgumentsTest(
+        token_pos, type, is_instance_lbl, is_not_instance_lbl);
+    if (has_fall_through) {
+      // If test non-conclusive so far, try the inlined type-test cache.
+      // 'type' is known at compile time.
+      return GenerateSubtype1TestCacheLookup(
+          token_pos, type_class, is_instance_lbl, is_not_instance_lbl);
+    } else {
+      return SubtypeTestCache::null();
+    }
+  }
+  return GenerateUninstantiatedTypeTest(token_pos, type, is_instance_lbl,
+                                        is_not_instance_lbl);
+}
+#endif
 
 LType AnonImpl::GetMachineRepresentationType(Representation rep) {
   LType type;
@@ -1056,6 +1266,25 @@ LValue AnonImpl::CompareClassId(LValue o, intptr_t clsid) {
   return output().buildICmp(LLVMIntEQ, clsid_val, output().constIntPtr(clsid));
 }
 
+LValue AnonImpl::CompareObject(LValue v, const Object& o) {
+  LValue o_val = LoadObject(o);
+  return output().buildICmp(LLVMIntEQ, v, o_val);
+}
+
+LValue AnonImpl::ExpectTrue(LValue cond) {
+  EMASSERT(typeOf(cond) == output().repo().boolean);
+
+  return output().buildCall(output().repo().expectIntrinsic(), cond,
+                            output().repo().booleanTrue);
+}
+
+LValue AnonImpl::ExpectFalse(LValue cond) {
+  EMASSERT(typeOf(cond) == output().repo().boolean);
+
+  return output().buildCall(output().repo().expectIntrinsic(), cond,
+                            output().repo().booleanFalse);
+}
+
 LValue AnonImpl::GetLLVMValue(int ssa_id) {
   return current_bb_impl()->GetLLVMValue(ssa_id);
 }
@@ -1164,6 +1393,7 @@ void AnonImpl::StoreIntoObject(Instruction* instr,
         pointerType(output().repo().intPtr));
     LValue barrier_mask = output().buildLoad(barrier_mask_gep);
     DiamondContinuationResolver resolver(*this, -1);
+    resolver.RightHint();
     resolver.BuildCmp([&]() {
       LValue test_value = output().buildAnd(and_value, barrier_mask);
       return output().buildICmp(LLVMIntNE, test_value, output().constIntPtr(0));
@@ -1179,8 +1409,9 @@ void AnonImpl::StoreIntoObject(Instruction* instr,
       std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
       callsite_info->set_type(CallSiteInfo::CallTargetType::kTarget);
 
-      CallResolver::CallResolverParameter param = {
-          instr, 0, std::move(callsite_info), entry};
+      CallResolver::CallResolverParameter param(instr, 0,
+                                                std::move(callsite_info));
+      param.set_target(entry);
       CallResolver call_resolver(*this, -1, param);
       call_resolver.SetGParameter(kWriteBarrierObjectReg, object);
       call_resolver.SetGParameter(kWriteBarrierValueReg, value);
@@ -1243,9 +1474,10 @@ void AnonImpl::StoreIntoArray(Instruction* instr,
           pointerType(output().repo().ref8));
       LValue entry = output().buildLoad(entry_gep);
       std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
-      // use kReg type.
-      CallResolver::CallResolverParameter param = {
-          instr, 0, std::move(callsite_info), entry};
+      callsite_info->set_type(CallSiteInfo::CallTargetType::kTarget);
+      CallResolver::CallResolverParameter param(instr, 0,
+                                                std::move(callsite_info));
+      param.set_target(entry);
       CallResolver call_resolver(*this, -1, param);
       LValue slot = output().buildAdd(TaggedToWord(object), dest);
       slot = output().buildSub(slot, output().constIntPtr(kHeapObjectTag));
@@ -1290,11 +1522,9 @@ DiamondContinuationResolver& DiamondContinuationResolver::BuildCmp(
     std::function<LValue()> f) {
   LValue cmp_value = f();
   if (hint_ < 0) {
-    cmp_value = output().buildCall(output().repo().expectIntrinsic(), cmp_value,
-                                   output().repo().booleanTrue);
+    cmp_value = impl().ExpectTrue(cmp_value);
   } else if (hint_ > 0) {
-    cmp_value = output().buildCall(output().repo().expectIntrinsic(), cmp_value,
-                                   output().repo().booleanFalse);
+    cmp_value = impl().ExpectFalse(cmp_value);
   }
   output().buildCondBr(cmp_value, blocks_[0], blocks_[1]);
   return *this;
@@ -1337,6 +1567,24 @@ void DiamondContinuationResolver::BranchToOtherLeafOnCondition(LValue cond) {
   output().buildCondBr(cond, blocks_[other_leaf_index], diamond_continuation);
   output().positionToBBEnd(diamond_continuation);
   blocks_[building_block_index_] = diamond_continuation;
+}
+
+CallResolver::CallResolverParameter::CallResolverParameter(
+    Instruction* instr,
+    size_t _instruction_size,
+    std::unique_ptr<CallSiteInfo> _callinfo)
+    : call_instruction(instr),
+      instruction_size(_instruction_size),
+      callsite_info(std::move(_callinfo)),
+      target(nullptr),
+      second_return(false) {}
+
+void CallResolver::CallResolverParameter::set_target(LValue t) {
+  target = t;
+}
+
+void CallResolver::CallResolverParameter::set_second_return(bool s) {
+  second_return = s;
 }
 
 CallResolver::CallResolver(
@@ -1408,13 +1656,15 @@ void CallResolver::ExtractCallInfo() {
 }
 
 void CallResolver::GenerateStatePointFunction() {
-  LType return_type = output().tagged_type();
+  return_type_ = call_resolver_parameter_.second_return
+                     ? output().tagged_pair()
+                     : output().tagged_type();
   std::vector<LType> operand_value_types;
   for (LValue param : parameters_) {
     operand_value_types.emplace_back(typeOf(param));
   }
   LType callee_function_type =
-      functionType(return_type, operand_value_types.data(),
+      functionType(return_type_, operand_value_types.data(),
                    operand_value_types.size(), NotVariadic);
   callee_type_ = pointerType(callee_function_type);
 
@@ -1489,6 +1739,7 @@ void CallResolver::EmitCall() {
                              statepoint_operands.size(), continuation_block_,
                              catch_block_impl_->native_bb);
   }
+  LLVMSetInstructionCallConv(statepoint_value_, LLVMV8CallConv);
 }
 
 void CallResolver::EmitRelocatesIfNeeded() {
@@ -1501,8 +1752,7 @@ void CallResolver::EmitRelocatesIfNeeded() {
     impl().current_bb_impl()->SetLLVMValue(gc_relocate.ssa_index, relocated);
   }
 
-  LType return_type = output().tagged_type();
-  LValue intrinsic = output().getGCResultFunction(return_type);
+  LValue intrinsic = output().getGCResultFunction(return_type_);
   call_value_ = output().buildCall(intrinsic, statepoint_value_);
 }
 
@@ -1525,7 +1775,6 @@ void CallResolver::EmitExceptionBlockIfNeeded() {
     ExceptionBlockLiveInEntry e = {
         std::move(exception_block_live_in_value_map_),
         impl().current_bb_impl()->continuation};
-    output().positionToBBEnd(catch_block_impl_->native_bb);
     impl().MergeExceptionLiveInEntries(e, catch_block_, catch_block_impl_);
   }
 }
@@ -1595,16 +1844,8 @@ LValue BoxAllocationSlowPath::Allocate() {
 LValue BoxAllocationSlowPath::BuildSlowPath() {
   const Code& stub = Code::ZoneHandle(
       impl().zone(), StubCode::GetAllocationStubForClass(cls_));
-
-  std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
-  callsite_info->set_type(CallSiteInfo::CallTargetType::kStubRelative);
-  callsite_info->set_token_pos(instruction_->token_pos());
-  callsite_info->set_deopt_id(instruction_->deopt_id());
-  callsite_info->set_code(&stub);
-  CallResolver::CallResolverParameter param = {
-      instruction_, Instr::kInstrSize, std::move(callsite_info), nullptr};
-  CallResolver resolver(impl(), -1, param);
-  return resolver.BuildCall();
+  return impl().GenerateCall(instruction_, instruction_->token_pos(), -1, stub,
+                             RawPcDescriptors::kOther, 0, {});
 }
 
 ComparisonResolver::ComparisonResolver(AnonImpl& impl)
@@ -1620,9 +1861,9 @@ void ComparisonResolver::VisitStrictCompare(StrictCompareInstr* instr) {
         check_mint("check_mint_%d", instr->ssa_temp_index());
     AssemblerResolver resolver(impl());
     LValue left_is_smi = impl().TstSmi(left);
-    resolver.Branch(left_is_smi, reference_compare);
+    resolver.BranchIf(left_is_smi, reference_compare);
     LValue right_is_smi = impl().TstSmi(left);
-    resolver.Branch(right_is_smi, reference_compare);
+    resolver.BranchIf(right_is_smi, reference_compare);
     LValue left_is_double = impl().CompareClassId(left, kDoubleCid);
     resolver.BranchIfNot(left_is_double, check_mint);
     LValue right_is_double = impl().CompareClassId(right, kDoubleCid);
@@ -1793,13 +2034,20 @@ void Label::InitBBIfNeeded(AnonImpl& impl) {
 }
 
 AssemblerResolver::AssemblerResolver(AnonImpl& impl)
-    : impl_(impl), current_(impl.current_bb_impl()->continuation) {
+    : impl_(impl), current_(impl.output().getInsertionBlock()) {
   merge_ = impl.NewBasicBlock("AssemblerResolver::Merge");
 }
 
-void AssemblerResolver::Branch(LValue cond, Label& label) {
+void AssemblerResolver::Branch(Label& label) {
+  label.InitBBIfNeeded(impl());
+  output().buildBr(label.basic_block());
+  current_ = nullptr;
+}
+
+void AssemblerResolver::BranchIf(LValue cond, Label& label) {
   EMASSERT(current_);
-  LBasicBlock continuation = impl().NewBasicBlock("AssemblerResolver::Branch");
+  LBasicBlock continuation =
+      impl().NewBasicBlock("AssemblerResolver::BranchIf");
   label.InitBBIfNeeded(impl());
   output().buildCondBr(cond, label.basic_block(), continuation);
   current_ = continuation;
@@ -1837,12 +2085,32 @@ LValue AssemblerResolver::End() {
   return phi;
 }
 
+void AssemblerResolver::GotoMerge() {
+  output().buildBr(merge_);
+  current_ = nullptr;
+}
+
+void AssemblerResolver::GotoMergeIf(LValue cond) {
+  LBasicBlock continuation =
+      impl().NewBasicBlock("AssemblerResolver::GotoMergeIf");
+  output().buildCondBr(cond, merge_, continuation);
+  current_ = continuation;
+  output().positionToBBEnd(current_);
+}
+
+void AssemblerResolver::GotoMergeIfNot(LValue cond) {
+  LBasicBlock continuation =
+      impl().NewBasicBlock("AssemblerResolver::GotoMergeIf");
+  output().buildCondBr(cond, continuation, merge_);
+  current_ = continuation;
+  output().positionToBBEnd(current_);
+}
+
 void AssemblerResolver::GotoMergeWithValue(LValue v) {
   EMASSERT(current_);
   merge_values_.emplace_back(v);
   merge_blocks_.emplace_back(current_);
-  output().buildBr(merge_);
-  current_ = nullptr;
+  GotoMerge();
 }
 
 void AssemblerResolver::GotoMergeWithValueIf(LValue cond, LValue v) {
@@ -2054,8 +2322,8 @@ void IRTranslator::VisitTailCall(TailCallInstr* instr) {
   impl().SetDebugLine(instr);
   std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
   callsite_info->set_type(CallSiteInfo::CallTargetType::kCodeObject);
-  CallResolver::CallResolverParameter param = {
-      instr, Instr::kInstrSize, std::move(callsite_info), nullptr};
+  CallResolver::CallResolverParameter param(instr, Instr::kInstrSize,
+                                            std::move(callsite_info));
   CallResolver resolver(impl(), -1, param);
   LValue code_object = impl().LoadObject(instr->code());
   resolver.SetGParameter(static_cast<int>(CODE_REG), code_object);
@@ -2090,14 +2358,14 @@ void IRTranslator::VisitNativeReturn(NativeReturnInstr* instr) {
 void IRTranslator::VisitThrow(ThrowInstr* instr) {
   impl().SetDebugLine(instr);
   impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
-                             kThrowRuntimeEntry, 1);
+                             kThrowRuntimeEntry, 1, false);
   output().buildCall(output().repo().trapIntrinsic());
 }
 
 void IRTranslator::VisitReThrow(ReThrowInstr* instr) {
   impl().SetDebugLine(instr);
   impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
-                             kReThrowRuntimeEntry, 2);
+                             kReThrowRuntimeEntry, 2, false);
   output().buildCall(output().repo().trapIntrinsic());
 }
 
@@ -2175,8 +2443,8 @@ void IRTranslator::VisitClosureCall(ClosureCallInstr* instr) {
   callsite_info->set_token_pos(instr->token_pos());
   callsite_info->set_deopt_id(instr->deopt_id());
   callsite_info->set_stack_parameter_count(argument_count);
-  CallResolver::CallResolverParameter param = {
-      instr, Instr::kInstrSize, std::move(callsite_info), nullptr};
+  CallResolver::CallResolverParameter param(instr, Instr::kInstrSize,
+                                            std::move(callsite_info));
   CallResolver resolver(impl(), instr->ssa_temp_index(), param);
   const Array& arguments_descriptor =
       Array::ZoneHandle(impl().zone(), instr->GetArgumentsDescriptor());
@@ -2215,8 +2483,8 @@ void IRTranslator::VisitInstanceCall(InstanceCallInstr* instr) {
   callsite_info->set_token_pos(instr->token_pos());
   callsite_info->set_deopt_id(instr->deopt_id());
   callsite_info->set_stack_parameter_count(argument_count);
-  CallResolver::CallResolverParameter param = {
-      instr, Instr::kInstrSize, std::move(callsite_info), nullptr};
+  CallResolver::CallResolverParameter param(instr, Instr::kInstrSize,
+                                            std::move(callsite_info));
   CallResolver resolver(impl(), instr->ssa_temp_index(), param);
 
   const Code& initial_stub = StubCode::UnlinkedCall();
@@ -2233,12 +2501,6 @@ void IRTranslator::VisitInstanceCall(InstanceCallInstr* instr) {
   LValue receiver =
       resolver.GetStackParameter((ic_data.CountWithoutTypeArgs() - 1));
   resolver.SetGParameter(kReceiverReg, receiver);
-#if 0
-  // unknown effect.
-  __ LoadFromOffset(
-      kWord, R0, SP,
-      (ic_data.CountWithoutTypeArgs() - 1) * compiler::target::kWordSize);
-#endif
 
   LValue result = resolver.BuildCall();
   impl().SetLLVMValue(instr, result);
@@ -2460,8 +2722,8 @@ void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
   callsite_info->set_token_pos(instr->token_pos());
   callsite_info->set_deopt_id(instr->deopt_id());
   callsite_info->set_stack_parameter_count(argument_count);
-  CallResolver::CallResolverParameter param = {
-      instr, kNativeCallInstrSize, std::move(callsite_info), nullptr};
+  CallResolver::CallResolverParameter param(instr, kNativeCallInstrSize,
+                                            std::move(callsite_info));
   CallResolver resolver(impl(), instr->ssa_temp_index(), param);
   for (intptr_t i = 0; i < argument_count; ++i) {
     LValue argument = impl().pushed_arguments_.back();
@@ -2704,18 +2966,67 @@ void IRTranslator::VisitStoreIndexed(StoreIndexedInstr* instr) {
 }
 
 void IRTranslator::VisitStoreInstanceField(StoreInstanceFieldInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  EMASSERT(!instr->IsUnboxedStore());
+  const intptr_t offset_in_bytes = instr->OffsetInBytes();
+
+  LValue val = impl().GetLLVMValue(instr->value());
+  LValue instance = impl().GetLLVMValue(instr->instance());
+  if (instr->ShouldEmitStoreBarrier()) {
+    impl().StoreIntoObject(
+        instr, instance, output().constIntPtr(offset_in_bytes - kHeapObjectTag),
+        val, instr->CanValueBeSmi());
+  } else {
+    impl().StoreToOffset(instance, offset_in_bytes - kHeapObjectTag, val);
+  }
 }
 
 void IRTranslator::VisitInitInstanceField(InitInstanceFieldInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  LValue instance = impl().GetLLVMValue(instr->InputAt(0));
+  LValue field_value =
+      impl().LoadFieldFromOffset(instance, instr->field().Offset());
+  LValue sentinel = impl().LoadObject(Object::sentinel());
+  AssemblerResolver resolver(impl());
+  LValue cmp = output().buildICmp(LLVMIntNE, field_value, sentinel);
+  resolver.GotoMergeIf(impl().ExpectTrue(cmp));
+
+  LValue unused_result = impl().LoadObject(Object::null_object());
+  LValue field_original =
+      impl().LoadObject(Field::ZoneHandle(instr->field().Original()));
+  impl().PushArgument(unused_result);
+  impl().PushArgument(instance);
+  impl().PushArgument(field_original);
+  impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
+                             kInitInstanceFieldRuntimeEntry, 3);
+  resolver.GotoMerge();
+  resolver.End();
 }
 
 void IRTranslator::VisitInitStaticField(InitStaticFieldInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  Label call_runtime("call_runtime");
+  LValue field_value = impl().GetLLVMValue(instr->InputAt(0));
+  LValue static_value = impl().LoadFieldFromOffset(
+      field_value, compiler::target::Field::static_value_offset());
+  LValue sentinel = impl().LoadObject(Object::sentinel());
+  AssemblerResolver resolver(impl());
+  LValue cmp = output().buildICmp(LLVMIntEQ, static_value, sentinel);
+  resolver.BranchIf(impl().ExpectFalse(cmp), call_runtime);
+
+  LValue transition_sentinel = impl().LoadObject(Object::transition_sentinel());
+  cmp = output().buildICmp(LLVMIntNE, static_value, transition_sentinel);
+  resolver.GotoMergeIf(impl().ExpectTrue(cmp));
+  resolver.Branch(call_runtime);
+
+  resolver.Bind(call_runtime);
+  LValue unused_result = impl().LoadObject(Object::null_object());
+  impl().PushArgument(unused_result);
+  impl().PushArgument(field_value);
+  impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
+                             kInitStaticFieldRuntimeEntry, 2);
+  resolver.GotoMerge();
+  resolver.End();
 }
 
 void IRTranslator::VisitLoadStaticField(LoadStaticFieldInstr* instr) {
@@ -2727,8 +3038,21 @@ void IRTranslator::VisitLoadStaticField(LoadStaticFieldInstr* instr) {
 }
 
 void IRTranslator::VisitStoreStaticField(StoreStaticFieldInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  LValue value = impl().GetLLVMValue(instr->InputAt(0));
+  LValue field_original = impl().LoadObject(
+      Field::ZoneHandle(impl().zone(), instr->field().Original()));
+  if (instr->value()->NeedsWriteBarrier()) {
+    impl().StoreIntoObject(
+        instr, field_original,
+        output().constIntPtr(compiler::target::Field::static_value_offset() -
+                             kHeapObjectTag),
+        value, instr->CanValueBeSmi());
+  } else {
+    impl().StoreToOffset(
+        field_original,
+        compiler::target::Field::static_value_offset() - kHeapObjectTag, value);
+  }
 }
 
 void IRTranslator::VisitBooleanNegate(BooleanNegateInstr* instr) {
@@ -2743,13 +3067,35 @@ void IRTranslator::VisitBooleanNegate(BooleanNegateInstr* instr) {
 }
 
 void IRTranslator::VisitInstanceOf(InstanceOfInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  // FIXME: implement inline instance of
+  LValue instance = impl().GetLLVMValue(instr->value());
+  LValue instantiator_type_arguments =
+      impl().GetLLVMValue(instr->instantiator_type_arguments());
+  LValue function_type_arguments =
+      impl().GetLLVMValue(instr->function_type_arguments());
+  LValue null_object = impl().LoadObject(Object::null_object());
+  impl().PushArgument(null_object);
+  impl().PushArgument(instance);
+  impl().PushArgument(impl().LoadObject(instr->type()));
+  impl().PushArgument(instantiator_type_arguments);
+  impl().PushArgument(function_type_arguments);
+  impl().PushArgument(null_object);  // cache
+  LValue result = impl().GenerateRuntimeCall(
+      instr, instr->token_pos(), instr->deopt_id(), kInstanceofRuntimeEntry, 6);
+  impl().SetLLVMValue(instr, result);
 }
 
 void IRTranslator::VisitCreateArray(CreateArrayInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  LValue length = impl().GetLLVMValue(instr->num_elements());
+  LValue elem_type = impl().GetLLVMValue(instr->element_type());
+  LValue result = impl().GenerateCall(
+      instr, instr->token_pos(), instr->deopt_id(), StubCode::AllocateArray(),
+      RawPcDescriptors::kOther, 0,
+      {{kCreateArrayLengthReg, length},
+       {kCreateArrayElementTypeReg, elem_type}});
+  impl().SetLLVMValue(instr, result);
 }
 
 void IRTranslator::VisitAllocateObject(AllocateObjectInstr* instr) {

@@ -28,6 +28,7 @@ class Output {
   void initializeFunction(const RegisterParameterDesc&);
   LBasicBlock appendBasicBlock(const char* name = "");
   LBasicBlock appendBasicBlock(LValue function, const char* name = "");
+  LBasicBlock getInsertionBlock();
   void positionToBBEnd(LBasicBlock);
   void positionBefore(LValue);
   LValue constInt8(int);
@@ -121,6 +122,7 @@ class Output {
   void setDebugInfo(intptr_t linenum, const char* source_file_name);
   void finalize();
   LValue addFunction(const char* name, LType type);
+  LType tagged_pair() const;
 
   inline IntrinsicRepository& repo() { return repo_; }
   inline LBasicBlock prologue() const { return prologue_; }
