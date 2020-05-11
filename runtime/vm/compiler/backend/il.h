@@ -6531,6 +6531,9 @@ class BoxInstr : public TemplateDefinition<1, NoThrow, Pure> {
   const Representation from_representation_;
 
   DISALLOW_COPY_AND_ASSIGN(BoxInstr);
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  friend class dart::dart_llvm::IRTranslator;
+#endif
 };
 
 class BoxIntegerInstr : public BoxInstr {

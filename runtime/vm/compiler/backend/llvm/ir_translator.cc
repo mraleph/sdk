@@ -292,6 +292,11 @@ class AnonImpl {
         flow_graph()->isolate()->object_store()->mint_class());
   }
 
+  const Class& double_class() {
+    return Class::ZoneHandle(
+        flow_graph()->isolate()->object_store()->double_class());
+  }
+
   Zone* zone() { return flow_graph_->zone(); }
 
   BlockEntryInstr* current_bb_;
@@ -1242,7 +1247,7 @@ LValue AnonImpl::SmiTag(LValue v) {
 LValue AnonImpl::SmiUntag(LValue v) {
   EMASSERT(typeOf(v) == output().tagged_type());
   v = TaggedToWord(v);
-  return output().buildShr(v, output().constIntPtr(kSmiTagSize));
+  return output().buildSar(v, output().constIntPtr(kSmiTagSize));
 }
 
 LValue AnonImpl::TstSmi(LValue v) {
@@ -3570,8 +3575,27 @@ void IRTranslator::VisitUnaryDoubleOp(UnaryDoubleOpInstr* instr) {
 }
 
 void IRTranslator::VisitCheckStackOverflow(CheckStackOverflowInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  LValue stack_pointer =
+      output().buildCall(output().repo().stackSaveIntrinsic());
+  LValue stack_pointer_int =
+      output().buildCast(LLVMPtrToInt, stack_pointer, output().repo().intPtr);
+
+  LValue stack_limit = output().buildLoad(output().buildGEPWithByteOffset(
+      output().thread(),
+      output().constIntPtr(compiler::target::Thread::stack_limit_offset()),
+      pointerType(output().repo().intPtr)));
+  AssemblerResolver resolver(impl());
+  Label slow_path("CheckStackOverflowSlowPath");
+  LValue cmp = output().buildICmp(LLVMIntULE, stack_pointer_int, stack_limit);
+  resolver.BranchIf(impl().ExpectFalse(cmp), slow_path);
+  resolver.GotoMerge();
+  resolver.Bind(slow_path);
+  // FIXME: support live fpu register here.
+  impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
+                             kStackOverflowRuntimeEntry, 0, false);
+  resolver.GotoMerge();
+  resolver.End();
 }
 
 void IRTranslator::VisitSmiToDouble(SmiToDoubleInstr* instr) {
@@ -3613,8 +3637,12 @@ void IRTranslator::VisitDoubleToDouble(DoubleToDoubleInstr* instr) {
 }
 
 void IRTranslator::VisitDoubleToFloat(DoubleToFloatInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  LValue fnum = impl().GetLLVMValue(instr->value());
+  EMASSERT(typeOf(fnum) == output().repo().doubleType);
+  LValue dnum =
+      output().buildCast(LLVMFPTrunc, fnum, output().repo().floatType);
+  impl().SetLLVMValue(instr, dnum);
 }
 
 void IRTranslator::VisitFloatToDouble(FloatToDoubleInstr* instr) {
@@ -3641,8 +3669,16 @@ void IRTranslator::VisitCheckSmi(CheckSmiInstr* instr) {
 }
 
 void IRTranslator::VisitCheckNull(CheckNullInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  LValue value = impl().GetLLVMValue(instr->value());
+  AssemblerResolver resolver(impl());
+  Label slow_path("CheckNullSlowPath");
+  LValue null_object = impl().LoadObject(Object::null_object());
+  LValue cmp = output().buildICmp(LLVMIntEQ, null_object, value);
+  resolver.BranchIf(impl().ExpectFalse(cmp), slow_path);
+  resolver.Bind(slow_path);
+  impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
+                             kNullErrorRuntimeEntry, 0, false);
 }
 
 void IRTranslator::VisitCheckCondition(CheckConditionInstr* instr) {
@@ -3746,8 +3782,50 @@ void IRTranslator::VisitMathMinMax(MathMinMaxInstr* instr) {
 }
 
 void IRTranslator::VisitBox(BoxInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  LValue value = impl().GetLLVMValue(instr->value());
+  auto BoxClassFor = [&](Representation rep) -> const Class& {
+    switch (rep) {
+      case kUnboxedFloat:
+      case kUnboxedDouble:
+        return impl().double_class();
+      case kUnboxedFloat32x4:
+        LLVMLOGE("unsupported kUnboxedFloat32x4");
+        UNREACHABLE();
+      case kUnboxedFloat64x2:
+        LLVMLOGE("unsupported kUnboxedFloat64x2");
+        UNREACHABLE();
+      case kUnboxedInt32x4:
+        LLVMLOGE("unsupported kUnboxedInt32x4");
+        UNREACHABLE();
+      case kUnboxedInt64:
+        return impl().mint_class();
+      default:
+        UNREACHABLE();
+        return Class::ZoneHandle();
+    }
+  };
+
+  BoxAllocationSlowPath allocate(
+      instr, BoxClassFor(instr->from_representation()), impl());
+  LValue result = allocate.Allocate();
+  switch (instr->from_representation()) {
+    case kUnboxedDouble:
+      impl().StoreToOffset(result, instr->ValueOffset() - kHeapObjectTag,
+                           value);
+      break;
+    case kUnboxedFloat:
+      impl().StoreToOffset(result, instr->ValueOffset() - kHeapObjectTag,
+                           value);
+      break;
+    case kUnboxedFloat32x4:
+    case kUnboxedFloat64x2:
+    case kUnboxedInt32x4:
+    default:
+      UNREACHABLE();
+      break;
+  }
+  impl().SetLLVMValue(instr, result);
 }
 
 void IRTranslator::VisitUnbox(UnboxInstr* instr) {
@@ -3801,7 +3879,8 @@ void IRTranslator::VisitUnbox(UnboxInstr* instr) {
         .BuildLeft([&]() { return impl().SmiUntag(value); })
         .BuildRight([&]() {
           return impl().LoadFieldFromOffset(
-              value, compiler::target::Mint::value_offset());
+              value, compiler::target::Mint::value_offset(),
+              output().repo().ref32);
         });
     return diamond.End();
   };
@@ -3885,8 +3964,48 @@ void IRTranslator::VisitUnbox(UnboxInstr* instr) {
 }
 
 void IRTranslator::VisitBoxInt64(BoxInt64Instr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  LValue value = impl().GetLLVMValue(instr->value());
+  EMASSERT(typeOf(value) == output().repo().int64);
+  LValue result;
+  if (instr->ValueFitsSmi()) {
+    value = output().buildCast(LLVMTrunc, value, output().repo().intPtr);
+    result = impl().SmiTag(value);
+  } else {
+    AssemblerResolver resolver(impl());
+    Label slow_path("Allocate for BoxInt64:%d", instr->ssa_temp_index());
+#if defined(TARGET_ARCH_IS_32_BIT)
+    LValue value_lo =
+        output().buildCast(LLVMTrunc, value, output().repo().int32);
+    LValue value_hi = output().buildCast(
+        LLVMTrunc, output().buildShr(value, output().constInt32(32)),
+        output().repo().int32);
+    result = output().buildShl(value_lo, output().constInt32(kSmiTagSize));
+    LValue cmp_1 = output().buildICmp(
+        LLVMIntEQ, output().buildSar(result, output().constInt32(kSmiTagSize)),
+        value_lo);
+    LValue cmp_2 =
+        output().buildICmp(LLVMIntEQ, value_hi,
+                           output().buildSar(result, output().constInt32(31)));
+    LValue cmp = output().buildAnd(cmp_1, cmp_2);
+#else
+    result = output().buildShl(value, output().constInt64(kSmiTagSize));
+    LValue cmp = output().buildICmp(
+        LLVMIntEQ, value,
+        output().buildSar(result, output().constInt64(kSmiTagSize)));
+#endif
+    resolver.BranchIfNot(impl().ExpectTrue(cmp), slow_path);
+    resolver.GotoMergeWithValue(impl().WordToTagged(result));
+
+    resolver.Bind(slow_path);
+    BoxAllocationSlowPath allocate(instr, impl().mint_class(), impl());
+    result = allocate.Allocate();
+    impl().StoreToOffset(
+        result, compiler::target::Mint::value_offset() - kHeapObjectTag, value);
+    resolver.GotoMergeWithValue(result);
+    result = resolver.End();
+  }
+  impl().SetLLVMValue(instr, result);
 }
 
 void IRTranslator::VisitUnboxInt64(UnboxInt64Instr* instr) {
