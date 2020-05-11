@@ -56,6 +56,7 @@ class CallSiteInfo final : public StackMapInfo {
     kStubRelative,
     // Code object call is the call that code object alreadly loaded to CODE_REG
     kCodeObject,
+    kCFunction,
     kNative,
   };
   explicit CallSiteInfo();

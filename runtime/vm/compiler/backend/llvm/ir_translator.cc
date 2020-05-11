@@ -187,15 +187,16 @@ class AnonImpl {
                              const RuntimeEntry& entry,
                              intptr_t argument_count,
                              bool return_on_stack = true);
-  LValue GenerateStaticCall(Instruction*,
-                            int ssa_index,
-                            const std::vector<LValue>& arguments,
-                            intptr_t deopt_id,
-                            TokenPosition token_pos,
-                            const Function& function,
-                            ArgumentsInfo args_info,
-                            const ICData& ic_data_in,
-                            Code::EntryKind entry_kind);
+  LValue GenerateStaticCall(
+      Instruction*,
+      int ssa_index,
+      const std::vector<LValue>& arguments,
+      intptr_t deopt_id,
+      TokenPosition token_pos,
+      const Function& function,
+      ArgumentsInfo args_info,
+      const ICData& ic_data_in,
+      Code::EntryKind entry_kind = Code::EntryKind::kNormal);
   LValue GenerateMegamorphicInstanceCall(Instruction* instr,
                                          const String& name,
                                          const Array& arguments_descriptor,
@@ -273,6 +274,7 @@ class AnonImpl {
                      Label& failure,
                      intptr_t cid,
                      intptr_t instance_size);
+  LValue BoxInteger32(Instruction*, LValue value, bool fit, Representation rep);
 
   // Basic blocks continuation
   LBasicBlock NewBasicBlock(const char* fmt, ...);
@@ -957,22 +959,30 @@ LValue AnonImpl::GenerateRuntimeCall(Instruction* instr,
                                      intptr_t argument_count,
                                      bool return_on_stack) {
   EMASSERT(!runtime_entry.is_leaf());
-  LValue code_object =
+  LValue runtime_entry_point =
       LoadFromOffset(output().thread(),
                      compiler::target::Thread::OffsetFromThread(&runtime_entry),
-                     pointerType(output().tagged_type()));
+                     pointerType(output().repo().ref8));
+  LValue target_gep = output().buildGEPWithByteOffset(
+      output().thread(),
+      compiler::target::Thread::call_to_runtime_entry_point_offset(),
+      pointerType(output().repo().ref8));
+  LValue target = output().buildLoad(target_gep);
   std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
-  callsite_info->set_type(CallSiteInfo::CallTargetType::kCodeObject);
+  callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
   callsite_info->set_token_pos(token_pos);
   callsite_info->set_deopt_id(deopt_id);
   callsite_info->set_return_on_stack(return_on_stack);
+  callsite_info->set_reg(kRuntimeCallTargetReg);
   CallResolver::CallResolverParameter param(
       instr,
       return_on_stack ? kRuntimeCallReturnOnStackInstrSize
                       : kRuntimeCallInstrSize,
       std::move(callsite_info));
   CallResolver resolver(*this, -1, param);
-  resolver.SetGParameter(static_cast<int>(CODE_REG), code_object);
+  resolver.SetGParameter(static_cast<int>(kRuntimeCallTargetReg), target);
+  resolver.SetGParameter(static_cast<int>(kRuntimeCallEntryReg),
+                         runtime_entry_point);
   resolver.SetGParameter(static_cast<int>(kRuntimeCallArgCountReg),
                          output().constIntPtr(argument_count));
   // add stack parameters.
@@ -1553,6 +1563,45 @@ LValue AnonImpl::TryAllocate(AssemblerResolver& resolver,
     resolver.Branch(failure);
     return nullptr;
   }
+}
+
+LValue AnonImpl::BoxInteger32(Instruction* instr,
+                              LValue value,
+                              bool fit,
+                              Representation rep) {
+  EMASSERT(typeOf(value) == output().repo().int32);
+#if defined(TARGET_ARCH_IS_32_BIT)
+  LValue result = SmiTag(value);
+  if (!fit) {
+    AssemblerResolver resolver(*this);
+    LValue fit_in_smi;
+    if (kUnboxedInt32 == rep) {
+      fit_in_smi = output().buildICmp(LLVMIntEQ, value, SmiUntag(result));
+    } else {
+      // high 2 bit must be 0 for 32bit arch unsigned integer.
+      LValue and_value =
+          output().buildAnd(value, output().constInt32(0xC0000000));
+      fit_in_smi =
+          output().buildICmp(LLVMIntEQ, and_value, output().constInt32(0));
+    }
+    Label slow_path("BoxInteger32SlowPath");
+    resolver.BranchIfNot(ExpectTrue(fit_in_smi), slow_path);
+    resolver.GotoMergeWithValue(result);
+
+    resolver.Bind(slow_path);
+    BoxAllocationSlowPath box_allocate(instr, mint_class(), *this);
+    LValue mint = box_allocate.Allocate();
+    StoreToOffset(mint, compiler::target::Mint::value_offset() - kHeapObjectTag,
+                  value);
+    resolver.GotoMergeWithValue(mint);
+    result = resolver.End();
+  }
+#else
+  LValue result = output().buildCast(LLVMSExt, value, output().int64);
+  result = output().buildShl(result, output().constInt64(kSmiTagSize));
+  result = WordToTagged(result);
+#endif
+  return result;
 }
 
 LBasicBlock AnonImpl::NewBasicBlock(const char* fmt, ...) {
@@ -3829,6 +3878,7 @@ void IRTranslator::VisitBox(BoxInstr* instr) {
 }
 
 void IRTranslator::VisitUnbox(UnboxInstr* instr) {
+  // FIXME: need to review 64 bit integer.
   impl().SetDebugLine(instr);
   LValue value = impl().GetLLVMValue(instr->value());
   LValue result;
@@ -3924,6 +3974,7 @@ void IRTranslator::VisitUnbox(UnboxInstr* instr) {
       } break;
 
       case kUnboxedInt32:
+      case kUnboxedUint32:
         result = EmitLoadInt32FromBoxOrSmi();
         break;
 
@@ -4110,8 +4161,24 @@ void IRTranslator::VisitCheckArrayBound(CheckArrayBoundInstr* instr) {
 }
 
 void IRTranslator::VisitGenericCheckBound(GenericCheckBoundInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  LValue length = impl().GetLLVMValue(instr->length());
+  LValue index = impl().GetLLVMValue(instr->index());
+  const intptr_t index_cid = instr->index()->Type()->ToCid();
+  AssemblerResolver resolver(impl());
+  Label slow_path("GenericCheckBoundInstrSlowPath");
+  if (index_cid != kSmiCid) {
+    LValue is_smi = impl().TstSmi(index);
+    resolver.BranchIfNot(impl().ExpectTrue(is_smi), slow_path);
+  }
+  LValue cmp = output().buildICmp(LLVMIntUGE, index, length);
+  resolver.BranchIf(impl().ExpectFalse(cmp), slow_path);
+  resolver.Bind(slow_path);
+  impl().PushArgument(length);
+  impl().PushArgument(index);
+  impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
+                             kRangeErrorRuntimeEntry, 2, false);
+  resolver.End();
 }
 
 void IRTranslator::VisitConstraint(ConstraintInstr* instr) {
@@ -4131,13 +4198,49 @@ void IRTranslator::VisitOneByteStringFromCharCode(
 }
 
 void IRTranslator::VisitStringInterpolate(StringInterpolateInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  const int kTypeArgsLen = 0;
+  const int kNumberOfArguments = 1;
+  const Array& kNoArgumentNames = Object::null_array();
+  ArgumentsInfo args_info(kTypeArgsLen, kNumberOfArguments, kNoArgumentNames);
+  std::vector<LValue> arguments{impl().GetLLVMValue(instr->value())};
+  LValue result = impl().GenerateStaticCall(
+      instr, instr->ssa_temp_index(), arguments, instr->deopt_id(),
+      instr->token_pos(), instr->CallFunction(), args_info, ICData::Handle());
+  impl().SetLLVMValue(instr, result);
 }
 
 void IRTranslator::VisitInvokeMathCFunction(InvokeMathCFunctionInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  LValue runtime_entry_point = impl().LoadFromOffset(
+      output().thread(),
+      compiler::target::Thread::OffsetFromThread(&instr->TargetFunction()),
+      pointerType(output().repo().ref8));
+
+  LValue result;
+  if (instr->ArgumentCount() == 1) {
+    LType function_type =
+        functionType(output().repo().doubleType, output().repo().doubleType);
+    LValue function = output().buildCast(LLVMBitCast, runtime_entry_point,
+                                         pointerType(function_type));
+    LValue input0 = impl().GetLLVMValue(instr->InputAt(0));
+    EMASSERT(typeOf(input0) == output().repo().doubleType);
+    result = output().buildCall(function, input0);
+  } else if (instr->ArgumentCount() == 2) {
+    LType function_type =
+        functionType(output().repo().doubleType, output().repo().doubleType,
+                     output().repo().doubleType);
+    LValue function = output().buildCast(LLVMBitCast, runtime_entry_point,
+                                         pointerType(function_type));
+    LValue input0 = impl().GetLLVMValue(instr->InputAt(0));
+    LValue input1 = impl().GetLLVMValue(instr->InputAt(1));
+    EMASSERT(typeOf(input0) == output().repo().doubleType);
+    EMASSERT(typeOf(input1) == output().repo().doubleType);
+    result = output().buildCall(function, input0, input1);
+  } else {
+    UNREACHABLE();
+  }
+  impl().SetLLVMValue(instr, result);
 }
 
 void IRTranslator::VisitTruncDivMod(TruncDivModInstr* instr) {
@@ -4313,8 +4416,11 @@ void IRTranslator::VisitUnaryUint32Op(UnaryUint32OpInstr* instr) {
 }
 
 void IRTranslator::VisitBoxUint32(BoxUint32Instr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  LValue value = impl().GetLLVMValue(instr->value());
+  LValue result = impl().BoxInteger32(instr, value, instr->ValueFitsSmi(),
+                                      instr->from_representation());
+  impl().SetLLVMValue(instr, result);
 }
 
 void IRTranslator::VisitUnboxUint32(UnboxUint32Instr* instr) {
@@ -4322,8 +4428,11 @@ void IRTranslator::VisitUnboxUint32(UnboxUint32Instr* instr) {
 }
 
 void IRTranslator::VisitBoxInt32(BoxInt32Instr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  LValue value = impl().GetLLVMValue(instr->value());
+  LValue result = impl().BoxInteger32(instr, value, instr->ValueFitsSmi(),
+                                      instr->from_representation());
+  impl().SetLLVMValue(instr, result);
 }
 
 void IRTranslator::VisitUnboxInt32(UnboxInt32Instr* instr) {
