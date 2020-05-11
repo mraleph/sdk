@@ -14,6 +14,9 @@ static const size_t kNativeCallInstrSize = 12 * Instr::kInstrSize;
 static const size_t kRuntimeCallInstrSize = Instr::kInstrSize;
 static const size_t kRuntimeCallReturnOnStackInstrSize = 2 * Instr::kInstrSize;
 
+// Runtime Call
+static const Register kRuntimeCallArgCountReg = R4;
+
 // instance of
 static const Register kInstanceOfInstanceReg = R0;
 static const Register kInstanceOfFunctionTypeReg = R1;
@@ -22,6 +25,9 @@ static const Register kInstanceOfInstantiatorTypeReg = R2;
 // array
 static const Register kCreateArrayLengthReg = R2;
 static const Register kCreateArrayElementTypeReg = R1;
+
+// Context Allocation
+static const Register kAllocateContextNumOfContextVarsReg = R1;
 #else
 #error unsupported arch
 #endif

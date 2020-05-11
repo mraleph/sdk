@@ -13,12 +13,14 @@
 #include "vm/compiler/backend/llvm/target_specific.h"
 #include "vm/compiler/runtime_api.h"
 #include "vm/object_store.h"
+#include "vm/type_testing_stubs.h"
 
 namespace dart {
 namespace dart_llvm {
 namespace {
 class AnonImpl;
 class Label;
+class AssemblerResolver;
 struct NotMergedPhiDesc {
   BlockEntryInstr* pred;
   int value;
@@ -266,6 +268,11 @@ class AnonImpl {
                       LValue value,   // Value we are storing.
                       compiler::Assembler::CanBeSmi can_value_be_smi =
                           compiler::Assembler::kValueCanBeSmi);
+  // Allocate
+  LValue TryAllocate(AssemblerResolver& resolver,
+                     Label& failure,
+                     intptr_t cid,
+                     intptr_t instance_size);
 
   // Basic blocks continuation
   LBasicBlock NewBasicBlock(const char* fmt, ...);
@@ -467,6 +474,7 @@ class AssemblerResolver {
   void GotoMergeWithValue(LValue v);
   void GotoMergeWithValueIf(LValue cond, LValue v);
   void GotoMergeWithValueIfNot(LValue cond, LValue v);
+  LBasicBlock current() { return current_; }
 
  private:
   Output& output() { return impl_.output(); }
@@ -856,12 +864,7 @@ LValue AnonImpl::BuildAccessPointer(LValue base,
 LValue AnonImpl::BuildAccessPointer(LValue base, LValue offset, LType type) {
   LLVMTypeKind kind = LLVMGetTypeKind(typeOf(base));
   if (kind == LLVMIntegerTypeKind) {
-    base = WordToTagged(base);
-  }
-  // For ElementOffsetFromIndex ignores BitcastTaggedToWord.
-  if (typeOf(offset) == output().tagged_type()) {
-    UNREACHABLE();
-    // offset = TaggedToWord(offset);
+    base = output().buildCast(LLVMIntToPtr, base, output().repo().ref8);
   }
   LValue pointer = output().buildGEPWithByteOffset(base, offset, type);
   return pointer;
@@ -948,7 +951,7 @@ LValue AnonImpl::GenerateRuntimeCall(Instruction* instr,
                                      const RuntimeEntry& runtime_entry,
                                      intptr_t argument_count,
                                      bool return_on_stack) {
-  EMASSERT(runtime_entry.is_leaf());
+  EMASSERT(!runtime_entry.is_leaf());
   LValue code_object =
       LoadFromOffset(output().thread(),
                      compiler::target::Thread::OffsetFromThread(&runtime_entry),
@@ -957,7 +960,6 @@ LValue AnonImpl::GenerateRuntimeCall(Instruction* instr,
   callsite_info->set_type(CallSiteInfo::CallTargetType::kCodeObject);
   callsite_info->set_token_pos(token_pos);
   callsite_info->set_deopt_id(deopt_id);
-  callsite_info->set_stack_parameter_count(argument_count);
   callsite_info->set_return_on_stack(return_on_stack);
   CallResolver::CallResolverParameter param(
       instr,
@@ -966,6 +968,8 @@ LValue AnonImpl::GenerateRuntimeCall(Instruction* instr,
       std::move(callsite_info));
   CallResolver resolver(*this, -1, param);
   resolver.SetGParameter(static_cast<int>(CODE_REG), code_object);
+  resolver.SetGParameter(static_cast<int>(kRuntimeCallArgCountReg),
+                         output().constIntPtr(argument_count));
   // add stack parameters.
   EMASSERT(static_cast<intptr_t>(pushed_arguments_.size()) >= argument_count);
   for (intptr_t i = 0; i < argument_count; ++i) {
@@ -973,6 +977,10 @@ LValue AnonImpl::GenerateRuntimeCall(Instruction* instr,
     pushed_arguments_.pop_back();
     resolver.AddStackParameter(argument);
   }
+  if (return_on_stack) {
+    resolver.AddStackParameter(LoadObject(Object::null_object()));
+  }
+  callsite_info->set_stack_parameter_count(argument_count);
   return resolver.BuildCall();
 }
 
@@ -1493,6 +1501,55 @@ void AnonImpl::StoreIntoArray(Instruction* instr,
   diamond.End();
 }
 
+LValue AnonImpl::TryAllocate(AssemblerResolver& resolver,
+                             Label& failure,
+                             intptr_t cid,
+                             intptr_t instance_size) {
+  if (compiler::target::Heap::IsAllocatableInNewSpace(instance_size)) {
+    LValue top_offset = output().buildGEPWithByteOffset(
+        output().thread(), compiler::target::Thread::top_offset(),
+        pointerType(output().repo().intPtr));
+    LValue instance = output().buildLoad(top_offset);
+    // TODO(koda): Protect against unsigned overflow here.
+#if !defined(TARGET_ARCH_IS_64_BIT)
+    LValue uadd_overflow =
+        output().buildCall(output().repo().uaddWithOverflow32Intrinsic(),
+                           instance, output().constInt32(instance_size));
+#else
+    LValue uadd_overflow =
+        output().buildCall(output().repo().uaddWithOverflow64Intrinsic(),
+                           instance, output().constInt64(instance_size));
+#endif
+    LValue end_offset = output().buildGEPWithByteOffset(
+        output().thread(), compiler::target::Thread::end_offset(),
+        pointerType(output().repo().intPtr));
+    LValue end = output().buildLoad(end_offset);
+
+    LValue icmp = output().buildICmp(
+        LLVMIntULE, end, output().buildExtractValue(uadd_overflow, 0));
+    LValue overflowed = output().buildExtractValue(uadd_overflow, 1);
+    LValue cond = output().buildOr(icmp, overflowed);
+    resolver.BranchIf(ExpectFalse(cond), failure);
+    output().buildStore(output().buildExtractValue(uadd_overflow, 0),
+                        top_offset);
+    EMASSERT(instance_size >= kHeapObjectTag);
+    const uint32_t tags =
+        compiler::target::MakeTagWordForNewSpaceObject(cid, instance_size);
+    output().buildStore(
+        output().constIntPtr(tags),
+        BuildAccessPointer(
+            instance,
+            output().constIntPtr(compiler::target::Object::tags_offset()),
+            pointerType(output().repo().intPtr)));
+    instance =
+        output().buildAdd(instance, output().constIntPtr(kHeapObjectTag));
+    return WordToTagged(instance);
+  } else {
+    resolver.Branch(failure);
+    return nullptr;
+  }
+}
+
 LBasicBlock AnonImpl::NewBasicBlock(const char* fmt, ...) {
   va_list va;
   va_start(va, fmt);
@@ -1786,59 +1843,14 @@ BoxAllocationSlowPath::BoxAllocationSlowPath(Instruction* instruction,
 
 LValue BoxAllocationSlowPath::Allocate() {
   const intptr_t instance_size = compiler::target::Class::GetInstanceSize(cls_);
-  if (compiler::target::Heap::IsAllocatableInNewSpace(instance_size)) {
-    const classid_t cid = compiler::target::Class::GetId(cls_);
-    LValue top_offset = output().buildGEPWithByteOffset(
-        output().thread(), compiler::target::Thread::top_offset(),
-        pointerType(output().repo().intPtr));
-    LValue instance = output().buildLoad(top_offset);
-    // TODO(koda): Protect against unsigned overflow here.
-#if !defined(TARGET_ARCH_IS_64_BIT)
-    LValue uadd_overflow =
-        output().buildCall(output().repo().uaddWithOverflow32Intrinsic(),
-                           instance, output().constInt32(instance_size));
-#else
-    LValue uadd_overflow =
-        output().buildCall(output().repo().uaddWithOverflow64Intrinsic(),
-                           instance, output().constInt64(instance_size));
-#endif
-    LValue end_offset = output().buildGEPWithByteOffset(
-        output().thread(), compiler::target::Thread::end_offset(),
-        pointerType(output().repo().intPtr));
-    LValue end = output().buildLoad(end_offset);
-
-    DiamondContinuationResolver diamond(impl_, -1);
-    diamond.RightHint();
-    diamond.BuildCmp([&]() {
-      LValue icmp = output().buildICmp(
-          LLVMIntULE, end, output().buildExtractValue(uadd_overflow, 0));
-      LValue overflowed = output().buildExtractValue(uadd_overflow, 1);
-      LValue true_cond = output().buildOr(icmp, overflowed);
-      return true_cond;
-    });
-    diamond.BuildLeft([&]() { return BuildSlowPath(); });
-    diamond.BuildRight([&]() {
-      // Successfully allocated the object, now update top to point to
-      // next object start and store the class in the class field of object.
-      output().buildStore(output().buildExtractValue(uadd_overflow, 0),
-                          top_offset);
-      EMASSERT(instance_size >= kHeapObjectTag);
-      const uint32_t tags =
-          compiler::target::MakeTagWordForNewSpaceObject(cid, instance_size);
-      output().buildStore(
-          output().constIntPtr(tags),
-          impl().BuildAccessPointer(
-              instance,
-              output().constIntPtr(compiler::target::Object::tags_offset()),
-              pointerType(output().repo().intPtr)));
-      instance =
-          output().buildAdd(instance, output().constIntPtr(kHeapObjectTag));
-      return impl().WordToTagged(instance);
-    });
-    return diamond.End();
-  } else {
-    return BuildSlowPath();
-  }
+  const classid_t cid = compiler::target::Class::GetId(cls_);
+  AssemblerResolver resolver(impl());
+  Label slow_path("BoxAllocationSlowPath:slow_path");
+  LValue instance = impl().TryAllocate(resolver, slow_path, cid, instance_size);
+  if (instance) resolver.GotoMergeWithValue(instance);
+  resolver.Bind(slow_path);
+  resolver.GotoMergeWithValue(BuildSlowPath());
+  return resolver.End();
 }
 
 LValue BoxAllocationSlowPath::BuildSlowPath() {
@@ -2991,14 +3003,12 @@ void IRTranslator::VisitInitInstanceField(InitInstanceFieldInstr* instr) {
   LValue cmp = output().buildICmp(LLVMIntNE, field_value, sentinel);
   resolver.GotoMergeIf(impl().ExpectTrue(cmp));
 
-  LValue unused_result = impl().LoadObject(Object::null_object());
   LValue field_original =
       impl().LoadObject(Field::ZoneHandle(instr->field().Original()));
-  impl().PushArgument(unused_result);
   impl().PushArgument(instance);
   impl().PushArgument(field_original);
   impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
-                             kInitInstanceFieldRuntimeEntry, 3);
+                             kInitInstanceFieldRuntimeEntry, 2);
   resolver.GotoMerge();
   resolver.End();
 }
@@ -3020,11 +3030,9 @@ void IRTranslator::VisitInitStaticField(InitStaticFieldInstr* instr) {
   resolver.Branch(call_runtime);
 
   resolver.Bind(call_runtime);
-  LValue unused_result = impl().LoadObject(Object::null_object());
-  impl().PushArgument(unused_result);
   impl().PushArgument(field_value);
   impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
-                             kInitStaticFieldRuntimeEntry, 2);
+                             kInitStaticFieldRuntimeEntry, 1);
   resolver.GotoMerge();
   resolver.End();
 }
@@ -3075,14 +3083,13 @@ void IRTranslator::VisitInstanceOf(InstanceOfInstr* instr) {
   LValue function_type_arguments =
       impl().GetLLVMValue(instr->function_type_arguments());
   LValue null_object = impl().LoadObject(Object::null_object());
-  impl().PushArgument(null_object);
   impl().PushArgument(instance);
   impl().PushArgument(impl().LoadObject(instr->type()));
   impl().PushArgument(instantiator_type_arguments);
   impl().PushArgument(function_type_arguments);
   impl().PushArgument(null_object);  // cache
   LValue result = impl().GenerateRuntimeCall(
-      instr, instr->token_pos(), instr->deopt_id(), kInstanceofRuntimeEntry, 6);
+      instr, instr->token_pos(), instr->deopt_id(), kInstanceofRuntimeEntry, 5);
   impl().SetLLVMValue(instr, result);
 }
 
@@ -3099,8 +3106,23 @@ void IRTranslator::VisitCreateArray(CreateArrayInstr* instr) {
 }
 
 void IRTranslator::VisitAllocateObject(AllocateObjectInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+
+  if (instr->ArgumentCount() == 1) {
+    TypeUsageInfo* type_usage_info = impl().thread()->type_usage_info();
+    if (type_usage_info != nullptr) {
+      RegisterTypeArgumentsUse(
+          impl().flow_graph()->parsed_function().function(), type_usage_info,
+          instr->cls(), instr->ArgumentAt(0));
+    }
+  }
+  const Code& stub = Code::ZoneHandle(
+      impl().zone(), StubCode::GetAllocationStubForClass(instr->cls()));
+
+  LValue result =
+      impl().GenerateCall(instr, instr->token_pos(), instr->deopt_id(), stub,
+                          RawPcDescriptors::kOther, instr->ArgumentCount(), {});
+  impl().SetLLVMValue(instr, result);
 }
 
 void IRTranslator::VisitLoadField(LoadFieldInstr* instr) {
@@ -3172,37 +3194,154 @@ void IRTranslator::VisitLoadClassId(LoadClassIdInstr* instr) {
     value = diamond.End();
   } else {
     value = impl().LoadClassId(object);
-    ;
   }
   value = impl().SmiTag(value);
   impl().SetLLVMValue(instr, value);
 }
 
 void IRTranslator::VisitInstantiateType(InstantiateTypeInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  LValue instantiator_type_args =
+      impl().GetLLVMValue(instr->instantiator_type_arguments());
+  LValue function_type_args =
+      impl().GetLLVMValue(instr->function_type_arguments());
+  impl().PushArgument(impl().LoadObject(instr->type()));
+  impl().PushArgument(instantiator_type_args);
+  impl().PushArgument(function_type_args);
+  LValue result =
+      impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
+                                 kInstantiateTypeRuntimeEntry, 3);
+  impl().SetLLVMValue(instr, result);
 }
 
 void IRTranslator::VisitInstantiateTypeArguments(
     InstantiateTypeArgumentsInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  LValue instantiator_type_args =
+      impl().GetLLVMValue(instr->instantiator_type_arguments());
+  LValue function_type_args =
+      impl().GetLLVMValue(instr->function_type_arguments());
+  AssemblerResolver resolver(impl());
+  Label type_arguments_instantiated("type_arguments_instantiated");
+  // If both the instantiator and function type arguments are null and if the
+  // type argument vector instantiated from null becomes a vector of dynamic,
+  // then use null as the type arguments.
+  const intptr_t len = instr->type_arguments().Length();
+  if (instr->type_arguments().IsRawWhenInstantiatedFromRaw(len)) {
+    LValue null_object = impl().LoadObject(Object::null_object());
+    LValue cmp_1 =
+        output().buildICmp(LLVMIntEQ, instantiator_type_args, null_object);
+    LValue cmp_2 =
+        output().buildICmp(LLVMIntEQ, function_type_args, null_object);
+    LValue and_val = output().buildAnd(cmp_1, cmp_2);
+    resolver.GotoMergeWithValueIf(and_val, null_object);
+  }
+  // Lookup cache before calling runtime.
+  // TODO(regis): Consider moving this into a shared stub to reduce
+  // generated code size.
+  LValue type_arguments_value = impl().LoadObject(instr->type_arguments());
+  LValue instantiations_value = impl().LoadFieldFromOffset(
+      type_arguments_value,
+      compiler::target::TypeArguments::instantiations_offset());
+  LValue data_value = output().buildAdd(
+      impl().TaggedToWord(instantiations_value),
+      output().constIntPtr(compiler::target::Array::data_offset() -
+                           kHeapObjectTag));
+  Label loop("loop"), next("next"), found("found"), slow_case("slow_case");
+  LBasicBlock from_block = resolver.current();
+  resolver.Branch(loop);
+  LValue data_phi = output().buildPhi(typeOf(data_value));
+  addIncoming(data_phi, &data_value, &from_block, 1);
+  LValue cached_instantiator_type_args =
+      output().buildLoad(impl().BuildAccessPointer(
+          data_phi, output().constIntPtr(0 * compiler::target::kWordSize),
+          output().tagged_type()));
+  LValue cmp = output().buildICmp(LLVMIntEQ, cached_instantiator_type_args,
+                                  instantiator_type_args);
+  resolver.BranchIfNot(cmp, next);
+  LValue cached_function_type_args =
+      output().buildLoad(impl().BuildAccessPointer(
+          data_phi, output().constIntPtr(1 * compiler::target::kWordSize),
+          output().tagged_type()));
+  cmp = output().buildICmp(LLVMIntEQ, cached_function_type_args,
+                           function_type_args);
+  resolver.BranchIf(cmp, found);
+  resolver.Branch(next);
+  resolver.Bind(next);
+
+  data_value = output().buildAdd(
+      data_phi, output().constIntPtr(StubCode::kInstantiationSizeInWords *
+                                     compiler::target::kWordSize));
+  cmp = output().buildICmp(
+      LLVMIntEQ, cached_instantiator_type_args,
+      output().constTagged(static_cast<intptr_t>(
+          compiler::target::ToRawSmi(StubCode::kNoInstantiator))));
+  from_block = resolver.current();
+  addIncoming(data_phi, &data_value, &from_block, 1);
+  resolver.BranchIfNot(impl().ExpectFalse(cmp), loop);
+  resolver.Branch(slow_case);
+
+  resolver.Bind(found);
+  LValue result = output().buildLoad(impl().BuildAccessPointer(
+      data_phi, output().constIntPtr(2 * compiler::target::kWordSize),
+      output().tagged_type()));
+  resolver.GotoMergeWithValue(result);
+
+  resolver.Bind(slow_case);
+  impl().PushArgument(impl().LoadObject(instr->type_arguments()));
+  impl().PushArgument(instantiator_type_args);
+  impl().PushArgument(function_type_args);
+  result =
+      impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
+                                 kInstantiateTypeArgumentsRuntimeEntry, 3);
+  resolver.GotoMergeWithValue(result);
+  result = resolver.End();
+  impl().SetLLVMValue(instr, result);
 }
 
 void IRTranslator::VisitAllocateContext(AllocateContextInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  LValue result = impl().GenerateCall(
+      instr, instr->token_pos(), instr->deopt_id(), StubCode::AllocateContext(),
+      RawPcDescriptors::kOther, 0,
+      {{kAllocateContextNumOfContextVarsReg,
+        output().constIntPtr(instr->num_context_variables())}});
+  impl().SetLLVMValue(instr, result);
 }
 
 void IRTranslator::VisitAllocateUninitializedContext(
     AllocateUninitializedContextInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  intptr_t instance_size =
+      Context::InstanceSize(instr->num_context_variables());
+  AssemblerResolver resolver(impl());
+  Label slow_path("AllocateContextSlowPath:%d", instr->ssa_temp_index());
+  LValue instance =
+      impl().TryAllocate(resolver, slow_path, kContextCid, instance_size);
+  if (instance) {
+    impl().StoreToOffset(
+        instance,
+        compiler::target::Context::num_variables_offset() - kHeapObjectTag,
+        output().constIntPtr(instr->num_context_variables()));
+    resolver.GotoMergeWithValue(instance);
+  }
+  resolver.Bind(slow_path);
+  resolver.GotoMergeWithValue(impl().GenerateCall(
+      instr, instr->token_pos(), instr->deopt_id(), StubCode::AllocateContext(),
+      RawPcDescriptors::kOther, 0,
+      {{kAllocateContextNumOfContextVarsReg,
+        output().constIntPtr(instr->num_context_variables())}}));
+  LValue result = resolver.End();
+  impl().SetLLVMValue(instr, result);
 }
 
 void IRTranslator::VisitCloneContext(CloneContextInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  impl().SetDebugLine(instr);
+  LValue context_value = impl().GetLLVMValue(instr->context_value());
+  impl().PushArgument(context_value);
+  LValue result =
+      impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
+                                 kCloneContextRuntimeEntry, 1);
+  impl().SetLLVMValue(instr, result);
 }
 
 void IRTranslator::VisitBinarySmiOp(BinarySmiOpInstr* instr) {
