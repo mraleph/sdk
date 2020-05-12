@@ -5,6 +5,7 @@
 #include "vm/compiler/aot/precompiler.h"
 #include "vm/compiler/assembler/object_pool_builder.h"
 #include "vm/compiler/backend/il_printer.h"
+#include "vm/compiler/backend/llvm/compile.h"
 #include "vm/compiler/backend/llvm/compiler_state.h"
 #include "vm/compiler/backend/llvm/initialize_llvm.h"
 #include "vm/compiler/backend/llvm/liveness_analysis.h"
@@ -39,10 +40,8 @@ enum class ValueType { LLVMValue };
 
 struct ValueDesc {
   ValueType type;
-  Definition* def;
   union {
     LValue llvm_value;
-    int64_t relative_call_target;
   };
 };
 
@@ -77,11 +76,7 @@ struct IRTranslatorBlockImpl {
   bool exception_block = false;
 
   inline void SetLLVMValue(int ssa_id, LValue value) {
-    values_[ssa_id] = {ValueType::LLVMValue, nullptr, {value}};
-  }
-
-  inline void SetLLVMValue(Definition* d, LValue value) {
-    values_[d->ssa_temp_index()] = {ValueType::LLVMValue, nullptr, {value}};
+    values_[ssa_id] = {ValueType::LLVMValue, {value}};
   }
 
   inline void SetValue(int nid, const ValueDesc& value) {
@@ -130,6 +125,15 @@ struct IRTranslatorBlockImpl {
   }
 };
 
+class ValueInterceptor {
+ public:
+  virtual ~ValueInterceptor() = default;
+  // return true means intercepted, and anon impl must not record this value.
+  // return false means not intercepted, and anon impl must record this value.
+  virtual bool SetLLVMValue(int, LValue) = 0;
+  virtual LValue GetLLVMValue(int) = 0;
+};
+
 class AnonImpl {
  public:
   AnonImpl() = default;
@@ -153,8 +157,6 @@ class AnonImpl {
   void ProcessPhiWorkList();
   void BuildPhiAndPushToWorkList(BlockEntryInstr* bb,
                                  BlockEntryInstr* ref_pred);
-  // MaterializeDef
-  void MaterializeDef(ValueDesc& desc);
   // Phis
   LValue EnsurePhiInput(BlockEntryInstr* pred, int index, LType type);
   LValue EnsurePhiInputAndPosition(BlockEntryInstr* pred,
@@ -245,6 +247,9 @@ class AnonImpl {
   void SetLLVMValue(int ssa_id, LValue v);
   void SetLLVMValue(Definition* d, LValue v);
   void SetLazyValue(Definition*);
+  // MaterializeDef
+  LValue MaterializeDef(Definition* d);
+  bool IsLazyValue(int ssa_index);
 
   // Load Store
   compiler::ObjectPoolBuilder& object_pool_builder() {
@@ -312,6 +317,12 @@ class AnonImpl {
   StackMapInfoMap stack_map_info_map;
   std::vector<BlockEntryInstr*> phi_rebuild_worklist_;
   std::vector<LBasicBlock> catch_blocks_;
+  // lazy values
+  std::unordered_map<int, Definition*> lazy_values_;
+  std::unordered_map<int, LValue> lazy_values_block_cache_;
+
+  // Value intercept
+  ValueInterceptor* value_interceptor_ = nullptr;
 
   // debug lines
   std::vector<Instruction*> debug_instrs_;
@@ -367,12 +378,10 @@ class CallResolver : public ContinuationResolver {
   struct CallResolverParameter {
     CallResolverParameter(Instruction*, size_t, std::unique_ptr<CallSiteInfo>);
     ~CallResolverParameter() = default;
-    void set_target(LValue);
     void set_second_return(bool);
     Instruction* call_instruction;
     size_t instruction_size;
     std::unique_ptr<CallSiteInfo> callsite_info;
-    LValue target;
     bool second_return;
     DISALLOW_COPY_AND_ASSIGN(CallResolverParameter);
   };
@@ -465,10 +474,10 @@ class Label {
   LBasicBlock bb_;
 };
 
-class AssemblerResolver {
+class AssemblerResolver : public ValueInterceptor {
  public:
   AssemblerResolver(AnonImpl&);
-  ~AssemblerResolver() = default;
+  ~AssemblerResolver() override;
 
   void Branch(Label&);
   void BranchIf(LValue cond, Label&);
@@ -484,6 +493,11 @@ class AssemblerResolver {
   LBasicBlock current() { return current_; }
 
  private:
+  bool SetLLVMValue(int ssa_id, LValue index) override;
+  LValue GetLLVMValue(int ssa_id) override;
+  void AssignBlockInitialValues(LBasicBlock);
+  void AssignModifiedValueToMerge();
+  void MergeModified();
   Output& output() { return impl_.output(); }
   AnonImpl& impl() { return impl_; }
   AnonImpl& impl_;
@@ -491,6 +505,15 @@ class AssemblerResolver {
   LBasicBlock merge_;
   std::vector<LBasicBlock> merge_blocks_;
   std::vector<LValue> merge_values_;
+
+  BitVector* values_modified_;
+  // modified merging
+  std::unordered_map<LBasicBlock, std::unordered_map<int, LValue>>
+      initial_modified_values_lookup_;
+  std::unordered_map<int, LValue> current_modified_;
+  std::unordered_map<LBasicBlock, std::unordered_map<int, LValue>>
+      modified_values_to_merge_;
+  ValueInterceptor* old_value_interceptor_;
 };
 
 ExceptionBlockLiveInEntry::ExceptionBlockLiveInEntry(
@@ -503,16 +526,16 @@ LValue IRTranslatorBlockImpl::GetLLVMValue(int ssa_id) {
   auto found = values_.find(ssa_id);
   EMASSERT(found != values_.end());
   EMASSERT(found->second.type == ValueType::LLVMValue);
-  if (!found->second.llvm_value) {
-    // materialize the llvm_value now!
-    anon_impl->MaterializeDef(found->second);
-  }
   EMASSERT(found->second.llvm_value);
   return found->second.llvm_value;
 }
 
 IRTranslatorBlockImpl* AnonImpl::GetTranslatorBlockImpl(BlockEntryInstr* bb) {
   auto& ref = block_map_[bb];
+  if (ref.anon_impl == nullptr) {
+    // init.
+    ref.anon_impl = this;
+  }
   return &ref;
 }
 
@@ -566,6 +589,7 @@ void AnonImpl::MergePredecessors(BlockEntryInstr* bb) {
     for (BitVector::Iterator it(liveness().GetLiveInSet(bb)); !it.Done();
          it.Advance()) {
       int live = it.Current();
+      if (IsLazyValue(live)) continue;
       auto& value = pred_block_impl->GetValue(live);
       block_impl->SetValue(live, value);
     }
@@ -584,13 +608,6 @@ void AnonImpl::MergePredecessors(BlockEntryInstr* bb) {
     auto& value = GetTranslatorBlockImpl(ref_pred)->GetValue(live);
     if (value.type != ValueType::LLVMValue) {
       block_impl->SetValue(live, value);
-      continue;
-    }
-    if (value.def != nullptr) {
-      ValueDesc new_value_desc = value;
-      // reset the constant.
-      new_value_desc.llvm_value = nullptr;
-      block_impl->SetValue(live, new_value_desc);
       continue;
     }
     LValue ref_value = value.llvm_value;
@@ -630,21 +647,18 @@ void AnonImpl::MergeExceptionLiveInEntries(
     IRTranslatorBlockImpl* catch_block_impl) {
   auto& values = catch_block_impl->values();
   auto MergeNotExist = [&](int ssa_id, const ValueDesc& value_desc_incoming) {
-    if (value_desc_incoming.type != ValueType::LLVMValue ||
-        value_desc_incoming.def) {
+    if (value_desc_incoming.type != ValueType::LLVMValue) {
       values.emplace(ssa_id, value_desc_incoming);
     } else {
       LValue phi = output().buildPhi(typeOf(value_desc_incoming.llvm_value));
       addIncoming(phi, &value_desc_incoming.llvm_value, &e.from_block, 1);
-      ValueDesc value_desc{ValueType::LLVMValue, nullptr, {phi}};
+      ValueDesc value_desc{ValueType::LLVMValue, {phi}};
       values.emplace(ssa_id, value_desc);
     }
   };
   auto MergeExist = [&](int ssa_id, ValueDesc& value_desc,
                         const ValueDesc& value_desc_incoming) {
-    if (value_desc_incoming.type != ValueType::LLVMValue ||
-        value_desc_incoming.def) {
-      EMASSERT(value_desc_incoming.def == value_desc.def);
+    if (value_desc_incoming.type != ValueType::LLVMValue) {
       EMASSERT(value_desc_incoming.type == value_desc.type);
     } else {
       LValue phi = value_desc.llvm_value;
@@ -694,13 +708,6 @@ void AnonImpl::BuildPhiAndPushToWorkList(BlockEntryInstr* bb,
       block_impl->SetValue(live, value_desc);
       continue;
     }
-    if (value_desc.def != nullptr) {
-      ValueDesc new_value_desc = value_desc;
-      // reset the constant.
-      new_value_desc.llvm_value = nullptr;
-      block_impl->SetValue(live, new_value_desc);
-      continue;
-    }
     LValue ref_value = value_desc.llvm_value;
     LType ref_type = typeOf(ref_value);
     if (ref_type != output().tagged_type()) {
@@ -735,10 +742,13 @@ void AnonImpl::End() {
   output().positionToBBEnd(output().prologue());
   output().buildBr(GetNativeBB(flow_graph_->graph_entry()));
   output().finalize();
+  output().EmitDebugInfo(std::move(debug_instrs_));
+  Compile(compiler_state());
 }
 
 void AnonImpl::EndCurrentBlock() {
   GetTranslatorBlockImpl(current_bb_)->EndTranslate();
+  lazy_values_block_cache_.clear();
   current_bb_ = nullptr;
   current_bb_impl_ = nullptr;
   pushed_arguments_.clear();
@@ -808,9 +818,7 @@ LValue AnonImpl::EnsurePhiInputAndPosition(BlockEntryInstr* pred,
   return value;
 }
 
-void AnonImpl::MaterializeDef(ValueDesc& desc) {
-  EMASSERT(desc.def != nullptr);
-  Definition* def = desc.def;
+LValue AnonImpl::MaterializeDef(Definition* def) {
   LValue v;
   if (UnboxedConstantInstr* unboxed = def->AsUnboxedConstant()) {
     const Object& object = unboxed->value();
@@ -832,7 +840,11 @@ void AnonImpl::MaterializeDef(ValueDesc& desc) {
     LLVMLOGE("MaterializeDef: unknown def: %s\n", def->ToCString());
     UNREACHABLE();
   }
-  desc.llvm_value = v;
+  return v;
+}
+
+bool AnonImpl::IsLazyValue(int ssa_index) {
+  return lazy_values_.find(ssa_index) != lazy_values_.end();
 }
 
 LBasicBlock AnonImpl::EnsureNativeCatchBlock(int try_index) {
@@ -974,6 +986,7 @@ LValue AnonImpl::GenerateRuntimeCall(Instruction* instr,
   callsite_info->set_deopt_id(deopt_id);
   callsite_info->set_return_on_stack(return_on_stack);
   callsite_info->set_reg(kRuntimeCallTargetReg);
+  callsite_info->set_stack_parameter_count(argument_count);
   CallResolver::CallResolverParameter param(
       instr,
       return_on_stack ? kRuntimeCallReturnOnStackInstrSize
@@ -995,7 +1008,6 @@ LValue AnonImpl::GenerateRuntimeCall(Instruction* instr,
   if (return_on_stack) {
     resolver.AddStackParameter(LoadObject(Object::null_object()));
   }
-  callsite_info->set_stack_parameter_count(argument_count);
   return resolver.BuildCall();
 }
 
@@ -1020,8 +1032,8 @@ LValue AnonImpl::GenerateStaticCall(Instruction* instr,
       argument_desc_val = output().constTagged(0);
     }
   }
-  size_t argument_count = args_info.count_with_type_args;
-  EMASSERT(argument_count == arguments.size());
+  int argument_count = args_info.count_with_type_args;
+  EMASSERT(argument_count == static_cast<int>(arguments.size()));
 
   std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
   callsite_info->set_type(CallSiteInfo::CallTargetType::kCallRelative);
@@ -1035,7 +1047,7 @@ LValue AnonImpl::GenerateStaticCall(Instruction* instr,
   CallResolver resolver(*this, ssa_index, param);
   resolver.SetGParameter(static_cast<int>(ARGS_DESC_REG), argument_desc_val);
   // setup stack parameters
-  for (size_t i = argument_count - 1; i >= 0; --i) {
+  for (int i = argument_count - 1; i >= 0; --i) {
     LValue param = arguments[i];
     resolver.AddStackParameter(param);
   }
@@ -1049,8 +1061,8 @@ LValue AnonImpl::GenerateMegamorphicInstanceCall(
     intptr_t deopt_id,
     TokenPosition token_pos) {
   const ArgumentsDescriptor args_desc(arguments_descriptor);
-  size_t argument_count = args_desc.Count();
-  EMASSERT(argument_count >= pushed_arguments_.size());
+  int argument_count = args_desc.Count();
+  EMASSERT(argument_count >= static_cast<int>(pushed_arguments_.size()));
   const MegamorphicCache& cache = MegamorphicCache::ZoneHandle(
       zone(),
       MegamorphicCacheTable::Lookup(thread(), name, arguments_descriptor));
@@ -1062,14 +1074,15 @@ LValue AnonImpl::GenerateMegamorphicInstanceCall(
   LValue entry = output().buildLoad(entry_gep);
 
   std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
-  callsite_info->set_type(CallSiteInfo::CallTargetType::kTarget);
+  callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
   callsite_info->set_token_pos(token_pos);
   callsite_info->set_deopt_id(deopt_id);
   callsite_info->set_stack_parameter_count(argument_count);
-  CallResolver::CallResolverParameter param(instr, 0, std::move(callsite_info));
-  param.set_target(entry);
+  CallResolver::CallResolverParameter param(instr, kCallInstrSize,
+                                            std::move(callsite_info));
   CallResolver resolver(*this, -1, param);
-  for (size_t i = 0; i < argument_count; ++i) {
+  resolver.SetGParameter(kCallTargetReg, entry);
+  for (int i = 0; i < argument_count; ++i) {
     LValue argument = pushed_arguments_.back();
     pushed_arguments_.pop_back();
     resolver.AddStackParameter(argument);
@@ -1309,20 +1322,35 @@ LValue AnonImpl::ExpectFalse(LValue cond) {
 }
 
 LValue AnonImpl::GetLLVMValue(int ssa_id) {
+  auto found_in_lazy_values = lazy_values_.find(ssa_id);
+  if (found_in_lazy_values != lazy_values_.end()) {
+    auto found_in_cache = lazy_values_block_cache_.find(ssa_id);
+    if (found_in_cache != lazy_values_block_cache_.end())
+      return found_in_cache->second;
+    LValue v = MaterializeDef(found_in_lazy_values->second);
+    lazy_values_block_cache_[ssa_id] = v;
+    return v;
+  }
+  if (value_interceptor_) {
+    LValue v = value_interceptor_->GetLLVMValue(ssa_id);
+    if (v) return v;
+  }
   return current_bb_impl()->GetLLVMValue(ssa_id);
 }
 
 void AnonImpl::SetLLVMValue(int ssa_id, LValue val) {
+  if (value_interceptor_) {
+    if (value_interceptor_->SetLLVMValue(ssa_id, val)) return;
+  }
   current_bb_impl()->SetLLVMValue(ssa_id, val);
 }
 
 void AnonImpl::SetLLVMValue(Definition* d, LValue val) {
-  current_bb_impl()->SetLLVMValue(d, val);
+  current_bb_impl()->SetLLVMValue(d->ssa_temp_index(), val);
 }
 
 void AnonImpl::SetLazyValue(Definition* d) {
-  ValueDesc desc = {ValueType::LLVMValue, d, {nullptr}};
-  current_bb_impl()->SetValue(d->ssa_temp_index(), desc);
+  lazy_values_.emplace(d->ssa_temp_index(), d);
 }
 
 LValue AnonImpl::LoadFieldFromOffset(LValue base, int offset, LType type) {
@@ -1400,9 +1428,9 @@ void AnonImpl::StoreIntoObject(Instruction* instr,
   diamond.BuildRight([&]() {
     // None Smi case
     LValue object_tag = LoadFieldFromOffset(
-        object, compiler::target::Object::tags_offset(), output().repo().int8);
+        object, compiler::target::Object::tags_offset(), output().repo().ref8);
     LValue value_tag = LoadFieldFromOffset(
-        value, compiler::target::Object::tags_offset(), output().repo().int8);
+        value, compiler::target::Object::tags_offset(), output().repo().ref8);
     LValue and_value = output().buildAnd(
         value_tag, output().buildShr(
                        object_tag,
@@ -1430,12 +1458,12 @@ void AnonImpl::StoreIntoObject(Instruction* instr,
           pointerType(output().repo().ref8));
       LValue entry = output().buildLoad(entry_gep);
       std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
-      callsite_info->set_type(CallSiteInfo::CallTargetType::kTarget);
+      callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
 
-      CallResolver::CallResolverParameter param(instr, 0,
+      CallResolver::CallResolverParameter param(instr, kCallInstrSize,
                                                 std::move(callsite_info));
-      param.set_target(entry);
       CallResolver call_resolver(*this, -1, param);
+      call_resolver.SetGParameter(kCallTargetReg, entry);
       call_resolver.SetGParameter(kWriteBarrierObjectReg, object);
       call_resolver.SetGParameter(kWriteBarrierValueReg, value);
       call_resolver.BuildCall();
@@ -1497,13 +1525,13 @@ void AnonImpl::StoreIntoArray(Instruction* instr,
           pointerType(output().repo().ref8));
       LValue entry = output().buildLoad(entry_gep);
       std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
-      callsite_info->set_type(CallSiteInfo::CallTargetType::kTarget);
-      CallResolver::CallResolverParameter param(instr, 0,
+      callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
+      CallResolver::CallResolverParameter param(instr, kCallInstrSize,
                                                 std::move(callsite_info));
-      param.set_target(entry);
       CallResolver call_resolver(*this, -1, param);
       LValue slot = output().buildAdd(TaggedToWord(object), dest);
       slot = output().buildSub(slot, output().constIntPtr(kHeapObjectTag));
+      call_resolver.SetGParameter(kCallTargetReg, entry);
       call_resolver.SetGParameter(kWriteBarrierObjectReg, object);
       call_resolver.SetGParameter(kWriteBarrierValueReg, value);
       call_resolver.SetGParameter(kWriteBarrierSlotReg, slot);
@@ -1687,12 +1715,7 @@ CallResolver::CallResolverParameter::CallResolverParameter(
     : call_instruction(instr),
       instruction_size(_instruction_size),
       callsite_info(std::move(_callinfo)),
-      target(nullptr),
       second_return(false) {}
-
-void CallResolver::CallResolverParameter::set_target(LValue t) {
-  target = t;
-}
 
 void CallResolver::CallResolverParameter::set_second_return(bool s) {
   second_return = s;
@@ -1783,22 +1806,12 @@ void CallResolver::GenerateStatePointFunction() {
 }
 
 void CallResolver::EmitCall() {
-  EMASSERT(call_resolver_parameter_.instruction_size != 0 ||
-           call_resolver_parameter_.target != nullptr);
-  EMASSERT(call_resolver_parameter_.callsite_info->type() !=
-               CallSiteInfo::CallTargetType::kTarget ||
-           call_resolver_parameter_.target != nullptr);
   std::vector<LValue> statepoint_operands;
   patchid_ = impl().NextPatchPoint();
   statepoint_operands.push_back(output().constInt64(patchid_));
   statepoint_operands.push_back(
       output().constInt32(call_resolver_parameter_.instruction_size));
-  if (!call_resolver_parameter_.target) {
-    statepoint_operands.push_back(constNull(callee_type_));
-  } else {
-    statepoint_operands.push_back(output().buildCast(
-        LLVMBitCast, call_resolver_parameter_.target, callee_type_));
-  }
+  statepoint_operands.push_back(constNull(callee_type_));
   statepoint_operands.push_back(
       output().constInt32(parameters_.size()));           // # call params
   statepoint_operands.push_back(output().constInt32(0));  // flags
@@ -1810,14 +1823,9 @@ void CallResolver::EmitCall() {
   if (!tail_call_) {
     for (BitVector::Iterator it(call_live_out_); !it.Done(); it.Advance()) {
       int live_ssa_index = it.Current();
+      if (impl().IsLazyValue(live_ssa_index)) continue;
       ValueDesc desc = impl().current_bb_impl()->GetValue(live_ssa_index);
       if (desc.type != ValueType::LLVMValue) continue;
-      if (desc.def != nullptr) {
-        // constant values need to rematerialize after call.
-        desc.llvm_value = nullptr;
-        impl().current_bb_impl()->SetValue(live_ssa_index, desc);
-        continue;
-      }
       gc_desc_list_.emplace_back(live_ssa_index, statepoint_operands.size());
       statepoint_operands.emplace_back(desc.llvm_value);
     }
@@ -1828,10 +1836,6 @@ void CallResolver::EmitCall() {
          !it.Done(); it.Advance()) {
       int live_ssa_index = it.Current();
       ValueDesc desc = impl().current_bb_impl()->GetValue(live_ssa_index);
-      if (desc.def != nullptr) {
-        // constant value save directly, and need to rematerialize.
-        desc.llvm_value = nullptr;
-      }
       exception_block_live_in_value_map_.emplace(live_ssa_index, desc);
     }
   }
@@ -2102,11 +2106,20 @@ void Label::InitBBIfNeeded(AnonImpl& impl) {
 AssemblerResolver::AssemblerResolver(AnonImpl& impl)
     : impl_(impl), current_(impl.output().getInsertionBlock()) {
   merge_ = impl.NewBasicBlock("AssemblerResolver::Merge");
+  values_modified_ = new (impl.zone())
+      BitVector(impl.zone(), impl.flow_graph()->max_virtual_register_number());
+  old_value_interceptor_ = impl.value_interceptor_;
+  impl.value_interceptor_ = this;
+}
+
+AssemblerResolver::~AssemblerResolver() {
+  EMASSERT(impl().value_interceptor_ != this);
 }
 
 void AssemblerResolver::Branch(Label& label) {
   label.InitBBIfNeeded(impl());
   output().buildBr(label.basic_block());
+  AssignBlockInitialValues(label.basic_block());
   current_ = nullptr;
 }
 
@@ -2116,6 +2129,7 @@ void AssemblerResolver::BranchIf(LValue cond, Label& label) {
       impl().NewBasicBlock("AssemblerResolver::BranchIf");
   label.InitBBIfNeeded(impl());
   output().buildCondBr(cond, label.basic_block(), continuation);
+  AssignBlockInitialValues(label.basic_block());
   current_ = continuation;
   output().positionToBBEnd(current_);
 }
@@ -2126,6 +2140,7 @@ void AssemblerResolver::BranchIfNot(LValue cond, Label& label) {
       impl().NewBasicBlock("AssemblerResolver::BranchIfNot");
   label.InitBBIfNeeded(impl());
   output().buildCondBr(cond, continuation, label.basic_block());
+  AssignBlockInitialValues(label.basic_block());
   current_ = continuation;
   output().positionToBBEnd(current_);
 }
@@ -2134,40 +2149,53 @@ void AssemblerResolver::Bind(Label& label) {
   label.InitBBIfNeeded(impl());
   current_ = label.basic_block();
   output().positionToBBEnd(current_);
+  auto found_initial_vals = initial_modified_values_lookup_.find(current_);
+  EMASSERT(found_initial_vals != initial_modified_values_lookup_.end());
+  current_modified_ = std::move(found_initial_vals->second);
 }
 
 LValue AssemblerResolver::End() {
+  output().positionToBBEnd(merge_);
+  impl().SetCurrentBlockContinuation(merge_);
   if (merge_values_.empty()) return nullptr;
   EMASSERT(merge_values_.size() == merge_blocks_.size());
   LType type = typeOf(merge_values_.front());
-  output().positionToBBEnd(merge_);
   LValue phi = output().buildPhi(type);
   for (LValue v : merge_values_) {
     EMASSERT(type == typeOf(v));
   }
   addIncoming(phi, merge_values_.data(), merge_blocks_.data(),
               merge_values_.size());
-  impl().SetCurrentBlockContinuation(merge_);
+  // reset old
+  impl().value_interceptor_ = old_value_interceptor_;
+
+  MergeModified();
   return phi;
 }
 
 void AssemblerResolver::GotoMerge() {
+  merge_blocks_.emplace_back(current_);
   output().buildBr(merge_);
+  AssignModifiedValueToMerge();
   current_ = nullptr;
 }
 
 void AssemblerResolver::GotoMergeIf(LValue cond) {
+  merge_blocks_.emplace_back(current_);
   LBasicBlock continuation =
       impl().NewBasicBlock("AssemblerResolver::GotoMergeIf");
   output().buildCondBr(cond, merge_, continuation);
+  AssignModifiedValueToMerge();
   current_ = continuation;
   output().positionToBBEnd(current_);
 }
 
 void AssemblerResolver::GotoMergeIfNot(LValue cond) {
+  merge_blocks_.emplace_back(current_);
   LBasicBlock continuation =
       impl().NewBasicBlock("AssemblerResolver::GotoMergeIf");
   output().buildCondBr(cond, continuation, merge_);
+  AssignModifiedValueToMerge();
   current_ = continuation;
   output().positionToBBEnd(current_);
 }
@@ -2175,7 +2203,6 @@ void AssemblerResolver::GotoMergeIfNot(LValue cond) {
 void AssemblerResolver::GotoMergeWithValue(LValue v) {
   EMASSERT(current_);
   merge_values_.emplace_back(v);
-  merge_blocks_.emplace_back(current_);
   GotoMerge();
 }
 
@@ -2186,6 +2213,7 @@ void AssemblerResolver::GotoMergeWithValueIf(LValue cond, LValue v) {
   merge_values_.emplace_back(v);
   merge_blocks_.emplace_back(current_);
   output().buildCondBr(cond, merge_, continuation);
+  AssignModifiedValueToMerge();
   current_ = continuation;
   output().positionToBBEnd(current_);
 }
@@ -2197,8 +2225,49 @@ void AssemblerResolver::GotoMergeWithValueIfNot(LValue cond, LValue v) {
   merge_values_.emplace_back(v);
   merge_blocks_.emplace_back(current_);
   output().buildCondBr(cond, continuation, merge_);
+  AssignModifiedValueToMerge();
   current_ = continuation;
   output().positionToBBEnd(current_);
+}
+
+LValue AssemblerResolver::GetLLVMValue(int ssa_id) {
+  auto found = current_modified_.find(ssa_id);
+  if (found != current_modified_.end()) return found->second;
+  return nullptr;
+}
+
+bool AssemblerResolver::SetLLVMValue(int ssa_id, LValue v) {
+  current_modified_[ssa_id] = v;
+  values_modified_->Add(ssa_id);
+  return true;
+}
+
+void AssemblerResolver::AssignBlockInitialValues(LBasicBlock bb) {
+  initial_modified_values_lookup_.emplace(bb, current_modified_);
+}
+
+void AssemblerResolver::AssignModifiedValueToMerge() {
+  modified_values_to_merge_.emplace(current_, current_modified_);
+}
+
+void AssemblerResolver::MergeModified() {
+  for (BitVector::Iterator it(values_modified_); !it.Done(); it.Advance()) {
+    int need_to_merge = it.Current();
+    LValue original = impl().GetLLVMValue(need_to_merge);
+    LType type = typeOf(original);
+    LValue phi = output().buildPhi(type);
+    for (LBasicBlock b : merge_blocks_) {
+      auto found_block = modified_values_to_merge_.find(b);
+      EMASSERT(found_block != modified_values_to_merge_.end());
+      auto& value_lookup = found_block->second;
+      auto found = value_lookup.find(need_to_merge);
+      if (found == value_lookup.end()) {
+        addIncoming(phi, &original, &b, 1);
+      } else {
+        addIncoming(phi, &found->second, &b, 1);
+      }
+    }
+  }
 }
 }  // namespace
 
@@ -2232,9 +2301,10 @@ IRTranslator::IRTranslator(FlowGraph* flow_graph, Precompiler* precompiler)
 IRTranslator::~IRTranslator() {}
 
 void IRTranslator::Translate() {
-#if 0
+#if 1
   impl().liveness().Analyze();
   VisitBlocks();
+  impl().End();
 #endif
 
   // FlowGraphPrinter::PrintGraph("IRTranslator", impl().flow_graph_);
@@ -2347,8 +2417,8 @@ void IRTranslator::VisitRedefinition(RedefinitionInstr* instr) {
 void IRTranslator::VisitParameter(ParameterInstr* instr) {
   int param_index = instr->index();
   // only stack parameters
-  output().parameter(kV8CCRegisterParameterCount +
-                     output().stack_parameter_count() - param_index - 1);
+  LValue result = output().parameter(param_index);
+  impl().SetLLVMValue(instr, result);
 }
 
 void IRTranslator::VisitNativeParameter(NativeParameterInstr* instr) {
@@ -2703,7 +2773,8 @@ void IRTranslator::VisitStaticCall(StaticCallInstr* instr) {
                           instr->argument_names());
   std::vector<LValue> arguments;
   for (intptr_t i = 0; i < args_info.count_with_type_args; ++i) {
-    arguments.emplace_back(impl().GetLLVMValue(instr->PushArgumentAt(i)));
+    arguments.emplace_back(
+        impl().GetLLVMValue(instr->PushArgumentAt(i)->value()));
   }
   LValue result = impl().GenerateStaticCall(
       instr, instr->ssa_temp_index(), arguments, instr->deopt_id(),
@@ -2783,7 +2854,6 @@ void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
       instr->ArgumentCount();  // Includes type args.
 
   std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
-  // use kReg type.
   callsite_info->set_type(CallSiteInfo::CallTargetType::kNative);
   callsite_info->set_token_pos(instr->token_pos());
   callsite_info->set_deopt_id(instr->deopt_id());

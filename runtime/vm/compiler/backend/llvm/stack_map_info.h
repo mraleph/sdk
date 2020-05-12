@@ -46,8 +46,6 @@ class CallSiteInfo final : public StackMapInfo {
  public:
   enum class CallTargetType {
     kUnspecify,
-    // target passed in the statepoint
-    kTarget,
     // target passed in the GP reg.
     kReg,
     // relative call target in the function

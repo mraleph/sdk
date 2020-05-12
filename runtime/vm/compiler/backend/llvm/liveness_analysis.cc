@@ -110,7 +110,7 @@ Zone* LivenessAnalysis::zone() const {
 BitVector* LivenessAnalysis::GetCallOutAt(Instruction* at) const {
   auto found = call_out_map_.find(at);
   // other il instruction may also need the liveness info.
-  if (found != call_out_map_.end()) {
+  if (found == call_out_map_.end()) {
     return CalculateLiveness(at);
   }
   return found->second;

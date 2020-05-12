@@ -588,6 +588,10 @@ LType Output::tagged_pair() const {
   return structType(state_.context_, repo_.tagged_type, repo_.tagged_type);
 }
 
+void Output::EmitDebugInfo(std::vector<Instruction*>&& debug_instrs) {
+  state_.debug_instrs_ = std::move(debug_instrs);
+}
+
 void Output::AddFunctionCommonAttr(LValue function) {
   // arm jump tables are slow.
 #if 0

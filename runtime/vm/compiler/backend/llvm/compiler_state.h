@@ -16,6 +16,7 @@
 
 #if defined(DART_ENABLE_LLVM_COMPILER)
 namespace dart {
+class Instruction;
 namespace dart_llvm {
 class StackMapInfo;
 typedef std::vector<uint8_t> ByteBuffer;
@@ -29,6 +30,7 @@ struct CompilerState {
   StringList data_section_names_;
   StackMapInfoMap stack_map_info_map_;
   StackMaps sm_;
+  std::vector<Instruction*> debug_instrs_;
   ByteBuffer* stackMapsSection_;
   ByteBuffer* exception_table_;
   LLVMModuleRef module_;

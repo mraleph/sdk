@@ -10,6 +10,7 @@
 #if defined(DART_ENABLE_LLVM_COMPILER)
 
 namespace dart {
+class Instruction;
 namespace dart_llvm {
 struct CompilerState;
 struct RegisterParameter {
@@ -123,6 +124,7 @@ class Output {
   void finalize();
   LValue addFunction(const char* name, LType type);
   LType tagged_pair() const;
+  void EmitDebugInfo(std::vector<Instruction*>&& debug_instrs);
 
   inline IntrinsicRepository& repo() { return repo_; }
   inline LBasicBlock prologue() const { return prologue_; }

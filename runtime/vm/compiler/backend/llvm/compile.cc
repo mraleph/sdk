@@ -22,6 +22,57 @@ namespace dart {
 namespace dart_llvm {
 typedef CompilerState State;
 
+static const char* symbolLookupCallback(void* DisInfo,
+                                        uint64_t ReferenceValue,
+                                        uint64_t* ReferenceType,
+                                        uint64_t ReferencePC,
+                                        const char** ReferenceName) {
+  *ReferenceType = LLVMDisassembler_ReferenceType_InOut_None;
+  return nullptr;
+}
+
+static void disassemble(ByteBuffer& code) {
+  LLVMDisasmContextRef DCR = LLVMCreateDisasm(
+      "armv8-unknown-unknown-v8", nullptr, 0, nullptr, symbolLookupCallback);
+
+  uint8_t* BytesP = code.data();
+
+  unsigned NumBytes = code.size();
+  unsigned PC = 0;
+  const char OutStringSize = 100;
+  char OutString[OutStringSize];
+  printf(
+      "========================================================================"
+      "========\n");
+  while (NumBytes != 0) {
+    size_t InstSize = LLVMDisasmInstruction(DCR, BytesP, NumBytes, PC,
+                                            OutString, OutStringSize);
+    if (InstSize == 0) {
+      printf("%08x: %08x maybe constant\n", PC,
+             *reinterpret_cast<uint32_t*>(BytesP));
+      PC += 4;
+      BytesP += 4;
+      NumBytes -= 4;
+    }
+    printf("%08x: %08x %s\n", PC, *reinterpret_cast<uint32_t*>(BytesP),
+           OutString);
+    PC += InstSize;
+    BytesP += InstSize;
+    NumBytes -= InstSize;
+  }
+  printf(
+      "========================================================================"
+      "========\n");
+  LLVMDisasmDispose(DCR);
+}
+
+static DART_UNUSED void disassemble(CompilerState& state) {
+  printf("Disassemble for function:%s\n", state.function_name_.c_str());
+  for (auto& code : state.code_section_list_) {
+    disassemble(code);
+  }
+}
+
 static uint8_t* mmAllocateCodeSection(void* opaqueState,
                                       uintptr_t size,
                                       unsigned alignment,
@@ -116,6 +167,7 @@ void Compile(State& state) {
   LLVMMCJITCompilerOptions options;
   LLVMInitializeMCJITCompilerOptions(&options, sizeof(options));
   options.OptLevel = 3;
+  options.NoFramePointerElim = true;
   LLVMExecutionEngineRef engine;
   char* error = 0;
   options.MCJMM = LLVMCreateSimpleMCJITMemoryManager(
@@ -171,6 +223,7 @@ void Compile(State& state) {
   SaveObjectFile(state);
 #endif  // defined(FEATURE_SAVE_OBJECT_FILE)
   LLVMDisposeExecutionEngine(engine);
+  disassemble(state);
 }
 }  // namespace dart_llvm
 }  // namespace dart

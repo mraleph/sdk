@@ -33,7 +33,7 @@
     macro(stackmap, "llvm.experimental.stackmap", functionType(void_type, int64, int32, Variadic)) \
     macro(gcRelocate, "llvm.experimental.gc.relocate.p1s_TaggedStructs", functionType(tagged_type, tokenType, int32, int32)) \
     macro(gcException, "llvm.experimental.gc.exception.p1s_TaggedStructs", functionType(tagged_type, tokenType)) \
-    macro(gcExceptionData, "llvm.experimental.gc.exceptiondata.p1s_TaggedStructs", functionType(tagged_type, tokenType)) \
+    macro(gcExceptionData, "llvm.experimental.gc.exception.data.p1s_TaggedStructs", functionType(tagged_type, tokenType)) \
     macro(stackSave, "llvm.stacksave", functionType(ref8)) \
     macro(fakePersonality, "fake_personality", functionType(void_type)) \
     macro(trap, "llvm.trap", functionType(void_type)) \
