@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "vm/compiler/backend/linearscan.h"
+#include "vm/compiler/backend/flow_graph.h"
 #include "vm/compiler/backend/llvm/llvm_config.h"
 #ifdef DART_ENABLE_LLVM_COMPILER
 
@@ -13,8 +13,20 @@ namespace dart {
 class FlowGraph;
 class Instruction;
 class BlockEntryInstr;
+class GraphEntryInstr;
 class Zone;
 namespace dart_llvm {
+
+class SSALivenessAnalysis : public dart::LivenessAnalysis {
+ public:
+  explicit SSALivenessAnalysis(const FlowGraph& flow_graph);
+
+ private:
+  // Compute initial values for live-out, kill and live-in sets.
+  void ComputeInitialSets() override;
+
+  GraphEntryInstr* graph_entry_;
+};
 using LiveValuesMap = std::unordered_map<Instruction*, BitVector*>;
 
 // This analysis is similar to the SSALivenessAnalysis.

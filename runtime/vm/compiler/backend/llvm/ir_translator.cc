@@ -284,6 +284,7 @@ class AnonImpl {
   // Basic blocks continuation
   LBasicBlock NewBasicBlock(const char* fmt, ...);
   void SetCurrentBlockContinuation(LBasicBlock continuation);
+  LBasicBlock GetCurrentBlockContinuation();
 
   inline CompilerState& compiler_state() { return *compiler_state_; }
   inline LivenessAnalysis& liveness() { return *liveness_analysis_; }
@@ -334,6 +335,34 @@ class AnonImpl {
   DISALLOW_COPY_AND_ASSIGN(AnonImpl);
 };
 
+class ModifiedValuesMergeHelper : public ValueInterceptor {
+ public:
+  explicit ModifiedValuesMergeHelper(AnonImpl&);
+  ~ModifiedValuesMergeHelper() override;
+  void AssignBlockInitialValues(LBasicBlock);
+  void InitialValuesInBlock(LBasicBlock);
+  void InitialValuesInBlockToEmpty();
+  void AssignModifiedValueToMerge(LBasicBlock);
+  void MergeModified();
+  void Enable();
+  void Disable();
+  AnonImpl& impl() { return impl_; }
+  Output& output() { return impl_.output(); }
+
+ private:
+  bool SetLLVMValue(int ssa_id, LValue index) override;
+  LValue GetLLVMValue(int ssa_id) override;
+
+  AnonImpl& impl_;
+  BitVector* values_modified_;
+  std::unordered_map<LBasicBlock, std::unordered_map<int, LValue>>
+      initial_modified_values_lookup_;
+  std::unordered_map<int, LValue> current_modified_;
+  std::unordered_map<LBasicBlock, std::unordered_map<int, LValue>>
+      modified_values_to_merge_;
+  ValueInterceptor* old_value_interceptor_;
+};
+
 class ContinuationResolver {
  protected:
   ContinuationResolver(AnonImpl& impl, int ssa_id);
@@ -364,6 +393,7 @@ class DiamondContinuationResolver : public ContinuationResolver {
   void RightHint() { hint_ = 1; }
 
  private:
+  ModifiedValuesMergeHelper modified_value_helper_;
   LBasicBlock blocks_[3];
   LValue values_[2];
   // 0 no hint
@@ -398,6 +428,7 @@ class CallResolver : public ContinuationResolver {
   void GenerateStatePointFunction();
   void ExtractCallInfo();
   void EmitCall();
+  void EmitTailCall();
   void EmitRelocatesIfNeeded();
   void EmitExceptionBlockIfNeeded();
   void EmitPatchPoint();
@@ -457,6 +488,7 @@ class ComparisonResolver : public FlowGraphVisitor {
   void VisitEqualityCompare(EqualityCompareInstr* instr) override;
   void VisitCheckedSmiComparison(CheckedSmiComparisonInstr* instr) override;
   void VisitCaseInsensitiveCompare(CaseInsensitiveCompareInstr* instr) override;
+  void VisitRelationalOp(RelationalOpInstr* instr) override;
 
   AnonImpl& impl_;
   LValue result_;
@@ -474,7 +506,7 @@ class Label {
   LBasicBlock bb_;
 };
 
-class AssemblerResolver : public ValueInterceptor {
+class AssemblerResolver : private ModifiedValuesMergeHelper {
  public:
   AssemblerResolver(AnonImpl&);
   ~AssemblerResolver() override;
@@ -493,27 +525,13 @@ class AssemblerResolver : public ValueInterceptor {
   LBasicBlock current() { return current_; }
 
  private:
-  bool SetLLVMValue(int ssa_id, LValue index) override;
-  LValue GetLLVMValue(int ssa_id) override;
-  void AssignBlockInitialValues(LBasicBlock);
-  void AssignModifiedValueToMerge();
-  void MergeModified();
-  Output& output() { return impl_.output(); }
-  AnonImpl& impl() { return impl_; }
-  AnonImpl& impl_;
   LBasicBlock current_;
   LBasicBlock merge_;
+  // Must an ordered list with merge values
+  // The unordered_map modified_values_to_merge_ from ModifiedValuesMergeHelper
+  // is unordered thus unusable.
   std::vector<LBasicBlock> merge_blocks_;
   std::vector<LValue> merge_values_;
-
-  BitVector* values_modified_;
-  // modified merging
-  std::unordered_map<LBasicBlock, std::unordered_map<int, LValue>>
-      initial_modified_values_lookup_;
-  std::unordered_map<int, LValue> current_modified_;
-  std::unordered_map<LBasicBlock, std::unordered_map<int, LValue>>
-      modified_values_to_merge_;
-  ValueInterceptor* old_value_interceptor_;
 };
 
 ExceptionBlockLiveInEntry::ExceptionBlockLiveInEntry(
@@ -605,6 +623,7 @@ void AnonImpl::MergePredecessors(BlockEntryInstr* bb) {
   for (BitVector::Iterator it(liveness().GetLiveInSet(bb)); !it.Done();
        it.Advance()) {
     int live = it.Current();
+    if (IsLazyValue(live)) continue;
     auto& value = GetTranslatorBlockImpl(ref_pred)->GetValue(live);
     if (value.type != ValueType::LLVMValue) {
       block_impl->SetValue(live, value);
@@ -743,6 +762,7 @@ void AnonImpl::End() {
   output().buildBr(GetNativeBB(flow_graph_->graph_entry()));
   output().finalize();
   output().EmitDebugInfo(std::move(debug_instrs_));
+  LLVMDumpModule(compiler_state().module_);
   Compile(compiler_state());
 }
 
@@ -770,7 +790,17 @@ void AnonImpl::ProcessPhiWorkList() {
 }
 
 LValue AnonImpl::EnsurePhiInput(BlockEntryInstr* pred, int index, LType type) {
-  LValue val = GetTranslatorBlockImpl(pred)->GetLLVMValue(index);
+  LValue val;
+  auto found_in_lazy_values = lazy_values_.find(index);
+  if (found_in_lazy_values != lazy_values_.end()) {
+    LValue terminator =
+        LLVMGetBasicBlockTerminator(GetNativeBBContinuation(pred));
+    output().positionBefore(terminator);
+    val = MaterializeDef(found_in_lazy_values->second);
+    return val;
+  } else {
+    val = GetTranslatorBlockImpl(pred)->GetLLVMValue(index);
+  }
   LType value_type = typeOf(val);
   if (value_type == type) return val;
   LValue terminator =
@@ -1380,8 +1410,8 @@ LValue AnonImpl::LoadObject(const Object& object, bool is_unique) {
     return output().buildInvariantLoad(gep);
   } else if (compiler::target::IsSmi(object)) {
     // Relocation doesn't apply to Smis.
-    return output().constIntPtr(
-        static_cast<intptr_t>(compiler::target::ToRawSmi(object)));
+    return WordToTagged(output().constIntPtr(
+        static_cast<intptr_t>(compiler::target::ToRawSmi(object))));
   } else {
     // Make sure that class CallPattern is able to decode this load from the
     // object pool.
@@ -1646,12 +1676,89 @@ void AnonImpl::SetCurrentBlockContinuation(LBasicBlock continuation) {
   current_bb_impl()->continuation = continuation;
 }
 
+LBasicBlock AnonImpl::GetCurrentBlockContinuation() {
+  return current_bb_impl()->continuation;
+}
+
+ModifiedValuesMergeHelper::ModifiedValuesMergeHelper(AnonImpl& impl)
+    : impl_(impl) {
+  values_modified_ = new (impl.zone())
+      BitVector(impl.zone(), impl.flow_graph()->max_virtual_register_number());
+}
+
+ModifiedValuesMergeHelper::~ModifiedValuesMergeHelper() {
+  // Check disabled.
+  EMASSERT(impl().value_interceptor_ != this);
+}
+
+LValue ModifiedValuesMergeHelper::GetLLVMValue(int ssa_id) {
+  auto found = current_modified_.find(ssa_id);
+  if (found != current_modified_.end()) return found->second;
+  return nullptr;
+}
+
+bool ModifiedValuesMergeHelper::SetLLVMValue(int ssa_id, LValue v) {
+  current_modified_[ssa_id] = v;
+  values_modified_->Add(ssa_id);
+  return true;
+}
+
+void ModifiedValuesMergeHelper::AssignBlockInitialValues(LBasicBlock bb) {
+  initial_modified_values_lookup_.emplace(bb, current_modified_);
+}
+
+void ModifiedValuesMergeHelper::InitialValuesInBlock(LBasicBlock bb) {
+  auto found_initial_vals = initial_modified_values_lookup_.find(bb);
+  EMASSERT(found_initial_vals != initial_modified_values_lookup_.end());
+  current_modified_ = std::move(found_initial_vals->second);
+}
+
+void ModifiedValuesMergeHelper::InitialValuesInBlockToEmpty() {
+  current_modified_.clear();
+}
+
+void ModifiedValuesMergeHelper::AssignModifiedValueToMerge(LBasicBlock bb) {
+  modified_values_to_merge_.emplace(bb, current_modified_);
+}
+
+void ModifiedValuesMergeHelper::MergeModified() {
+  EMASSERT(impl().value_interceptor_ != this);
+  for (BitVector::Iterator it(values_modified_); !it.Done(); it.Advance()) {
+    int need_to_merge = it.Current();
+    LValue original = impl().GetLLVMValue(need_to_merge);
+    LType type = typeOf(original);
+    LValue phi = output().buildPhi(type);
+    for (auto& pair : modified_values_to_merge_) {
+      auto& value_lookup = pair.second;
+      auto found = value_lookup.find(need_to_merge);
+      if (found == value_lookup.end()) {
+        addIncoming(phi, &original, &pair.first, 1);
+      } else {
+        addIncoming(phi, &found->second, &pair.first, 1);
+      }
+    }
+    impl().SetLLVMValue(need_to_merge, phi);
+  }
+}
+
+void ModifiedValuesMergeHelper::Enable() {
+  old_value_interceptor_ = impl().value_interceptor_;
+  impl().value_interceptor_ = this;
+}
+
+void ModifiedValuesMergeHelper::Disable() {
+  impl().value_interceptor_ = old_value_interceptor_;
+}
+
 ContinuationResolver::ContinuationResolver(AnonImpl& impl, int ssa_id)
     : impl_(impl), ssa_id_(ssa_id) {}
 
 DiamondContinuationResolver::DiamondContinuationResolver(AnonImpl& _impl,
                                                          int ssa_id)
-    : ContinuationResolver(_impl, ssa_id), hint_(0), building_block_index_(-1) {
+    : ContinuationResolver(_impl, ssa_id),
+      modified_value_helper_(_impl),
+      hint_(0),
+      building_block_index_(-1) {
   blocks_[0] = impl().NewBasicBlock("left_for_%d", ssa_id);
   blocks_[1] = impl().NewBasicBlock("right_for_%d", ssa_id);
   blocks_[2] = impl().NewBasicBlock("continuation_for_%d", ssa_id);
@@ -1666,29 +1773,50 @@ DiamondContinuationResolver& DiamondContinuationResolver::BuildCmp(
     cmp_value = impl().ExpectFalse(cmp_value);
   }
   output().buildCondBr(cmp_value, blocks_[0], blocks_[1]);
+  modified_value_helper_.Enable();
   return *this;
 }
 
 DiamondContinuationResolver& DiamondContinuationResolver::BuildLeft(
     std::function<LValue()> f) {
   output().positionToBBEnd(blocks_[0]);
+  LBasicBlock old_continuation = impl().GetCurrentBlockContinuation();
   building_block_index_ = 0;
+  modified_value_helper_.InitialValuesInBlockToEmpty();
   values_[0] = f();
   output().buildBr(blocks_[2]);
+  LBasicBlock from = blocks_[0];
+  LBasicBlock current_continuation = impl().GetCurrentBlockContinuation();
+  if (old_continuation != current_continuation) {
+    from = current_continuation;
+    blocks_[0] = from;
+  }
+  modified_value_helper_.AssignModifiedValueToMerge(from);
   return *this;
 }
 
 DiamondContinuationResolver& DiamondContinuationResolver::BuildRight(
     std::function<LValue()> f) {
   output().positionToBBEnd(blocks_[1]);
+  LBasicBlock old_continuation = impl().GetCurrentBlockContinuation();
   building_block_index_ = 1;
+  modified_value_helper_.InitialValuesInBlockToEmpty();
   values_[1] = f();
   output().buildBr(blocks_[2]);
+  LBasicBlock from = blocks_[1];
+  LBasicBlock current_continuation = impl().GetCurrentBlockContinuation();
+  if (old_continuation != current_continuation) {
+    from = current_continuation;
+    blocks_[1] = from;
+  }
+  modified_value_helper_.AssignModifiedValueToMerge(from);
   return *this;
 }
 
 LValue DiamondContinuationResolver::End() {
   output().positionToBBEnd(blocks_[2]);
+  modified_value_helper_.Disable();
+  modified_value_helper_.MergeModified();
   LValue phi = output().buildPhi(typeOf(values_[0]));
   addIncoming(phi, values_, blocks_, 2);
   impl().SetCurrentBlockContinuation(blocks_[2]);
@@ -1764,11 +1892,16 @@ LValue CallResolver::BuildCall() {
            !LLVMIsUndef(parameters_[static_cast<int>(CODE_REG)]));
   ExtractCallInfo();
   GenerateStatePointFunction();
-  EmitCall();
+  patchid_ = impl().NextPatchPoint();
+  if (!tail_call_)
+    EmitCall();
+  else
+    EmitTailCall();
   EmitExceptionBlockIfNeeded();
 
   // reset to continuation.
   if (need_invoke()) {
+    EMASSERT(!tail_call_);
     output().positionToBBEnd(continuation_block_);
     impl().SetCurrentBlockContinuation(continuation_block_);
   }
@@ -1807,7 +1940,6 @@ void CallResolver::GenerateStatePointFunction() {
 
 void CallResolver::EmitCall() {
   std::vector<LValue> statepoint_operands;
-  patchid_ = impl().NextPatchPoint();
   statepoint_operands.push_back(output().constInt64(patchid_));
   statepoint_operands.push_back(
       output().constInt32(call_resolver_parameter_.instruction_size));
@@ -1819,16 +1951,14 @@ void CallResolver::EmitCall() {
     statepoint_operands.push_back(parameter);
   statepoint_operands.push_back(output().constInt32(0));  // # transition args
   statepoint_operands.push_back(output().constInt32(0));  // # deopt arguments
-  // normal block
-  if (!tail_call_) {
-    for (BitVector::Iterator it(call_live_out_); !it.Done(); it.Advance()) {
-      int live_ssa_index = it.Current();
-      if (impl().IsLazyValue(live_ssa_index)) continue;
-      ValueDesc desc = impl().current_bb_impl()->GetValue(live_ssa_index);
-      if (desc.type != ValueType::LLVMValue) continue;
-      gc_desc_list_.emplace_back(live_ssa_index, statepoint_operands.size());
-      statepoint_operands.emplace_back(desc.llvm_value);
-    }
+
+  for (BitVector::Iterator it(call_live_out_); !it.Done(); it.Advance()) {
+    int live_ssa_index = it.Current();
+    if (impl().IsLazyValue(live_ssa_index)) continue;
+    ValueDesc desc = impl().current_bb_impl()->GetValue(live_ssa_index);
+    if (desc.type != ValueType::LLVMValue) continue;
+    gc_desc_list_.emplace_back(live_ssa_index, statepoint_operands.size());
+    statepoint_operands.emplace_back(desc.llvm_value);
   }
 
   if (need_invoke()) {
@@ -1844,7 +1974,6 @@ void CallResolver::EmitCall() {
     statepoint_value_ =
         output().buildCall(statepoint_function_, statepoint_operands.data(),
                            statepoint_operands.size());
-    if (tail_call_) output().buildReturnForTailCall();
   } else {
     catch_block_impl_ = impl().GetCatchBlockImplInitIfNeeded(catch_block_);
     continuation_block_ =
@@ -1857,6 +1986,23 @@ void CallResolver::EmitCall() {
   LLVMSetInstructionCallConv(statepoint_value_, LLVMV8CallConv);
 }
 
+void CallResolver::EmitTailCall() {
+  std::vector<LValue> patchpoint_operands;
+  patchpoint_operands.push_back(output().constInt64(patchid_));
+  patchpoint_operands.push_back(
+      output().constInt32(call_resolver_parameter_.instruction_size));
+  patchpoint_operands.push_back(constNull(output().repo().ref8));
+  patchpoint_operands.push_back(
+      output().constInt32(parameters_.size()));  // # call params
+  for (LValue parameter : parameters_)
+    patchpoint_operands.push_back(parameter);
+  LValue patchpoint_ret = output().buildCall(
+      output().repo().patchpointVoidIntrinsic(), patchpoint_operands.data(),
+      patchpoint_operands.size());
+  LLVMSetInstructionCallConv(patchpoint_ret, LLVMV8CallConv);
+  output().buildReturnForTailCall();
+}
+
 void CallResolver::EmitRelocatesIfNeeded() {
   if (tail_call_) return;
   for (auto& gc_relocate : gc_desc_list_) {
@@ -1864,7 +2010,7 @@ void CallResolver::EmitRelocatesIfNeeded() {
         output().repo().gcRelocateIntrinsic(), statepoint_value_,
         output().constInt32(gc_relocate.where),
         output().constInt32(gc_relocate.where));
-    impl().current_bb_impl()->SetLLVMValue(gc_relocate.ssa_index, relocated);
+    impl().SetLLVMValue(gc_relocate.ssa_index, relocated);
   }
 
   LValue intrinsic = output().getGCResultFunction(return_type_);
@@ -2089,6 +2235,31 @@ void ComparisonResolver::VisitCaseInsensitiveCompare(
   UNREACHABLE();
 }
 
+void ComparisonResolver::VisitRelationalOp(RelationalOpInstr* instr) {
+  LValue cmp_value;
+  LValue left = impl().GetLLVMValue(instr->InputAt(0));
+  LValue right = impl().GetLLVMValue(instr->InputAt(1));
+  if (instr->operation_cid() == kSmiCid) {
+    EMASSERT(typeOf(left) == output().tagged_type());
+    EMASSERT(typeOf(right) == output().tagged_type());
+    cmp_value =
+        output().buildICmp(TokenKindToSmiCondition(instr->kind()),
+                           impl().SmiUntag(left), impl().SmiUntag(right));
+  } else if (instr->operation_cid() == kMintCid) {
+    EMASSERT(typeOf(left) == output().repo().int64);
+    EMASSERT(typeOf(right) == output().repo().int64);
+    cmp_value =
+        output().buildICmp(TokenKindToSmiCondition(instr->kind()), left, right);
+  } else {
+    EMASSERT(instr->operation_cid() == kDoubleCid);
+    EMASSERT(typeOf(left) == output().repo().doubleType);
+    EMASSERT(typeOf(right) == output().repo().doubleType);
+    cmp_value = output().buildFCmp(TokenKindToDoubleCondition(instr->kind()),
+                                   left, right);
+  }
+  result_ = cmp_value;
+}
+
 Label::Label(const char* fmt, ...) : bb_(nullptr) {
   va_list va;
   va_start(va, fmt);
@@ -2104,17 +2275,13 @@ void Label::InitBBIfNeeded(AnonImpl& impl) {
 }
 
 AssemblerResolver::AssemblerResolver(AnonImpl& impl)
-    : impl_(impl), current_(impl.output().getInsertionBlock()) {
+    : ModifiedValuesMergeHelper(impl),
+      current_(impl.output().getInsertionBlock()) {
   merge_ = impl.NewBasicBlock("AssemblerResolver::Merge");
-  values_modified_ = new (impl.zone())
-      BitVector(impl.zone(), impl.flow_graph()->max_virtual_register_number());
-  old_value_interceptor_ = impl.value_interceptor_;
-  impl.value_interceptor_ = this;
+  Enable();
 }
 
-AssemblerResolver::~AssemblerResolver() {
-  EMASSERT(impl().value_interceptor_ != this);
-}
+AssemblerResolver::~AssemblerResolver() {}
 
 void AssemblerResolver::Branch(Label& label) {
   label.InitBBIfNeeded(impl());
@@ -2149,14 +2316,15 @@ void AssemblerResolver::Bind(Label& label) {
   label.InitBBIfNeeded(impl());
   current_ = label.basic_block();
   output().positionToBBEnd(current_);
-  auto found_initial_vals = initial_modified_values_lookup_.find(current_);
-  EMASSERT(found_initial_vals != initial_modified_values_lookup_.end());
-  current_modified_ = std::move(found_initial_vals->second);
+  InitialValuesInBlock(current_);
 }
 
 LValue AssemblerResolver::End() {
   output().positionToBBEnd(merge_);
   impl().SetCurrentBlockContinuation(merge_);
+
+  Disable();
+  MergeModified();
   if (merge_values_.empty()) return nullptr;
   EMASSERT(merge_values_.size() == merge_blocks_.size());
   LType type = typeOf(merge_values_.front());
@@ -2166,36 +2334,32 @@ LValue AssemblerResolver::End() {
   }
   addIncoming(phi, merge_values_.data(), merge_blocks_.data(),
               merge_values_.size());
-  // reset old
-  impl().value_interceptor_ = old_value_interceptor_;
-
-  MergeModified();
   return phi;
 }
 
 void AssemblerResolver::GotoMerge() {
   merge_blocks_.emplace_back(current_);
+  AssignModifiedValueToMerge(current_);
   output().buildBr(merge_);
-  AssignModifiedValueToMerge();
   current_ = nullptr;
 }
 
 void AssemblerResolver::GotoMergeIf(LValue cond) {
   merge_blocks_.emplace_back(current_);
+  AssignModifiedValueToMerge(current_);
   LBasicBlock continuation =
       impl().NewBasicBlock("AssemblerResolver::GotoMergeIf");
   output().buildCondBr(cond, merge_, continuation);
-  AssignModifiedValueToMerge();
   current_ = continuation;
   output().positionToBBEnd(current_);
 }
 
 void AssemblerResolver::GotoMergeIfNot(LValue cond) {
   merge_blocks_.emplace_back(current_);
+  AssignModifiedValueToMerge(current_);
   LBasicBlock continuation =
       impl().NewBasicBlock("AssemblerResolver::GotoMergeIf");
   output().buildCondBr(cond, continuation, merge_);
-  AssignModifiedValueToMerge();
   current_ = continuation;
   output().positionToBBEnd(current_);
 }
@@ -2212,8 +2376,8 @@ void AssemblerResolver::GotoMergeWithValueIf(LValue cond, LValue v) {
       impl().NewBasicBlock("AssemblerResolver::GotoMergeWithValueIf");
   merge_values_.emplace_back(v);
   merge_blocks_.emplace_back(current_);
+  AssignModifiedValueToMerge(current_);
   output().buildCondBr(cond, merge_, continuation);
-  AssignModifiedValueToMerge();
   current_ = continuation;
   output().positionToBBEnd(current_);
 }
@@ -2224,50 +2388,10 @@ void AssemblerResolver::GotoMergeWithValueIfNot(LValue cond, LValue v) {
       impl().NewBasicBlock("AssemblerResolver::GotoMergeWithValueIfNot");
   merge_values_.emplace_back(v);
   merge_blocks_.emplace_back(current_);
+  AssignModifiedValueToMerge(current_);
   output().buildCondBr(cond, continuation, merge_);
-  AssignModifiedValueToMerge();
   current_ = continuation;
   output().positionToBBEnd(current_);
-}
-
-LValue AssemblerResolver::GetLLVMValue(int ssa_id) {
-  auto found = current_modified_.find(ssa_id);
-  if (found != current_modified_.end()) return found->second;
-  return nullptr;
-}
-
-bool AssemblerResolver::SetLLVMValue(int ssa_id, LValue v) {
-  current_modified_[ssa_id] = v;
-  values_modified_->Add(ssa_id);
-  return true;
-}
-
-void AssemblerResolver::AssignBlockInitialValues(LBasicBlock bb) {
-  initial_modified_values_lookup_.emplace(bb, current_modified_);
-}
-
-void AssemblerResolver::AssignModifiedValueToMerge() {
-  modified_values_to_merge_.emplace(current_, current_modified_);
-}
-
-void AssemblerResolver::MergeModified() {
-  for (BitVector::Iterator it(values_modified_); !it.Done(); it.Advance()) {
-    int need_to_merge = it.Current();
-    LValue original = impl().GetLLVMValue(need_to_merge);
-    LType type = typeOf(original);
-    LValue phi = output().buildPhi(type);
-    for (LBasicBlock b : merge_blocks_) {
-      auto found_block = modified_values_to_merge_.find(b);
-      EMASSERT(found_block != modified_values_to_merge_.end());
-      auto& value_lookup = found_block->second;
-      auto found = value_lookup.find(need_to_merge);
-      if (found == value_lookup.end()) {
-        addIncoming(phi, &original, &b, 1);
-      } else {
-        addIncoming(phi, &found->second, &b, 1);
-      }
-    }
-  }
 }
 }  // namespace
 
@@ -2339,8 +2463,10 @@ void IRTranslator::VisitGraphEntry(GraphEntryInstr* instr) {
 
 void IRTranslator::VisitJoinEntry(JoinEntryInstr* instr) {
   VisitBlockEntry(instr);
-  for (PhiInstr* phi : *instr->phis()) {
-    VisitPhi(phi);
+  if (instr->phis()) {
+    for (PhiInstr* phi : *instr->phis()) {
+      VisitPhi(phi);
+    }
   }
 }
 
@@ -2429,9 +2555,9 @@ void IRTranslator::VisitNativeParameter(NativeParameterInstr* instr) {
 void IRTranslator::VisitLoadIndexedUnsafe(LoadIndexedUnsafeInstr* instr) {
   EMASSERT(instr->RequiredInputRepresentation(0) == kTagged);  // It is a Smi.
   impl().SetDebugLine(instr);
-  LValue index_smi = impl().GetLLVMValue(instr->index());
+  LValue index_smi = impl().TaggedToWord(impl().GetLLVMValue(instr->index()));
   EMASSERT(instr->base_reg() == FP);
-  LValue offset = output().buildShl(index_smi, output().constInt32(1));
+  LValue offset = output().buildShl(index_smi, output().constIntPtr(1));
   offset = output().buildAdd(offset, output().constIntPtr(instr->offset()));
   LValue access =
       impl().BuildAccessPointer(output().fp(), offset, instr->representation());
@@ -2458,13 +2584,12 @@ void IRTranslator::VisitTailCall(TailCallInstr* instr) {
   impl().SetDebugLine(instr);
   std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
   callsite_info->set_type(CallSiteInfo::CallTargetType::kCodeObject);
-  CallResolver::CallResolverParameter param(instr, Instr::kInstrSize,
+  CallResolver::CallResolverParameter param(instr, kCallInstrSize,
                                             std::move(callsite_info));
   CallResolver resolver(impl(), -1, param);
   LValue code_object = impl().LoadObject(instr->code());
   resolver.SetGParameter(static_cast<int>(CODE_REG), code_object);
   // add register parameter.
-  EMASSERT(impl().GetLLVMValue(instr->InputAt(0)) == output().args_desc());
   resolver.SetGParameter(static_cast<int>(ARGS_DESC_REG), output().args_desc());
   resolver.BuildCall();
 }
@@ -2821,28 +2946,9 @@ void IRTranslator::VisitEqualityCompare(EqualityCompareInstr* instr) {
 
 void IRTranslator::VisitRelationalOp(RelationalOpInstr* instr) {
   impl().SetDebugLine(instr);
-  LValue cmp_value;
-  LValue left = impl().GetLLVMValue(instr->InputAt(0));
-  LValue right = impl().GetLLVMValue(instr->InputAt(1));
-  if (instr->operation_cid() == kSmiCid) {
-    EMASSERT(typeOf(left) == output().tagged_type());
-    EMASSERT(typeOf(right) == output().tagged_type());
-    cmp_value =
-        output().buildICmp(TokenKindToSmiCondition(instr->kind()),
-                           impl().SmiUntag(left), impl().SmiUntag(right));
-  } else if (instr->operation_cid() == kMintCid) {
-    EMASSERT(typeOf(left) == output().repo().intPtr);
-    EMASSERT(typeOf(right) == output().repo().intPtr);
-    cmp_value =
-        output().buildICmp(TokenKindToSmiCondition(instr->kind()), left, right);
-  } else {
-    EMASSERT(instr->operation_cid() == kDoubleCid);
-    EMASSERT(typeOf(left) == output().repo().doubleType);
-    EMASSERT(typeOf(right) == output().repo().doubleType);
-    cmp_value = output().buildFCmp(TokenKindToDoubleCondition(instr->kind()),
-                                   left, right);
-  }
-  impl().SetLLVMValue(instr, cmp_value);
+  ComparisonResolver resolver(impl());
+  instr->Accept(&resolver);
+  impl().SetLLVMValue(instr, impl().BooleanToObject(resolver.result()));
 }
 
 void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
@@ -3480,12 +3586,28 @@ void IRTranslator::VisitBinarySmiOp(BinarySmiOpInstr* instr) {
     case Token::kADD:
       value = output().buildAdd(left, right);
       break;
+    case Token::kSUB:
+      value = output().buildSub(left, right);
+      break;
     case Token::kMUL:
       value = output().buildMul(left, right);
       break;
-    case Token::kTRUNCDIV:
-      value = output().buildSDiv(left, right);
-      break;
+    case Token::kTRUNCDIV: {
+      ConstantInstr* constant = instr->right()->definition()->AsConstant();
+
+      const intptr_t cvalue = compiler::target::SmiValue(constant->value());
+      EMASSERT(cvalue != kIntptrMin);
+      EMASSERT(Utils::IsPowerOfTwo(Utils::Abs(cvalue)));
+      const intptr_t shift_count =
+          Utils::ShiftForPowerOfTwo(Utils::Abs(cvalue)) + kSmiTagSize;
+      LValue left = impl().TaggedToWord(impl().GetLLVMValue(instr->left()));
+      LValue left_asr = output().buildSar(left, output().constIntPtr(31));
+      LValue temp = output().buildAdd(
+          left,
+          output().buildShr(left_asr, output().constIntPtr(32 - shift_count)));
+      value = output().buildSar(temp, output().constIntPtr(shift_count));
+      if (cvalue < 0) value = output().buildSub(output().constIntPtr(0), value);
+    } break;
     case Token::kBIT_AND:
       value = output().buildAnd(left, right);
       break;

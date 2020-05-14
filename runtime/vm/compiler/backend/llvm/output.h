@@ -131,8 +131,9 @@ class Output {
   inline LType tagged_type() const { return repo_.tagged_type; }
   inline LValue parameter(int i) { return parameters_[i]; }
   inline LValue thread() { return thread_; }
+  // FIXME: this is not allow. it will escape the gc relocator.
   inline LValue args_desc() { return args_desc_; }
-  inline LValue fp() { return fp_; }
+  LValue fp();
   inline LValue pp() { return pp_; }
   inline LValue bitcast_space() { return bitcast_space_; }
   inline int stack_parameter_count() const { return stack_parameter_count_; }
@@ -148,7 +149,6 @@ class Output {
   LBasicBlock prologue_;
   LValue thread_;
   LValue args_desc_;
-  LValue fp_;
   LValue pp_;
   LValue bitcast_space_;
   LLVMMetadataRef subprogram_;

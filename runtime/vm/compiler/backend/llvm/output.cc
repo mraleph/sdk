@@ -20,7 +20,6 @@ Output::Output(CompilerState& state)
       prologue_(nullptr),
       thread_(nullptr),
       args_desc_(nullptr),
-      fp_(nullptr),
       pp_(nullptr),
       bitcast_space_(nullptr),
       subprogram_(nullptr),
@@ -44,7 +43,6 @@ void Output::initializeBuild(const RegisterParameterDesc& registerParameters) {
   prologue_ = appendBasicBlock("Prologue");
   positionToBBEnd(prologue_);
   thread_ = LLVMGetParam(state_.function_, static_cast<int>(THR));
-  fp_ = LLVMGetParam(state_.function_, static_cast<int>(FP));
   pp_ = LLVMGetParam(state_.function_, static_cast<int>(PP));
   args_desc_ = LLVMGetParam(state_.function_, static_cast<int>(ARGS_DESC_REG));
 
@@ -590,6 +588,10 @@ LType Output::tagged_pair() const {
 
 void Output::EmitDebugInfo(std::vector<Instruction*>&& debug_instrs) {
   state_.debug_instrs_ = std::move(debug_instrs);
+}
+
+LValue Output::fp() {
+  return buildCall(repo().frameAddressIntrinsic(), constInt32(0));
 }
 
 void Output::AddFunctionCommonAttr(LValue function) {

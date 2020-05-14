@@ -7,7 +7,6 @@
 #include <iterator>
 #include <unordered_set>
 
-#include "vm/compiler/backend/flow_graph.h"
 #include "vm/compiler/backend/il.h"
 #include "vm/compiler/backend/llvm/llvm_log.h"
 
@@ -127,6 +126,140 @@ BitVector* LivenessAnalysis::CalculateLiveness(Instruction* at) const {
     return false;
   };
   return CalculateBlock(block, f);
+}
+
+SSALivenessAnalysis::SSALivenessAnalysis(const FlowGraph& flow_graph)
+    : LivenessAnalysis(flow_graph.max_virtual_register_number(),
+                       flow_graph.postorder()),
+      graph_entry_(flow_graph.graph_entry()) {}
+
+static intptr_t ToSecondPairVreg(intptr_t vreg) {
+  // Map vreg to its pair vreg.
+  static const intptr_t kNoVirtualRegister = -1;
+  static const intptr_t kPairVirtualRegisterOffset = 1;
+  EMASSERT((vreg == kNoVirtualRegister) || vreg >= 0);
+  return (vreg == kNoVirtualRegister) ? kNoVirtualRegister
+                                      : (vreg + kPairVirtualRegisterOffset);
+}
+
+void SSALivenessAnalysis::ComputeInitialSets() {
+  const intptr_t block_count = postorder_.length();
+  for (intptr_t i = 0; i < block_count; i++) {
+    BlockEntryInstr* block = postorder_[i];
+
+    BitVector* kill = kill_[i];
+    BitVector* live_in = live_in_[i];
+
+    // Iterate backwards starting at the last instruction.
+    for (BackwardInstructionIterator it(block); !it.Done(); it.Advance()) {
+      Instruction* current = it.Current();
+
+      // Initialize location summary for instruction.
+      current->InitializeLocationSummary(zone(), true);  // opt
+
+      LocationSummary* locs = current->locs();
+#if defined(DEBUG)
+      locs->DiscoverWritableInputs();
+#endif
+
+      // Handle definitions.
+      Definition* current_def = current->AsDefinition();
+      if ((current_def != NULL) && current_def->HasSSATemp()) {
+        kill->Add(current_def->ssa_temp_index());
+        live_in->Remove(current_def->ssa_temp_index());
+        if (current_def->HasPairRepresentation()) {
+          kill->Add(ToSecondPairVreg(current_def->ssa_temp_index()));
+          live_in->Remove(ToSecondPairVreg(current_def->ssa_temp_index()));
+        }
+      }
+
+      // Handle uses.
+      ASSERT(locs->input_count() == current->InputCount());
+      int input_count = current->InputCount();
+      for (intptr_t j = 0; j < input_count; j++) {
+        Value* input = current->InputAt(j);
+
+        ASSERT(!locs->in(j).IsConstant() || input->BindsToConstant());
+        if (locs->in(j).IsConstant()) continue;
+
+        live_in->Add(input->definition()->ssa_temp_index());
+        if (input->definition()->HasPairRepresentation()) {
+          live_in->Add(ToSecondPairVreg(input->definition()->ssa_temp_index()));
+        }
+      }
+      // Handle uses part2: arguments;
+      intptr_t argument_count = current->ArgumentCount();
+      for (intptr_t j = 0; j < argument_count; ++j) {
+        Definition* argument = current->ArgumentAt(j);
+        live_in->Add(argument->ssa_temp_index());
+        if (argument->HasPairRepresentation()) {
+          live_in->Add(ToSecondPairVreg(argument->ssa_temp_index()));
+        }
+      }
+
+      // Add non-argument uses from the deoptimization environment (pushed
+      // arguments are not allocated by the register allocator).
+      if (current->env() != NULL) {
+        for (Environment::DeepIterator env_it(current->env()); !env_it.Done();
+             env_it.Advance()) {
+          Definition* defn = env_it.CurrentValue()->definition();
+          if (defn->IsMaterializeObject()) {
+            // MaterializeObject instruction is not in the graph.
+            // Treat its inputs as part of the environment.
+            // DeepLiveness(defn->AsMaterializeObject(), live_in);
+            UNREACHABLE();
+          } else if (!defn->IsPushArgument() && !defn->IsConstant()) {
+            live_in->Add(defn->ssa_temp_index());
+            if (defn->HasPairRepresentation()) {
+              live_in->Add(ToSecondPairVreg(defn->ssa_temp_index()));
+            }
+          }
+        }
+      }
+    }
+
+    // Handle phis.
+    if (block->IsJoinEntry()) {
+      JoinEntryInstr* join = block->AsJoinEntry();
+      for (PhiIterator it(join); !it.Done(); it.Advance()) {
+        PhiInstr* phi = it.Current();
+        EMASSERT(phi != NULL);
+        kill->Add(phi->ssa_temp_index());
+        live_in->Remove(phi->ssa_temp_index());
+        if (phi->HasPairRepresentation()) {
+          kill->Add(ToSecondPairVreg(phi->ssa_temp_index()));
+          live_in->Remove(ToSecondPairVreg(phi->ssa_temp_index()));
+        }
+
+        // If a phi input is not defined by the corresponding predecessor it
+        // must be marked live-in for that predecessor.
+        for (intptr_t k = 0; k < phi->InputCount(); k++) {
+          Value* val = phi->InputAt(k);
+          if (val->BindsToConstant()) continue;
+
+          BlockEntryInstr* pred = block->PredecessorAt(k);
+          const intptr_t use = val->definition()->ssa_temp_index();
+          if (!kill_[pred->postorder_number()]->Contains(use)) {
+            live_in_[pred->postorder_number()]->Add(use);
+          }
+          if (phi->HasPairRepresentation()) {
+            const intptr_t second_use = ToSecondPairVreg(use);
+            if (!kill_[pred->postorder_number()]->Contains(second_use)) {
+              live_in_[pred->postorder_number()]->Add(second_use);
+            }
+          }
+        }
+      }
+    } else if (auto entry = block->AsBlockEntryWithInitialDefs()) {
+      // Process initial definitions, i.e. parameters and special parameters.
+      for (intptr_t i = 0; i < entry->initial_definitions()->length(); i++) {
+        Definition* def = (*entry->initial_definitions())[i];
+        const intptr_t vreg = def->ssa_temp_index();
+        kill_[entry->postorder_number()]->Add(vreg);
+        live_in_[entry->postorder_number()]->Remove(vreg);
+      }
+    }
+  }
 }
 }  // namespace dart_llvm
 }  // namespace dart
