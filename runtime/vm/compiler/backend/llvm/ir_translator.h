@@ -31,6 +31,7 @@ class IRTranslator : public FlowGraphVisitor {
   FOR_EACH_INSTRUCTION(DECLARE_VISIT_INSTRUCTION)
 
 #undef DECLARE_VISIT_INSTRUCTION
+  void VisitInstanceCallBase(InstanceCallBaseInstr*);
   DISALLOW_COPY_AND_ASSIGN(IRTranslator);
   std::unique_ptr<Impl> impl_;
 };

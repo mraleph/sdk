@@ -53,7 +53,7 @@ namespace dart {
   V(TypePropagation)                                                           \
   V(UseTableDispatch)                                                          \
   V(WidenSmiToInt32)                                                           \
-  V(EliminateWriteBarriers)
+  V(EliminateWriteBarriers)                                                    \
   DART_LLVM_PASS(V)
 
 #if defined(DART_ENABLE_LLVM_COMPILER)

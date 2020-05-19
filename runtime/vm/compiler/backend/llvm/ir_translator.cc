@@ -975,7 +975,6 @@ LValue AnonImpl::GenerateCall(
     std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
     callsite_info->set_type(CallSiteInfo::CallTargetType::kCodeObject);
     callsite_info->set_token_pos(token_pos);
-    callsite_info->set_code(&stub);
     callsite_info->set_kind(kind);
     callsite_info->set_stack_parameter_count(stack_argument_count);
     CallResolver::CallResolverParameter param(instr, Instr::kInstrSize,
@@ -2219,8 +2218,9 @@ void ComparisonResolver::VisitCheckedSmiComparison(
     impl().PushArgument(left);
     impl().PushArgument(right);
     const auto& selector = String::Handle(instr->call()->Selector());
-    const auto& arguments_descriptor = Array::Handle(
-        ArgumentsDescriptor::New(/*type_args_len=*/0, /*num_arguments=*/2));
+    const auto& arguments_descriptor =
+        Array::Handle(ArgumentsDescriptor::NewBoxed(/*type_args_len=*/0,
+                                                    /*num_arguments=*/2));
     LValue boolean_object = impl().GenerateMegamorphicInstanceCall(
         instr, selector, arguments_descriptor, instr->call()->deopt_id(),
         instr->token_pos());
@@ -2429,9 +2429,9 @@ void IRTranslator::Translate() {
   impl().liveness().Analyze();
   VisitBlocks();
   impl().End();
+#elif !defined(PRODUCT)
+  FlowGraphPrinter::PrintGraph("IRTranslator", impl().flow_graph_);
 #endif
-
-  // FlowGraphPrinter::PrintGraph("IRTranslator", impl().flow_graph_);
 }
 
 Output& IRTranslator::output() {
@@ -2714,7 +2714,7 @@ void IRTranslator::VisitClosureCall(ClosureCallInstr* instr) {
   resolver.SetGParameter(CODE_REG, code_object);
   resolver.SetGParameter(kICReg, output().constTagged(0));
   for (intptr_t i = argument_count - 1; i >= 0; --i) {
-    LValue param = impl().GetLLVMValue(instr->PushArgumentAt(i)->value());
+    LValue param = impl().GetLLVMValue(instr->ArgumentValueAt(i));
     resolver.AddStackParameter(param);
   }
   LValue result = resolver.BuildCall();
@@ -2726,7 +2726,7 @@ void IRTranslator::VisitFfiCall(FfiCallInstr* instr) {
   UNREACHABLE();
 }
 
-void IRTranslator::VisitInstanceCall(InstanceCallInstr* instr) {
+void IRTranslator::VisitInstanceCallBase(InstanceCallBaseInstr* instr) {
   impl().SetDebugLine(instr);
   EMASSERT(instr->ic_data() != NULL);
   EMASSERT((FLAG_precompiled_mode && FLAG_use_bare_instructions));
@@ -2756,7 +2756,7 @@ void IRTranslator::VisitInstanceCall(InstanceCallInstr* instr) {
   resolver.SetGParameter(kICReg, data_val);
   resolver.SetGParameter(kInstanceCallTargetReg, initial_stub_val);
   for (intptr_t i = argument_count - 1; i >= 0; --i) {
-    LValue param = impl().GetLLVMValue(instr->PushArgumentAt(i)->value());
+    LValue param = impl().GetLLVMValue(instr->ArgumentValueAt(i));
     resolver.AddStackParameter(param);
   }
   LValue receiver =
@@ -2765,6 +2765,10 @@ void IRTranslator::VisitInstanceCall(InstanceCallInstr* instr) {
 
   LValue result = resolver.BuildCall();
   impl().SetLLVMValue(instr, result);
+}
+
+void IRTranslator::VisitInstanceCall(InstanceCallInstr* instr) {
+  VisitInstanceCallBase(instr);
 }
 
 void IRTranslator::VisitPolymorphicInstanceCall(
@@ -2886,7 +2890,7 @@ void IRTranslator::VisitPolymorphicInstanceCall(
   }
 #else
   // FIXME: implement the upper code.
-  VisitInstanceCall(instr->instance_call());
+  VisitInstanceCallBase(instr);
 #endif
 }
 
@@ -2895,11 +2899,10 @@ void IRTranslator::VisitStaticCall(StaticCallInstr* instr) {
   Zone* zone = impl().zone();
   ICData& ic_data = ICData::ZoneHandle(zone, instr->ic_data()->raw());
   ArgumentsInfo args_info(instr->type_args_len(), instr->ArgumentCount(),
-                          instr->argument_names());
+                          instr->ArgumentsSize(), instr->argument_names());
   std::vector<LValue> arguments;
   for (intptr_t i = 0; i < args_info.count_with_type_args; ++i) {
-    arguments.emplace_back(
-        impl().GetLLVMValue(instr->PushArgumentAt(i)->value()));
+    arguments.emplace_back(impl().GetLLVMValue(instr->ArgumentValueAt(i)));
   }
   LValue result = impl().GenerateStaticCall(
       instr, instr->ssa_temp_index(), arguments, instr->deopt_id(),
@@ -3227,7 +3230,7 @@ void IRTranslator::VisitInitInstanceField(InitInstanceFieldInstr* instr) {
   impl().SetDebugLine(instr);
   LValue instance = impl().GetLLVMValue(instr->InputAt(0));
   LValue field_value =
-      impl().LoadFieldFromOffset(instance, instr->field().Offset());
+      impl().LoadFieldFromOffset(instance, instr->field().TargetOffset());
   LValue sentinel = impl().LoadObject(Object::sentinel());
   AssemblerResolver resolver(impl());
   LValue cmp = output().buildICmp(LLVMIntNE, field_value, sentinel);
@@ -3245,52 +3248,62 @@ void IRTranslator::VisitInitInstanceField(InitInstanceFieldInstr* instr) {
 
 void IRTranslator::VisitInitStaticField(InitStaticFieldInstr* instr) {
   impl().SetDebugLine(instr);
+  const intptr_t field_table_offset =
+      compiler::target::Thread::field_table_values_offset();
+  const intptr_t field_offset =
+      compiler::target::FieldTable::OffsetOf(instr->field());
   Label call_runtime("call_runtime");
-  LValue field_value = impl().GetLLVMValue(instr->InputAt(0));
-  LValue static_value = impl().LoadFieldFromOffset(
-      field_value, compiler::target::Field::static_value_offset());
+  LValue field_table = impl().LoadFromOffset(
+      output().thread(), field_table_offset, pointerType(output().repo().ref8));
+  LValue field = impl().LoadFromOffset(field_table, field_offset,
+                                       pointerType(output().tagged_type()));
   LValue sentinel = impl().LoadObject(Object::sentinel());
   AssemblerResolver resolver(impl());
-  LValue cmp = output().buildICmp(LLVMIntEQ, static_value, sentinel);
+  LValue cmp = output().buildICmp(LLVMIntEQ, field, sentinel);
   resolver.BranchIf(impl().ExpectFalse(cmp), call_runtime);
 
   LValue transition_sentinel = impl().LoadObject(Object::transition_sentinel());
-  cmp = output().buildICmp(LLVMIntNE, static_value, transition_sentinel);
+  cmp = output().buildICmp(LLVMIntNE, field, transition_sentinel);
   resolver.GotoMergeIf(impl().ExpectTrue(cmp));
   resolver.Branch(call_runtime);
 
   resolver.Bind(call_runtime);
-  impl().PushArgument(field_value);
-  impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
-                             kInitStaticFieldRuntimeEntry, 1);
+  LValue field_original =
+      impl().LoadObject(Field::ZoneHandle(instr->field().Original()));
+  constexpr const Register kFieldOrignalReg = InitStaticFieldABI::kFieldReg;
+  impl().GenerateCall(instr, instr->token_pos(), instr->deopt_id(),
+                      StubCode::InitStaticField(), RawPcDescriptors::kOther, 0,
+                      {{kFieldOrignalReg, field_original}});
   resolver.GotoMerge();
   resolver.End();
 }
 
 void IRTranslator::VisitLoadStaticField(LoadStaticFieldInstr* instr) {
   impl().SetDebugLine(instr);
-  LValue field = impl().GetLLVMValue(instr->field_value());
-  LValue v = impl().LoadFieldFromOffset(
-      field, compiler::target::Field::static_value_offset());
+
+  LValue field_table_values = impl().LoadFromOffset(
+      output().thread(), compiler::target::Thread::field_table_values_offset(),
+      pointerType(output().repo().ref8));
+
+  LValue v = impl().LoadFromOffset(
+      field_table_values,
+      compiler::target::FieldTable::OffsetOf(instr->StaticField()),
+      pointerType(output().tagged_type()));
   impl().SetLLVMValue(instr, v);
 }
 
 void IRTranslator::VisitStoreStaticField(StoreStaticFieldInstr* instr) {
   impl().SetDebugLine(instr);
-  LValue value = impl().GetLLVMValue(instr->InputAt(0));
-  LValue field_original = impl().LoadObject(
-      Field::ZoneHandle(impl().zone(), instr->field().Original()));
-  if (instr->value()->NeedsWriteBarrier()) {
-    impl().StoreIntoObject(
-        instr, field_original,
-        output().constIntPtr(compiler::target::Field::static_value_offset() -
-                             kHeapObjectTag),
-        value, instr->CanValueBeSmi());
-  } else {
-    impl().StoreToOffset(
-        field_original,
-        compiler::target::Field::static_value_offset() - kHeapObjectTag, value);
-  }
+  // FIXME: need this when in assemble phase:
+  // compiler->used_static_fields().Add(&field());
+  const intptr_t field_table_offset =
+      compiler::target::Thread::field_table_values_offset();
+  LValue field_table = impl().LoadFromOffset(
+      output().thread(), field_table_offset, pointerType(output().repo().ref8));
+  LValue value = impl().GetLLVMValue(instr->value());
+  impl().StoreToOffset(field_table,
+                       compiler::target::FieldTable::OffsetOf(instr->field()),
+                       value);
 }
 
 void IRTranslator::VisitBooleanNegate(BooleanNegateInstr* instr) {
@@ -3466,64 +3479,20 @@ void IRTranslator::VisitInstantiateTypeArguments(
     LValue and_val = output().buildAnd(cmp_1, cmp_2);
     resolver.GotoMergeWithValueIf(and_val, null_object);
   }
-  // Lookup cache before calling runtime.
-  // TODO(regis): Consider moving this into a shared stub to reduce
-  // generated code size.
-  LValue type_arguments_value = impl().LoadObject(instr->type_arguments());
-  LValue instantiations_value = impl().LoadFieldFromOffset(
-      type_arguments_value,
-      compiler::target::TypeArguments::instantiations_offset());
-  LValue data_value = output().buildAdd(
-      impl().TaggedToWord(instantiations_value),
-      output().constIntPtr(compiler::target::Array::data_offset() -
-                           kHeapObjectTag));
-  Label loop("loop"), next("next"), found("found"), slow_case("slow_case");
-  LBasicBlock from_block = resolver.current();
-  resolver.Branch(loop);
-  LValue data_phi = output().buildPhi(typeOf(data_value));
-  addIncoming(data_phi, &data_value, &from_block, 1);
-  LValue cached_instantiator_type_args =
-      output().buildLoad(impl().BuildAccessPointer(
-          data_phi, output().constIntPtr(0 * compiler::target::kWordSize),
-          output().tagged_type()));
-  LValue cmp = output().buildICmp(LLVMIntEQ, cached_instantiator_type_args,
-                                  instantiator_type_args);
-  resolver.BranchIfNot(cmp, next);
-  LValue cached_function_type_args =
-      output().buildLoad(impl().BuildAccessPointer(
-          data_phi, output().constIntPtr(1 * compiler::target::kWordSize),
-          output().tagged_type()));
-  cmp = output().buildICmp(LLVMIntEQ, cached_function_type_args,
-                           function_type_args);
-  resolver.BranchIf(cmp, found);
-  resolver.Branch(next);
-  resolver.Bind(next);
+  constexpr Register kInstantiatorTypeArgumentsReg =
+      InstantiationABI::kInstantiatorTypeArgumentsReg;
+  constexpr Register kFunctionTypeArgumentsReg =
+      InstantiationABI::kFunctionTypeArgumentsReg;
+  constexpr Register kUninstantiatedTypeArgumentsReg =
+      InstantiationABI::kUninstantiatedTypeArgumentsReg;
+  LValue result = impl().GenerateCall(
+      instr, instr->token_pos(), instr->deopt_id(), instr->GetStub(),
+      RawPcDescriptors::kOther, 0,
+      {{kInstantiatorTypeArgumentsReg, instantiator_type_args},
+       {kFunctionTypeArgumentsReg, function_type_args},
+       {kUninstantiatedTypeArgumentsReg,
+        impl().LoadObject(instr->type_arguments())}});
 
-  data_value = output().buildAdd(
-      data_phi, output().constIntPtr(StubCode::kInstantiationSizeInWords *
-                                     compiler::target::kWordSize));
-  cmp = output().buildICmp(
-      LLVMIntEQ, cached_instantiator_type_args,
-      output().constTagged(static_cast<intptr_t>(
-          compiler::target::ToRawSmi(StubCode::kNoInstantiator))));
-  from_block = resolver.current();
-  addIncoming(data_phi, &data_value, &from_block, 1);
-  resolver.BranchIfNot(impl().ExpectFalse(cmp), loop);
-  resolver.Branch(slow_case);
-
-  resolver.Bind(found);
-  LValue result = output().buildLoad(impl().BuildAccessPointer(
-      data_phi, output().constIntPtr(2 * compiler::target::kWordSize),
-      output().tagged_type()));
-  resolver.GotoMergeWithValue(result);
-
-  resolver.Bind(slow_case);
-  impl().PushArgument(impl().LoadObject(instr->type_arguments()));
-  impl().PushArgument(instantiator_type_args);
-  impl().PushArgument(function_type_args);
-  result =
-      impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
-                                 kInstantiateTypeArgumentsRuntimeEntry, 3);
   resolver.GotoMergeWithValue(result);
   result = resolver.End();
   impl().SetLLVMValue(instr, result);
@@ -3756,8 +3725,9 @@ void IRTranslator::VisitCheckedSmiOp(CheckedSmiOpInstr* instr) {
     impl().PushArgument(left);
     impl().PushArgument(right);
     const auto& selector = String::Handle(instr->call()->Selector());
-    const auto& arguments_descriptor = Array::Handle(
-        ArgumentsDescriptor::New(/*type_args_len=*/0, /*num_arguments=*/2));
+    const auto& arguments_descriptor =
+        Array::Handle(ArgumentsDescriptor::NewBoxed(/*type_args_len=*/0,
+                                                    /*num_arguments=*/2));
     return impl().GenerateMegamorphicInstanceCall(
         instr, selector, arguments_descriptor, instr->call()->deopt_id(),
         instr->token_pos());
@@ -4158,7 +4128,7 @@ void IRTranslator::VisitUnbox(UnboxInstr* instr) {
         .BuildRight([&]() { return EmitLoadFromBox(); });
     return diamond.End();
   };
-  if (instr->speculative_mode() == UnboxInstr::kNotSpeculative) {
+  if (instr->SpeculativeModeOfInputs() == UnboxInstr::kNotSpeculative) {
     switch (instr->representation()) {
       case kUnboxedDouble:
       case kUnboxedFloat: {
@@ -4185,7 +4155,7 @@ void IRTranslator::VisitUnbox(UnboxInstr* instr) {
         break;
     }
   } else {
-    ASSERT(instr->speculative_mode() == UnboxInstr::kGuardInputs);
+    ASSERT(instr->SpeculativeModeOfInputs() == UnboxInstr::kGuardInputs);
     const intptr_t value_cid = instr->value()->Type()->ToCid();
     const intptr_t box_cid = Boxing::BoxCid(instr->representation());
 
@@ -4393,8 +4363,10 @@ void IRTranslator::VisitStringInterpolate(StringInterpolateInstr* instr) {
   impl().SetDebugLine(instr);
   const int kTypeArgsLen = 0;
   const int kNumberOfArguments = 1;
+  constexpr const int kSizeOfArguments = 1;
   const Array& kNoArgumentNames = Object::null_array();
-  ArgumentsInfo args_info(kTypeArgsLen, kNumberOfArguments, kNoArgumentNames);
+  ArgumentsInfo args_info(kTypeArgsLen, kNumberOfArguments, kSizeOfArguments,
+                          kNoArgumentNames);
   std::vector<LValue> arguments{impl().GetLLVMValue(instr->value())};
   LValue result = impl().GenerateStaticCall(
       instr, instr->ssa_temp_index(), arguments, instr->deopt_id(),
@@ -4663,17 +4635,19 @@ void IRTranslator::VisitBitCast(BitCastInstr* instr) {
   UNREACHABLE();
 }
 
-void IRTranslator::VisitUnboxedWidthExtender(UnboxedWidthExtenderInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
-}
-
 void IRTranslator::VisitDeoptimize(DeoptimizeInstr* instr) {
   LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
   UNREACHABLE();
 }
 
 void IRTranslator::VisitSimdOp(SimdOpInstr* instr) {
+  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
+  UNREACHABLE();
+}
+
+void IRTranslator::VisitReachabilityFence(ReachabilityFenceInstr*) {}
+
+void IRTranslator::VisitDispatchTableCall(DispatchTableCallInstr*) {
   LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
   UNREACHABLE();
 }
