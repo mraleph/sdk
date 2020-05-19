@@ -13,6 +13,7 @@
 #include "vm/compiler/backend/llvm/stack_map_info.h"
 #include "vm/compiler/backend/llvm/target_specific.h"
 #include "vm/compiler/runtime_api.h"
+#include "vm/dispatch_table.h"
 #include "vm/object_store.h"
 #include "vm/type_testing_stubs.h"
 
@@ -2425,12 +2426,12 @@ IRTranslator::IRTranslator(FlowGraph* flow_graph, Precompiler* precompiler)
 IRTranslator::~IRTranslator() {}
 
 void IRTranslator::Translate() {
-#if 1
+#if 0
   impl().liveness().Analyze();
   VisitBlocks();
   impl().End();
 #elif !defined(PRODUCT)
-  FlowGraphPrinter::PrintGraph("IRTranslator", impl().flow_graph_);
+  // FlowGraphPrinter::PrintGraph("IRTranslator", impl().flow_graph_);
 #endif
 }
 
@@ -3427,8 +3428,9 @@ void IRTranslator::VisitLoadClassId(LoadClassIdInstr* instr) {
   const AbstractType& value_type = *instr->object()->Type()->ToAbstractType();
   LValue object = impl().GetLLVMValue(instr->object());
   LValue value;
-  if (CompileType::Smi().IsAssignableTo(value_type) ||
-      value_type.IsTypeParameter()) {
+  if (instr->input_can_be_smi_ &&
+      (CompileType::Smi().IsAssignableTo(value_type) ||
+       value_type.IsTypeParameter())) {
     DiamondContinuationResolver diamond(impl(), instr->ssa_temp_index());
     diamond.BuildCmp([&]() { return impl().TstSmi(object); })
         .BuildLeft([&]() { return output().constInt16(kSmiCid); })
@@ -3438,7 +3440,7 @@ void IRTranslator::VisitLoadClassId(LoadClassIdInstr* instr) {
   } else {
     value = impl().LoadClassId(object);
   }
-  value = impl().SmiTag(value);
+  if (instr->representation() == kTagged) value = impl().SmiTag(value);
   impl().SetLLVMValue(instr, value);
 }
 
@@ -4647,9 +4649,50 @@ void IRTranslator::VisitSimdOp(SimdOpInstr* instr) {
 
 void IRTranslator::VisitReachabilityFence(ReachabilityFenceInstr*) {}
 
-void IRTranslator::VisitDispatchTableCall(DispatchTableCallInstr*) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+void IRTranslator::VisitDispatchTableCall(DispatchTableCallInstr* instr) {
+  impl().SetDebugLine(instr);
+  LValue dispatch_table = impl().LoadFromOffset(
+      output().thread(),
+      compiler::target::Thread::dispatch_table_array_offset(),
+      pointerType(output().repo().ref8));
+  intptr_t offset =
+      (instr->selector()->offset - DispatchTable::OriginElement()) *
+      compiler::target::kWordSize;
+  LValue cid = impl().GetLLVMValue(instr->class_id());
+  LValue offset_val = output().buildAdd(
+      output().constIntPtr(offset),
+      output().buildShl(cid,
+                        output().constIntPtr(compiler::target::kWordSizeLog2)));
+  LValue entry_gep = output().buildGEPWithByteOffset(
+      dispatch_table, offset_val, pointerType(output().repo().ref8));
+  LValue entry = output().buildInvariantLoad(entry_gep);
+
+  int argument_count = instr->ArgumentCount();
+  std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
+  callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
+  callsite_info->set_token_pos(instr->token_pos());
+  callsite_info->set_deopt_id(instr->deopt_id());
+  callsite_info->set_stack_parameter_count(argument_count);
+  CallResolver::CallResolverParameter param(instr, kCallInstrSize,
+                                            std::move(callsite_info));
+  CallResolver resolver(impl(), instr->ssa_temp_index(), param);
+  resolver.SetGParameter(kCallTargetReg, entry);
+  for (intptr_t i = argument_count - 1; i >= 0; --i) {
+    LValue param = impl().GetLLVMValue(instr->ArgumentValueAt(i));
+    resolver.AddStackParameter(param);
+  }
+  Array& arguments_descriptor = Array::ZoneHandle();
+  if (instr->selector()->requires_args_descriptor) {
+    ArgumentsInfo args_info(instr->type_args_len(), instr->ArgumentCount(),
+                            instr->ArgumentsSize(), instr->argument_names());
+    arguments_descriptor = args_info.ToArgumentsDescriptor();
+    LValue argument_desc_val = impl().LoadObject(arguments_descriptor);
+    resolver.SetGParameter(static_cast<int>(ARGS_DESC_REG), argument_desc_val);
+  }
+  // FIXME: need add this when code assemble.
+  // compiler->AddDispatchTableCallTarget(selector());
+  LValue v = resolver.BuildCall();
+  impl().SetLLVMValue(instr, v);
 }
 }  // namespace dart_llvm
 }  // namespace dart

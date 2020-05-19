@@ -6099,6 +6099,9 @@ class LoadClassIdInstr : public TemplateDefinition<1, NoThrow, Pure> {
   }
 
  private:
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  friend class dart::dart_llvm::IRTranslator;
+#endif
   Representation representation_;
   bool input_can_be_smi_;
 
