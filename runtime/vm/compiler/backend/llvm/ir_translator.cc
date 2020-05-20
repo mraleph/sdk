@@ -523,10 +523,8 @@ class AssemblerResolver : private ModifiedValuesMergeHelper {
   void GotoMergeWithValue(LValue v);
   void GotoMergeWithValueIf(LValue cond, LValue v);
   void GotoMergeWithValueIfNot(LValue cond, LValue v);
-  LBasicBlock current() { return current_; }
 
  private:
-  LBasicBlock current_;
   LBasicBlock merge_;
   // Must an ordered list with merge values
   // The unordered_map modified_values_to_merge_ from ModifiedValuesMergeHelper
@@ -1376,7 +1374,10 @@ void AnonImpl::SetLLVMValue(int ssa_id, LValue val) {
 }
 
 void AnonImpl::SetLLVMValue(Definition* d, LValue val) {
-  current_bb_impl()->SetLLVMValue(d->ssa_temp_index(), val);
+  SetLLVMValue(d->ssa_temp_index(), val);
+  if (d->HasPairRepresentation())
+    SetLLVMValue(d->ssa_temp_index() + 1,
+                 LLVMGetUndef(output().repo().boolean));
 }
 
 void AnonImpl::SetLazyValue(Definition* d) {
@@ -1870,7 +1871,6 @@ void CallResolver::SetGParameter(int reg, LValue val) {
 }
 
 void CallResolver::AddStackParameter(LValue v) {
-  EMASSERT(typeOf(v) == output().tagged_type());
   parameters_.emplace_back(v);
   EMASSERT(parameters_.size() - kV8CCRegisterParameterCount <=
            call_resolver_parameter_.callsite_info->stack_parameter_count());
@@ -1957,6 +1957,7 @@ void CallResolver::EmitCall() {
     if (impl().IsLazyValue(live_ssa_index)) continue;
     ValueDesc desc = impl().current_bb_impl()->GetValue(live_ssa_index);
     if (desc.type != ValueType::LLVMValue) continue;
+    if (typeOf(desc.llvm_value) != output().tagged_type()) continue;
     gc_desc_list_.emplace_back(live_ssa_index, statepoint_operands.size());
     statepoint_operands.emplace_back(desc.llvm_value);
   }
@@ -2276,8 +2277,7 @@ void Label::InitBBIfNeeded(AnonImpl& impl) {
 }
 
 AssemblerResolver::AssemblerResolver(AnonImpl& impl)
-    : ModifiedValuesMergeHelper(impl),
-      current_(impl.output().getInsertionBlock()) {
+    : ModifiedValuesMergeHelper(impl) {
   merge_ = impl.NewBasicBlock("AssemblerResolver::Merge");
   Enable();
 }
@@ -2288,36 +2288,34 @@ void AssemblerResolver::Branch(Label& label) {
   label.InitBBIfNeeded(impl());
   output().buildBr(label.basic_block());
   AssignBlockInitialValues(label.basic_block());
-  current_ = nullptr;
 }
 
 void AssemblerResolver::BranchIf(LValue cond, Label& label) {
-  EMASSERT(current_);
   LBasicBlock continuation =
       impl().NewBasicBlock("AssemblerResolver::BranchIf");
   label.InitBBIfNeeded(impl());
   output().buildCondBr(cond, label.basic_block(), continuation);
   AssignBlockInitialValues(label.basic_block());
-  current_ = continuation;
-  output().positionToBBEnd(current_);
+  output().positionToBBEnd(continuation);
 }
 
 void AssemblerResolver::BranchIfNot(LValue cond, Label& label) {
-  EMASSERT(current_);
   LBasicBlock continuation =
       impl().NewBasicBlock("AssemblerResolver::BranchIfNot");
   label.InitBBIfNeeded(impl());
   output().buildCondBr(cond, continuation, label.basic_block());
   AssignBlockInitialValues(label.basic_block());
-  current_ = continuation;
-  output().positionToBBEnd(current_);
+  output().positionToBBEnd(continuation);
 }
 
 void AssemblerResolver::Bind(Label& label) {
+  EMASSERT(
+      (LLVMGetBasicBlockTerminator(output().getInsertionBlock()) != nullptr) &&
+      "current bb has not yet been terminated");
   label.InitBBIfNeeded(impl());
-  current_ = label.basic_block();
-  output().positionToBBEnd(current_);
-  InitialValuesInBlock(current_);
+  LBasicBlock current = label.basic_block();
+  output().positionToBBEnd(current);
+  InitialValuesInBlock(current);
 }
 
 LValue AssemblerResolver::End() {
@@ -2339,60 +2337,57 @@ LValue AssemblerResolver::End() {
 }
 
 void AssemblerResolver::GotoMerge() {
-  merge_blocks_.emplace_back(current_);
-  AssignModifiedValueToMerge(current_);
+  LBasicBlock current = output().getInsertionBlock();
+  merge_blocks_.emplace_back(current);
+  AssignModifiedValueToMerge(current);
   output().buildBr(merge_);
-  current_ = nullptr;
 }
 
 void AssemblerResolver::GotoMergeIf(LValue cond) {
-  merge_blocks_.emplace_back(current_);
-  AssignModifiedValueToMerge(current_);
+  LBasicBlock current = output().getInsertionBlock();
+  merge_blocks_.emplace_back(current);
+  AssignModifiedValueToMerge(current);
   LBasicBlock continuation =
       impl().NewBasicBlock("AssemblerResolver::GotoMergeIf");
   output().buildCondBr(cond, merge_, continuation);
-  current_ = continuation;
-  output().positionToBBEnd(current_);
+  output().positionToBBEnd(continuation);
 }
 
 void AssemblerResolver::GotoMergeIfNot(LValue cond) {
-  merge_blocks_.emplace_back(current_);
-  AssignModifiedValueToMerge(current_);
+  LBasicBlock current = output().getInsertionBlock();
+  merge_blocks_.emplace_back(current);
+  AssignModifiedValueToMerge(current);
   LBasicBlock continuation =
       impl().NewBasicBlock("AssemblerResolver::GotoMergeIf");
   output().buildCondBr(cond, continuation, merge_);
-  current_ = continuation;
-  output().positionToBBEnd(current_);
+  output().positionToBBEnd(continuation);
 }
 
 void AssemblerResolver::GotoMergeWithValue(LValue v) {
-  EMASSERT(current_);
   merge_values_.emplace_back(v);
   GotoMerge();
 }
 
 void AssemblerResolver::GotoMergeWithValueIf(LValue cond, LValue v) {
-  EMASSERT(current_);
+  LBasicBlock current = output().getInsertionBlock();
   LBasicBlock continuation =
       impl().NewBasicBlock("AssemblerResolver::GotoMergeWithValueIf");
   merge_values_.emplace_back(v);
-  merge_blocks_.emplace_back(current_);
-  AssignModifiedValueToMerge(current_);
+  merge_blocks_.emplace_back(current);
+  AssignModifiedValueToMerge(current);
   output().buildCondBr(cond, merge_, continuation);
-  current_ = continuation;
-  output().positionToBBEnd(current_);
+  output().positionToBBEnd(continuation);
 }
 
 void AssemblerResolver::GotoMergeWithValueIfNot(LValue cond, LValue v) {
-  EMASSERT(current_);
   LBasicBlock continuation =
       impl().NewBasicBlock("AssemblerResolver::GotoMergeWithValueIfNot");
   merge_values_.emplace_back(v);
-  merge_blocks_.emplace_back(current_);
-  AssignModifiedValueToMerge(current_);
+  LBasicBlock current = output().getInsertionBlock();
+  merge_blocks_.emplace_back(current);
+  AssignModifiedValueToMerge(current);
   output().buildCondBr(cond, continuation, merge_);
-  current_ = continuation;
-  output().positionToBBEnd(current_);
+  output().positionToBBEnd(continuation);
 }
 }  // namespace
 
@@ -2416,8 +2411,36 @@ IRTranslator::IRTranslator(FlowGraph* flow_graph, Precompiler* precompiler)
   // init parameter desc
   RegisterParameterDesc parameter_desc;
   LType tagged_type = output().repo().tagged_type;
-  for (int i = flow_graph->num_direct_parameters(); i > 0; --i) {
-    parameter_desc.emplace_back(-i, tagged_type);
+  LType int64_type = output().repo().int64;
+  GraphEntryInstr* graph_entry = flow_graph->graph_entry();
+  EMASSERT(graph_entry->SuccessorCount() == 1);
+  FunctionEntryInstr* function_entry =
+      graph_entry->SuccessorAt(0)->AsFunctionEntry();
+  EMASSERT(function_entry != nullptr);
+
+  std::vector<ParameterInstr*> params;
+  for (Definition* def : *function_entry->initial_definitions()) {
+    ParameterInstr* param = def->AsParameter();
+    if (param) params.emplace_back(param);
+  }
+  std::sort(params.begin(), params.end(),
+            [](ParameterInstr* lhs, ParameterInstr* rhs) {
+              return lhs->index() < rhs->index();
+            });
+  int i = params.size();
+  EMASSERT(i == flow_graph->num_direct_parameters());
+  for (auto it = params.rbegin(); it != params.rend(); ++it, --i) {
+    ParameterInstr* param = *it;
+    switch (param->representation()) {
+      case kUnboxedInt64:
+        parameter_desc.emplace_back(-i, int64_type);
+        break;
+      case kTagged:
+        parameter_desc.emplace_back(-i, tagged_type);
+        break;
+      default:
+        UNREACHABLE();
+    }
   }
   // init output().
   output().initializeBuild(parameter_desc);
@@ -2426,7 +2449,7 @@ IRTranslator::IRTranslator(FlowGraph* flow_graph, Precompiler* precompiler)
 IRTranslator::~IRTranslator() {}
 
 void IRTranslator::Translate() {
-#if 0
+#if 1
   impl().liveness().Analyze();
   VisitBlocks();
   impl().End();
@@ -2988,6 +3011,8 @@ void IRTranslator::VisitLoadIndexed(LoadIndexedInstr* instr) {
   impl().SetDebugLine(instr);
   LValue array = impl().GetLLVMValue(instr->array());
   LValue index = impl().GetLLVMValue(instr->index());
+  EMASSERT(typeOf(index) == output().tagged_type());
+  index = impl().TaggedToWord(index);
 
   const intptr_t shift =
       Utils::ShiftForPowerOfTwo(instr->index_scale()) - kSmiTagShift;
@@ -3213,11 +3238,38 @@ void IRTranslator::VisitStoreIndexed(StoreIndexedInstr* instr) {
 
 void IRTranslator::VisitStoreInstanceField(StoreInstanceFieldInstr* instr) {
   impl().SetDebugLine(instr);
-  EMASSERT(!instr->IsUnboxedStore());
   const intptr_t offset_in_bytes = instr->OffsetInBytes();
 
   LValue val = impl().GetLLVMValue(instr->value());
   LValue instance = impl().GetLLVMValue(instr->instance());
+
+  if (instr->IsUnboxedStore()) {
+    impl().StoreToOffset(instance, offset_in_bytes - kHeapObjectTag, val);
+    if (instr->slot().field().is_non_nullable_integer()) {
+      EMASSERT(typeOf(val) == output().repo().int64);
+      return;
+    }
+
+    const intptr_t cid = instr->slot().field().UnboxedFieldCid();
+    switch (cid) {
+      case kDoubleCid:
+        EMASSERT(typeOf(val) == output().repo().doubleType);
+        return;
+      case kFloat32x4Cid:
+        LLVMLOGE("StoreInstanceFieldInstr: Unsupport kFloat32x4Cid\n");
+        UNREACHABLE();
+      case kFloat64x2Cid:
+        LLVMLOGE("StoreInstanceFieldInstr: Unsupport kFloat64x2Cid\n");
+        UNREACHABLE();
+      default:
+        UNREACHABLE();
+    }
+  }
+
+  if (instr->IsPotentialUnboxedStore()) {
+    LLVMLOGE("Unsupported IsPotentialUnboxedStore\n");
+    UNREACHABLE();
+  }
   if (instr->ShouldEmitStoreBarrier()) {
     impl().StoreIntoObject(
         instr, instance, output().constIntPtr(offset_in_bytes - kHeapObjectTag),
@@ -3889,9 +3941,12 @@ void IRTranslator::VisitCheckNull(CheckNullInstr* instr) {
   LValue null_object = impl().LoadObject(Object::null_object());
   LValue cmp = output().buildICmp(LLVMIntEQ, null_object, value);
   resolver.BranchIf(impl().ExpectFalse(cmp), slow_path);
+  resolver.GotoMerge();
   resolver.Bind(slow_path);
   impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
                              kNullErrorRuntimeEntry, 0, false);
+  resolver.GotoMerge();
+  resolver.End();
 }
 
 void IRTranslator::VisitCheckCondition(CheckConditionInstr* instr) {
@@ -4193,7 +4248,7 @@ void IRTranslator::VisitBoxInt64(BoxInt64Instr* instr) {
     LValue value_lo =
         output().buildCast(LLVMTrunc, value, output().repo().int32);
     LValue value_hi = output().buildCast(
-        LLVMTrunc, output().buildShr(value, output().constInt32(32)),
+        LLVMTrunc, output().buildShr(value, output().constInt64(32)),
         output().repo().int32);
     result = output().buildShl(value_lo, output().constInt32(kSmiTagSize));
     LValue cmp_1 = output().buildICmp(
@@ -4659,6 +4714,7 @@ void IRTranslator::VisitDispatchTableCall(DispatchTableCallInstr* instr) {
       (instr->selector()->offset - DispatchTable::OriginElement()) *
       compiler::target::kWordSize;
   LValue cid = impl().GetLLVMValue(instr->class_id());
+  cid = output().buildCast(LLVMZExt, cid, output().repo().intPtr);
   LValue offset_val = output().buildAdd(
       output().constIntPtr(offset),
       output().buildShl(cid,
