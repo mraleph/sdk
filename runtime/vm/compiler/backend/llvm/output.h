@@ -25,8 +25,7 @@ class Output {
  public:
   Output(CompilerState& state);
   ~Output();
-  void initializeBuild(const RegisterParameterDesc&);
-  void initializeFunction(const RegisterParameterDesc&);
+  void initializeBuild(const RegisterParameterDesc&, LType return_type);
   LBasicBlock appendBasicBlock(const char* name = "");
   LBasicBlock appendBasicBlock(LValue function, const char* name = "");
   LBasicBlock getInsertionBlock();
@@ -72,6 +71,7 @@ class Output {
   LValue buildSwitch(LValue, LBasicBlock, unsigned);
   LValue buildCondBr(LValue condition, LBasicBlock taken, LBasicBlock notTaken);
   LValue buildRet(LValue ret);
+  void buildRetUndef();
   void buildReturnForTailCall();
   LValue buildRetVoid(void);
   LValue buildSelect(LValue condition, LValue taken, LValue notTaken);
@@ -142,6 +142,7 @@ class Output {
   LValue setInstrDebugLoc(LValue);
   void AddFunctionCommonAttr(LValue function);
   void finalizeDebugInfo();
+  void initializeFunction(const RegisterParameterDesc&, LType return_type);
   CompilerState& state_;
   IntrinsicRepository repo_;
   LBuilder builder_;
@@ -151,6 +152,7 @@ class Output {
   LValue args_desc_;
   LValue pp_;
   LValue bitcast_space_;
+  LType return_type_;
   LLVMMetadataRef subprogram_;
   size_t stack_parameter_count_;
 

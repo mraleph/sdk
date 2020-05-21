@@ -15,7 +15,7 @@ static const size_t kRuntimeCallInstrSize = Instr::kInstrSize;
 static const size_t kRuntimeCallReturnOnStackInstrSize = 2 * Instr::kInstrSize;
 
 // Reg Call
-static const Register kCallTargetReg = R0;
+static const Register kCallTargetReg = R3;
 static const size_t kCallInstrSize = Instr::kInstrSize;
 
 // Runtime Call

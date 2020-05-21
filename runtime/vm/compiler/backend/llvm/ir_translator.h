@@ -25,6 +25,7 @@ class IRTranslator : public FlowGraphVisitor {
 
   void VisitBlockEntryWithInitialDefs(BlockEntryWithInitialDefs*);
   void VisitBlockEntry(BlockEntryInstr*);
+  void VisitUnboxInteger32(UnboxInteger32Instr*);
 #define DECLARE_VISIT_INSTRUCTION(ShortName, Attrs)                            \
   void Visit##ShortName(ShortName##Instr* instr) override;
 

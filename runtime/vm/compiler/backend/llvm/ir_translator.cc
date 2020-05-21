@@ -219,6 +219,7 @@ class AnonImpl {
 #endif
   // Types
   LType GetMachineRepresentationType(Representation);
+  LType DeduceReturnType();
   LValue TaggedToWord(LValue v);
   LValue WordToTagged(LValue v);
   LValue EnsureBoolean(LValue v);
@@ -409,11 +410,9 @@ class CallResolver : public ContinuationResolver {
   struct CallResolverParameter {
     CallResolverParameter(Instruction*, size_t, std::unique_ptr<CallSiteInfo>);
     ~CallResolverParameter() = default;
-    void set_second_return(bool);
     Instruction* call_instruction;
     size_t instruction_size;
     std::unique_ptr<CallSiteInfo> callsite_info;
-    bool second_return;
     DISALLOW_COPY_AND_ASSIGN(CallResolverParameter);
   };
   explicit CallResolver(AnonImpl& impl,
@@ -493,6 +492,19 @@ class ComparisonResolver : public FlowGraphVisitor {
 
   AnonImpl& impl_;
   LValue result_;
+  DISALLOW_COPY_AND_ASSIGN(ComparisonResolver);
+};
+
+class ReturnRepresentationDeducer : public FlowGraphVisitor {
+ public:
+  explicit ReturnRepresentationDeducer(AnonImpl& impl);
+  ~ReturnRepresentationDeducer() = default;
+  Representation Deduce();
+
+ private:
+  void VisitReturn(ReturnInstr*) override;
+  Representation rep_;
+  DISALLOW_COPY_AND_ASSIGN(ReturnRepresentationDeducer);
 };
 
 class Label {
@@ -721,6 +733,7 @@ void AnonImpl::BuildPhiAndPushToWorkList(BlockEntryInstr* bb,
   for (BitVector::Iterator it(liveness().GetLiveInSet(bb)); !it.Done();
        it.Advance()) {
     int live = it.Current();
+    if (IsLazyValue(live)) continue;
     const ValueDesc& value_desc = ref_pred_impl->GetValue(live);
     if (value_desc.type != ValueType::LLVMValue) {
       block_impl->SetValue(live, value_desc);
@@ -1246,6 +1259,16 @@ LType AnonImpl::GetMachineRepresentationType(Representation rep) {
   return type;
 }
 
+LType AnonImpl::DeduceReturnType() {
+  ReturnRepresentationDeducer deducer(*this);
+  Representation rep = deducer.Deduce();
+  if (rep == kNoRepresentation) {
+    // must have only throw il.
+    return output().tagged_type();
+  }
+  return GetMachineRepresentationType(rep);
+}
+
 LValue AnonImpl::TaggedToWord(LValue v) {
   EMASSERT(typeOf(v) == output().tagged_type());
   return output().buildCast(LLVMPtrToInt, v, output().repo().intPtr);
@@ -1528,9 +1551,9 @@ void AnonImpl::StoreIntoArray(Instruction* instr,
   diamond.BuildRight([&]() {
     // None Smi case
     LValue object_tag = LoadFieldFromOffset(
-        object, compiler::target::Object::tags_offset(), output().repo().int8);
+        object, compiler::target::Object::tags_offset(), output().repo().ref8);
     LValue value_tag = LoadFieldFromOffset(
-        value, compiler::target::Object::tags_offset(), output().repo().int8);
+        value, compiler::target::Object::tags_offset(), output().repo().ref8);
     LValue and_value = output().buildAnd(
         value_tag, output().buildShr(
                        object_tag,
@@ -1843,12 +1866,7 @@ CallResolver::CallResolverParameter::CallResolverParameter(
     std::unique_ptr<CallSiteInfo> _callinfo)
     : call_instruction(instr),
       instruction_size(_instruction_size),
-      callsite_info(std::move(_callinfo)),
-      second_return(false) {}
-
-void CallResolver::CallResolverParameter::set_second_return(bool s) {
-  second_return = s;
-}
+      callsite_info(std::move(_callinfo)) {}
 
 CallResolver::CallResolver(
     AnonImpl& impl,
@@ -1872,8 +1890,10 @@ void CallResolver::SetGParameter(int reg, LValue val) {
 
 void CallResolver::AddStackParameter(LValue v) {
   parameters_.emplace_back(v);
-  EMASSERT(parameters_.size() - kV8CCRegisterParameterCount <=
-           call_resolver_parameter_.callsite_info->stack_parameter_count());
+  EMASSERT(
+      parameters_.size() - kV8CCRegisterParameterCount <=
+      ((call_resolver_parameter_.callsite_info->return_on_stack() ? 1 : 0) +
+       call_resolver_parameter_.callsite_info->stack_parameter_count()));
 }
 
 LValue CallResolver::GetStackParameter(size_t i) {
@@ -1885,8 +1905,10 @@ LValue CallResolver::GetStackParameter(size_t i) {
 LValue CallResolver::BuildCall() {
   EMASSERT(call_resolver_parameter_.callsite_info->type() !=
            CallSiteInfo::CallTargetType::kUnspecify);
-  EMASSERT(parameters_.size() - kV8CCRegisterParameterCount ==
-           call_resolver_parameter_.callsite_info->stack_parameter_count());
+  EMASSERT(
+      parameters_.size() - kV8CCRegisterParameterCount ==
+      ((call_resolver_parameter_.callsite_info->return_on_stack() ? 1 : 0) +
+       call_resolver_parameter_.callsite_info->stack_parameter_count()));
   EMASSERT(call_resolver_parameter_.callsite_info->type() !=
                CallSiteInfo::CallTargetType::kCodeObject ||
            !LLVMIsUndef(parameters_[static_cast<int>(CODE_REG)]));
@@ -1923,9 +1945,8 @@ void CallResolver::ExtractCallInfo() {
 }
 
 void CallResolver::GenerateStatePointFunction() {
-  return_type_ = call_resolver_parameter_.second_return
-                     ? output().tagged_pair()
-                     : output().tagged_type();
+  return_type_ = impl().GetMachineRepresentationType(
+      call_resolver_parameter_.call_instruction->representation());
   std::vector<LType> operand_value_types;
   for (LValue param : parameters_) {
     operand_value_types.emplace_back(typeOf(param));
@@ -2120,6 +2141,20 @@ void ComparisonResolver::VisitStrictCompare(StrictCompareInstr* instr) {
   }
 }
 
+ReturnRepresentationDeducer::ReturnRepresentationDeducer(AnonImpl& impl)
+    : FlowGraphVisitor(impl.flow_graph()->reverse_postorder()),
+      rep_(kNoRepresentation) {}
+
+void ReturnRepresentationDeducer::VisitReturn(ReturnInstr* instr) {
+  Definition* def = instr->value()->definition();
+  rep_ = def->representation();
+}
+
+Representation ReturnRepresentationDeducer::Deduce() {
+  VisitBlocks();
+  return rep_;
+}
+
 static LLVMIntPredicate TokenKindToSmiCondition(Token::Kind kind) {
   switch (kind) {
     case Token::kEQ:
@@ -2169,8 +2204,8 @@ void ComparisonResolver::VisitEqualityCompare(EqualityCompareInstr* instr) {
         output().buildICmp(TokenKindToSmiCondition(instr->kind()),
                            impl().SmiUntag(left), impl().SmiUntag(right));
   } else if (instr->operation_cid() == kMintCid) {
-    EMASSERT(typeOf(left) == output().repo().intPtr);
-    EMASSERT(typeOf(right) == output().repo().intPtr);
+    EMASSERT(typeOf(left) == output().repo().int64);
+    EMASSERT(typeOf(right) == output().repo().int64);
     cmp_value =
         output().buildICmp(TokenKindToSmiCondition(instr->kind()), left, right);
   } else {
@@ -2319,6 +2354,9 @@ void AssemblerResolver::Bind(Label& label) {
 }
 
 LValue AssemblerResolver::End() {
+  EMASSERT(
+      (LLVMGetBasicBlockTerminator(output().getInsertionBlock()) != nullptr) &&
+      "current bb has not yet been terminated");
   output().positionToBBEnd(merge_);
   impl().SetCurrentBlockContinuation(merge_);
 
@@ -2423,33 +2461,35 @@ IRTranslator::IRTranslator(FlowGraph* flow_graph, Precompiler* precompiler)
     ParameterInstr* param = def->AsParameter();
     if (param) params.emplace_back(param);
   }
-  std::sort(params.begin(), params.end(),
-            [](ParameterInstr* lhs, ParameterInstr* rhs) {
-              return lhs->index() < rhs->index();
-            });
-  int i = params.size();
-  EMASSERT(i == flow_graph->num_direct_parameters());
-  for (auto it = params.rbegin(); it != params.rend(); ++it, --i) {
-    ParameterInstr* param = *it;
+  EMASSERT(params.size() ==
+           static_cast<size_t>(flow_graph->num_direct_parameters()));
+  for (ParameterInstr* param : params) {
+    int loc = param->index() + 1;
     switch (param->representation()) {
       case kUnboxedInt64:
-        parameter_desc.emplace_back(-i, int64_type);
+        parameter_desc.emplace_back(-loc, int64_type);
         break;
       case kTagged:
-        parameter_desc.emplace_back(-i, tagged_type);
+        parameter_desc.emplace_back(-loc, tagged_type);
         break;
       default:
-        UNREACHABLE();
+        impl().output_.reset();
+        impl().compiler_state_.reset();
+        THR_Print("function %s will not compile for param: %s\n",
+                  flow_graph->parsed_function().function().ToCString(),
+                  param->ToCString());
+        return;
     }
   }
   // init output().
-  output().initializeBuild(parameter_desc);
+  output().initializeBuild(parameter_desc, impl().DeduceReturnType());
 }
 
 IRTranslator::~IRTranslator() {}
 
 void IRTranslator::Translate() {
 #if 1
+  if (!impl().output_) return;
   impl().liveness().Analyze();
   VisitBlocks();
   impl().End();
@@ -2557,6 +2597,9 @@ void IRTranslator::VisitPhi(PhiInstr* instr) {
   if (should_add_to_tf_phi_worklist)
     impl().phi_rebuild_worklist_.push_back(impl().current_bb_);
   block_impl->SetLLVMValue(instr->ssa_temp_index(), phi);
+  if (instr->HasPairRepresentation())
+    block_impl->SetLLVMValue(instr->ssa_temp_index() + 1,
+                             LLVMGetUndef(output().repo().boolean));
 }
 
 void IRTranslator::VisitRedefinition(RedefinitionInstr* instr) {
@@ -2642,16 +2685,24 @@ void IRTranslator::VisitNativeReturn(NativeReturnInstr* instr) {
 
 void IRTranslator::VisitThrow(ThrowInstr* instr) {
   impl().SetDebugLine(instr);
+  LValue exception = impl().GetLLVMValue(instr->exception());
+  impl().PushArgument(exception);
   impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
                              kThrowRuntimeEntry, 1, false);
   output().buildCall(output().repo().trapIntrinsic());
+  output().buildRetUndef();
 }
 
 void IRTranslator::VisitReThrow(ReThrowInstr* instr) {
   impl().SetDebugLine(instr);
+  LValue exception = impl().GetLLVMValue(instr->exception());
+  impl().PushArgument(exception);
+  LValue stack_trace = impl().GetLLVMValue(instr->stacktrace());
+  impl().PushArgument(stack_trace);
   impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
                              kReThrowRuntimeEntry, 2, false);
   output().buildCall(output().repo().trapIntrinsic());
+  output().buildRetUndef();
 }
 
 void IRTranslator::VisitStop(StopInstr* instr) {
@@ -3129,7 +3180,7 @@ void IRTranslator::VisitLoadCodeUnits(LoadCodeUnitsInstr* instr) {
 void IRTranslator::VisitStoreIndexed(StoreIndexedInstr* instr) {
   impl().SetDebugLine(instr);
   LValue array = impl().GetLLVMValue(instr->array());
-  LValue index = impl().GetLLVMValue(instr->index());
+  LValue index = impl().TaggedToWord(impl().GetLLVMValue(instr->index()));
   LValue value = impl().GetLLVMValue(instr->value());
   const intptr_t shift =
       Utils::ShiftForPowerOfTwo(instr->index_scale()) - kSmiTagShift;
@@ -3424,16 +3475,22 @@ void IRTranslator::VisitAllocateObject(AllocateObjectInstr* instr) {
 void IRTranslator::VisitLoadField(LoadFieldInstr* instr) {
   impl().SetDebugLine(instr);
   LValue instance = impl().GetLLVMValue(instr->instance());
-  LValue boxed =
-      impl().LoadFieldFromOffset(instance, instr->slot().offset_in_bytes());
+  intptr_t offset_in_bytes = instr->slot().offset_in_bytes();
   if (instr->IsUnboxedLoad()) {
+    if (instr->slot().field().is_non_nullable_integer()) {
+      LValue value = impl().LoadFieldFromOffset(instance, offset_in_bytes,
+                                                output().repo().ref64);
+      impl().SetLLVMValue(instr, value);
+      return;
+    }
     const intptr_t cid = instr->slot().field().UnboxedFieldCid();
     LValue value;
+    EMASSERT(FLAG_precompiled_mode && "LLVM must in precompiled mode");
     switch (cid) {
       case kDoubleCid:
-        value = impl().LoadFieldFromOffset(
-            boxed, compiler::target::Double::value_offset(),
-            output().repo().refDouble);
+        value = impl().LoadFieldFromOffset(instance, offset_in_bytes,
+                                           output().repo().refDouble);
+        ;
         break;
       case kFloat32x4Cid:
         EMASSERT("kFloat32x4Cid not supported" && false);
@@ -3452,7 +3509,8 @@ void IRTranslator::VisitLoadField(LoadFieldInstr* instr) {
     // support after call implementation.
     UNREACHABLE();
   }
-  impl().SetLLVMValue(instr, boxed);
+  LValue value = impl().LoadFieldFromOffset(instance, offset_in_bytes);
+  impl().SetLLVMValue(instr, value);
 }
 
 void IRTranslator::VisitLoadUntagged(LoadUntaggedInstr* instr) {
@@ -4331,9 +4389,9 @@ void IRTranslator::VisitShiftInt64Op(ShiftInt64OpInstr* instr) {
 
   LValue left = impl().GetLLVMValue(instr->left());
   LValue right = impl().GetLLVMValue(instr->right());
+  EMASSERT(typeOf(left) == output().repo().int64);
+  EMASSERT(typeOf(right) == output().repo().int64);
 
-  // only support the constant shift now.
-  EMASSERT(instr->right()->BindsToConstant());
   LValue result;
 
   switch (instr->op_kind()) {
@@ -4392,11 +4450,13 @@ void IRTranslator::VisitGenericCheckBound(GenericCheckBoundInstr* instr) {
   }
   LValue cmp = output().buildICmp(LLVMIntUGE, index, length);
   resolver.BranchIf(impl().ExpectFalse(cmp), slow_path);
+  resolver.GotoMerge();
   resolver.Bind(slow_path);
   impl().PushArgument(length);
   impl().PushArgument(index);
   impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
                              kRangeErrorRuntimeEntry, 2, false);
+  resolver.GotoMerge();
   resolver.End();
 }
 
@@ -4490,13 +4550,10 @@ static bool IsPowerOfTwoKind(intptr_t v1, intptr_t v2) {
 }
 
 void IRTranslator::VisitIfThenElse(IfThenElseInstr* instr) {
-  ComparisonInstr* compare = instr->comparison();
-  if (!impl().current_bb_impl()->IsDefined(compare)) {
-    compare->Accept(this);
-  }
-  EMASSERT(impl().current_bb_impl()->IsDefined(compare));
+  ComparisonResolver resolver(impl());
+  instr->comparison()->Accept(&resolver);
+  LValue cmp_value = resolver.result();
   impl().SetDebugLine(instr);
-  LValue cmp_value = impl().GetLLVMValue(compare->ssa_temp_index());
 
   intptr_t true_value = instr->if_true();
   intptr_t false_value = instr->if_false();
@@ -4645,7 +4702,7 @@ void IRTranslator::VisitBoxUint32(BoxUint32Instr* instr) {
 }
 
 void IRTranslator::VisitUnboxUint32(UnboxUint32Instr* instr) {
-  VisitUnbox(instr);
+  VisitUnboxInteger32(instr);
 }
 
 void IRTranslator::VisitBoxInt32(BoxInt32Instr* instr) {
@@ -4657,7 +4714,7 @@ void IRTranslator::VisitBoxInt32(BoxInt32Instr* instr) {
 }
 
 void IRTranslator::VisitUnboxInt32(UnboxInt32Instr* instr) {
-  VisitUnbox(instr);
+  VisitUnboxInteger32(instr);
 }
 
 void IRTranslator::VisitIntConverter(IntConverterInstr* instr) {
@@ -4749,6 +4806,28 @@ void IRTranslator::VisitDispatchTableCall(DispatchTableCallInstr* instr) {
   // compiler->AddDispatchTableCallTarget(selector());
   LValue v = resolver.BuildCall();
   impl().SetLLVMValue(instr, v);
+}
+
+void IRTranslator::VisitUnboxInteger32(UnboxInteger32Instr* instr) {
+  impl().SetDebugLine(instr);
+  LValue value = impl().GetLLVMValue(instr->value());
+  const intptr_t value_cid = instr->value()->Type()->ToCid();
+  LValue result;
+  if (value_cid == kSmiCid) {
+    result = impl().SmiUntag(value);
+  } else if (value_cid == kMintCid) {
+    result = impl().LoadFieldFromOffset(
+        value, compiler::target::Mint::value_offset(), output().repo().ref32);
+  } else {
+    EMASSERT(!instr->CanDeoptimize());
+    AssemblerResolver resolver(impl());
+    resolver.GotoMergeWithValueIf(impl().ExpectTrue(impl().TstSmi(value)),
+                                  impl().SmiUntag(value));
+    resolver.GotoMergeWithValue(impl().LoadFieldFromOffset(
+        value, compiler::target::Mint::value_offset(), output().repo().ref32));
+    result = resolver.End();
+  }
+  impl().SetLLVMValue(instr, result);
 }
 }  // namespace dart_llvm
 }  // namespace dart

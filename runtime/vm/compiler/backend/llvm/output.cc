@@ -22,6 +22,7 @@ Output::Output(CompilerState& state)
       args_desc_(nullptr),
       pp_(nullptr),
       bitcast_space_(nullptr),
+      return_type_(nullptr),
       subprogram_(nullptr),
       stack_parameter_count_(0) {}
 
@@ -31,12 +32,14 @@ Output::~Output() {
 }
 
 // parameter layout: register parameter, stack parameter, float point parameter
-void Output::initializeBuild(const RegisterParameterDesc& registerParameters) {
+void Output::initializeBuild(const RegisterParameterDesc& registerParameters,
+                             LType return_type) {
   EMASSERT(!builder_);
   EMASSERT(!prologue_);
   builder_ = LLVMCreateBuilderInContext(state_.context_);
   di_builder_ = LLVMCreateDIBuilderDisallowUnresolved(state_.module_);
-  initializeFunction(registerParameters);
+  return_type_ = return_type;
+  initializeFunction(registerParameters, return_type);
   // FIXME: Add V8 to LLVM.
   LLVMSetGC(state_.function_, "coreclr");
 
@@ -97,27 +100,12 @@ void Output::initializeBuild(const RegisterParameterDesc& registerParameters) {
   bitcast_space_ = buildAlloca(arrayType(repo().int8, 16));
 }
 
-void Output::initializeFunction(
-    const RegisterParameterDesc& registerParameters) {
-#if 0
-  std::vector<LType> params_types = {tagged_type(),
-                                     tagged_type(),
-                                     tagged_type(),
-                                     tagged_type(),
-                                     tagged_type(),
-                                     tagged_type(),
-                                     tagged_type(),
-                                     tagged_type(),
-                                     tagged_type(),
-                                     tagged_type(),
-                                     pointerType(tagged_type()),
-                                     pointerType(repo().ref8)};
-#endif
+void Output::initializeFunction(const RegisterParameterDesc& registerParameters,
+                                LType return_type) {
   std::vector<LType> params_types;
   params_types.resize(kV8CCRegisterParameterCount, tagged_type());
   params_types[static_cast<int>(PP)] = pointerType(tagged_type());
   params_types[static_cast<int>(THR)] = repo().ref8;
-  params_types[static_cast<int>(FP)] = repo().ref8;
   EMASSERT(params_types.size() == kV8CCRegisterParameterCount);
   std::vector<LType> float_point_parameter_types;
   LType double_type = repo().doubleType;
@@ -157,7 +145,7 @@ void Output::initializeFunction(
       std::make_move_iterator(float_point_parameter_types.end()));
   state_.function_ =
       addFunction(state_.function_name_.c_str(),
-                  functionType(tagged_type(), params_types.data(),
+                  functionType(return_type, params_types.data(),
                                params_types.size(), NotVariadic));
   setFunctionCallingConv(state_.function_, LLVMV8CallConv);
 
@@ -370,6 +358,10 @@ LValue Output::buildRetVoid(void) {
 
 void Output::buildReturnForTailCall() {
   buildUnreachable();
+}
+
+void Output::buildRetUndef() {
+  dart_llvm::buildRet(builder_, LLVMGetUndef(return_type_));
 }
 
 LValue Output::buildCast(LLVMOpcode Op, LLVMValueRef Val, LLVMTypeRef DestTy) {
