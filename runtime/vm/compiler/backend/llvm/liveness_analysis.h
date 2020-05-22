@@ -21,11 +21,14 @@ class SSALivenessAnalysis : public dart::LivenessAnalysis {
  public:
   explicit SSALivenessAnalysis(const FlowGraph& flow_graph);
 
+  inline bool broken() const { return broken_; }
+
  private:
   // Compute initial values for live-out, kill and live-in sets.
   void ComputeInitialSets() override;
 
   GraphEntryInstr* graph_entry_;
+  bool broken_;
 };
 using LiveValuesMap = std::unordered_map<Instruction*, BitVector*>;
 
@@ -35,9 +38,10 @@ class LivenessAnalysis final {
  public:
   explicit LivenessAnalysis(FlowGraph* flow_graph);
   ~LivenessAnalysis() = default;
-  void Analyze();
+  bool Analyze();
 
   BitVector* GetLiveInSet(BlockEntryInstr*) const;
+  BitVector* GetLiveOutSet(BlockEntryInstr*) const;
   BitVector* GetCallOutAt(Instruction* at) const;
 
  private:
@@ -49,7 +53,6 @@ class LivenessAnalysis final {
   void Dump();
   Zone* zone() const;
 
- private:
   FlowGraph* flow_graph_;
   SSALivenessAnalysis liveness_;
   LiveValuesMap call_out_map_;

@@ -586,9 +586,7 @@ COMPILER_PASS(RoundTripSerialization, {
 #if defined(DART_ENABLE_LLVM_COMPILER)
 COMPILER_PASS(IRTranslate, {
   const Function& function = flow_graph->parsed_function().function();
-  const bool needs_args_descriptor =
-      function.HasOptionalParameters() || function.IsGeneric();
-  if (!(function.IsDynamicFunction() && !needs_args_descriptor)) {
+  if (!function.IsClosureFunction()) {
     dart_llvm::IRTranslator ir_translator(flow_graph, state->precompiler);
     ir_translator.Translate();
   } else {

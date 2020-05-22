@@ -15,12 +15,14 @@ namespace dart_llvm {
 LivenessAnalysis::LivenessAnalysis(FlowGraph* flow_graph)
     : flow_graph_(flow_graph), liveness_(*flow_graph) {}
 
-void LivenessAnalysis::Analyze() {
+bool LivenessAnalysis::Analyze() {
   liveness_.Analyze();
+  if (liveness_.broken()) return false;
   AnalyzeCallOut();
 #if LLVMLOG_LEVEL >= 20
   Dump();
 #endif
+  return true;
 }
 
 template <typename Functor>
@@ -119,6 +121,10 @@ BitVector* LivenessAnalysis::GetLiveInSet(BlockEntryInstr* block) const {
   return liveness_.GetLiveInSet(block);
 }
 
+BitVector* LivenessAnalysis::GetLiveOutSet(BlockEntryInstr* block) const {
+  return liveness_.GetLiveOutSet(block);
+}
+
 BitVector* LivenessAnalysis::CalculateLiveness(Instruction* at) const {
   BlockEntryInstr* block = at->GetBlock();
   auto f = [&](Instruction* current, BitVector* live) {
@@ -131,7 +137,8 @@ BitVector* LivenessAnalysis::CalculateLiveness(Instruction* at) const {
 SSALivenessAnalysis::SSALivenessAnalysis(const FlowGraph& flow_graph)
     : LivenessAnalysis(flow_graph.max_virtual_register_number(),
                        flow_graph.postorder()),
-      graph_entry_(flow_graph.graph_entry()) {}
+      graph_entry_(flow_graph.graph_entry()),
+      broken_(false) {}
 
 static intptr_t ToSecondPairVreg(intptr_t vreg) {
   // Map vreg to its pair vreg.
@@ -207,7 +214,7 @@ void SSALivenessAnalysis::ComputeInitialSets() {
             // MaterializeObject instruction is not in the graph.
             // Treat its inputs as part of the environment.
             // DeepLiveness(defn->AsMaterializeObject(), live_in);
-            UNREACHABLE();
+            broken_ = true;
           } else if (!defn->IsPushArgument() && !defn->IsConstant()) {
             live_in->Add(defn->ssa_temp_index());
             if (defn->HasPairRepresentation()) {

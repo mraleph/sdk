@@ -4676,6 +4676,9 @@ class StaticCallInstr : public TemplateDartCall<0> {
   Code::EntryKind entry_kind_ = Code::EntryKind::kNormal;
 
   AliasIdentity identity_;
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  friend class dart::dart_llvm::IRTranslator;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(StaticCallInstr);
 };

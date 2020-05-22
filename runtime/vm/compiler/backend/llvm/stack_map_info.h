@@ -79,6 +79,7 @@ class CallSiteInfo final : public StackMapInfo {
 
 #undef CALLSITE_WAPPER
 #undef CALLSITE_ACCESSOR
+  void MarkParameterBit(int which, bool set);
 
  private:
   CallTargetType type_;
@@ -96,6 +97,8 @@ class CallSiteInfo final : public StackMapInfo {
     };
     const Code* code_;
   };
+  int64_t parameter_bits_;
+  int valid_bits_;
   bool is_tailcall_;
   bool return_on_stack_;
 };

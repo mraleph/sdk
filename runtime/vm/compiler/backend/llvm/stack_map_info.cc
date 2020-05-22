@@ -17,9 +17,15 @@ CallSiteInfo::CallSiteInfo()
       stack_parameter_count_(0),
       try_index_(kInvalidTryIndex),
       kind_(RawPcDescriptors::kOther),
+      parameter_bits_(0),
+      valid_bits_(0),
       is_tailcall_(false),
       return_on_stack_(false) {}
 
+void CallSiteInfo::MarkParameterBit(int which, bool set) {
+  if (set) parameter_bits_ |= 1ULL << which;
+  if (which + 1 > valid_bits_) valid_bits_ = which + 1;
+}
 }  // namespace dart_llvm
 }  // namespace dart
 #endif  // DART_ENABLE_LLVM_COMPILER
