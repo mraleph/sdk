@@ -28,6 +28,9 @@ CommonValues::CommonValues(LContext context)
       tagged_type(
           LLVMPointerType(LLVMStructCreateNamed(context, "TaggedStruct"), 1)),
       meta_type(LLVMMetadataTypeInContext(context)),
+      int32x4(LLVMVectorType(int32, 4)),
+      float32x4(LLVMVectorType(floatType, 4)),
+      float64x2(LLVMVectorType(doubleType, 2)),
       booleanTrue(constInt(boolean, true, ZeroExtend)),
       booleanFalse(constInt(boolean, false, ZeroExtend)),
       int8Zero(constInt(int8, 0, SignExtend)),

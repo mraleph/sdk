@@ -35,6 +35,9 @@ class CommonValues {
   const LType refDouble;
   const LType tagged_type;
   const LType meta_type;
+  const LType int32x4;
+  const LType float32x4;
+  const LType float64x2;
   const LValue booleanTrue;
   const LValue booleanFalse;
   const LValue int8Zero;
