@@ -2070,6 +2070,9 @@ void CallResolver::EmitExceptionVars() {
     addIncoming(block_impl->exception_val, &exception_val,
                 &exception_native_bb_, 1);
     FlowGraph* flow_graph = impl().flow_graph();
+    // reset position in case lazy value generate code.
+    LValue terminator = LLVMGetBasicBlockTerminator(from_block_);
+    output().positionBefore(terminator);
     for (intptr_t i = 0; i < flow_graph->variable_count(); ++i) {
       auto found = exception_params.find(i);
       if (found == exception_params.end()) continue;
@@ -2077,7 +2080,7 @@ void CallResolver::EmitExceptionVars() {
       Definition* def = use->definition();
       LValue val;
       if (def->representation() == kTagged) {
-        val = impl().current_bb_impl()->GetLLVMValue(use);
+        val = impl().GetLLVMValue(use);
       } else {
         // We can't handle this function anymore.
         val = LLVMGetUndef(output().tagged_type());
@@ -4263,11 +4266,26 @@ void IRTranslator::VisitUnbox(UnboxInstr* instr) {
                                   output().repo().floatType);
       }
 
-      case kUnboxedFloat32x4:
-      case kUnboxedFloat64x2:
+      case kUnboxedFloat32x4: {
+        LValue gep = output().buildGEPWithByteOffset(
+            value,
+            Boxing::ValueOffset(instr->representation()) - kHeapObjectTag,
+            pointerType(output().repo().float32x4));
+        return output().buildLoad(gep);
+      }
+      case kUnboxedFloat64x2: {
+        LValue gep = output().buildGEPWithByteOffset(
+            value,
+            Boxing::ValueOffset(instr->representation()) - kHeapObjectTag,
+            pointerType(output().repo().float64x2));
+        return output().buildLoad(gep);
+      }
       case kUnboxedInt32x4: {
-        UNREACHABLE();
-        break;
+        LValue gep = output().buildGEPWithByteOffset(
+            value,
+            Boxing::ValueOffset(instr->representation()) - kHeapObjectTag,
+            pointerType(output().repo().int32x4));
+        return output().buildLoad(gep);
       }
 
       default:
@@ -4321,6 +4339,9 @@ void IRTranslator::VisitUnbox(UnboxInstr* instr) {
   };
   if (instr->SpeculativeModeOfInputs() == UnboxInstr::kNotSpeculative) {
     switch (instr->representation()) {
+      case kUnboxedInt32x4:
+      case kUnboxedFloat32x4:
+      case kUnboxedFloat64x2:
       case kUnboxedDouble:
       case kUnboxedFloat: {
         result = EmitLoadFromBox();
@@ -4843,8 +4864,10 @@ void IRTranslator::VisitDeoptimize(DeoptimizeInstr* instr) {
 }
 
 void IRTranslator::VisitSimdOp(SimdOpInstr* instr) {
-  LLVMLOGE("unsupported IR: %s\n", __FUNCTION__);
-  UNREACHABLE();
+  // AOT will not handle it.
+  impl().set_exception_occured();
+  impl().SetLLVMValue(instr, LLVMGetUndef(impl().GetMachineRepresentationType(
+                                 instr->representation())));
 }
 
 void IRTranslator::VisitReachabilityFence(ReachabilityFenceInstr*) {}
