@@ -36,6 +36,31 @@ inline uint64_t DecodeULEB128(const uint8_t* p,
   if (n) *n = (unsigned)(p - orig_p);
   return Value;
 }
+
+inline int64_t DecodeSLEB128(const uint8_t* p,
+                             unsigned* n = nullptr,
+                             const uint8_t* end = nullptr,
+                             const char** error = nullptr) {
+  const uint8_t* orig_p = p;
+  int64_t Value = 0;
+  unsigned Shift = 0;
+  uint8_t Byte;
+  if (error) *error = nullptr;
+  do {
+    if (end && p == end) {
+      if (error) *error = "malformed sleb128, extends past end";
+      if (n) *n = (unsigned)(p - orig_p);
+      return 0;
+    }
+    Byte = *p++;
+    Value |= (int64_t(Byte & 0x7f) << Shift);
+    Shift += 7;
+  } while (Byte >= 128);
+  // Sign extend negative numbers.
+  if (Byte & 0x40) Value |= (-1ULL) << Shift;
+  if (n) *n = (unsigned)(p - orig_p);
+  return Value;
+}
 }  // namespace
 
 template <typename T>
@@ -257,6 +282,20 @@ uint64_t DataView::ReadULEB128(unsigned& offset, const uint8_t* end) {
     EMASSERT(!error);
   }
   offset += n;
+  bytes_read_ = n;
+  return result;
+}
+
+int64_t DataView::ReadSLEB128(unsigned& offset, const uint8_t* end) {
+  const char* error;
+  unsigned n;
+  int64_t result = DecodeSLEB128(data_ + offset, &n, end, &error);
+  if (error) {
+    LLVMLOGE("DecodeSLEB128: %s\n", error);
+    EMASSERT(!error);
+  }
+  offset += n;
+  bytes_read_ = n;
   return result;
 }
 }  // namespace dart_llvm

@@ -721,7 +721,6 @@ void AnonImpl::End() {
   output().buildBr(GetNativeBB(flow_graph_->graph_entry()));
   output().finalize();
   output().EmitDebugInfo(std::move(debug_instrs_));
-  LLVMDumpModule(compiler_state().module_);
   Compile(compiler_state());
 }
 

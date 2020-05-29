@@ -2,7 +2,7 @@
 
 #include "vm/compiler/backend/llvm/output.h"
 #if defined(DART_ENABLE_LLVM_COMPILER)
-
+#define FEATURE_DEBUG_INFO 1
 #include <llvm-c/DebugInfo.h>
 
 #include "vm/compiler/backend/llvm/compiler_state.h"
@@ -532,7 +532,7 @@ void Output::setDebugInfo(intptr_t linenum, const char* source_file_name) {
                                                 file_name_meta, 0);
   }
   LLVMMetadataRef loc = LLVMDIBuilderCreateDebugLocation(
-      state_.context_, linenum, 0, scope, nullptr);
+      state_.context_, linenum, 1, scope, nullptr);
   LValue loc_value = LLVMMetadataAsValue(state_.context_, loc);
   LLVMSetCurrentDebugLocation(builder_, loc_value);
 #endif

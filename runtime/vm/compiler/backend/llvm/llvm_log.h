@@ -10,13 +10,13 @@
     __my_assert_fail(#p, __FILE__, __LINE__);                                  \
   }
 
-#if LLVMLOG_LEVEL >= 1
+#if LLVMLOG_LEVEL >= 10
 #define LLVMLOGV(...) __my_log('V', __VA_ARGS__)
 #endif  // DEFINING LLVMLOGV
 
 #if LLVMLOG_LEVEL >= 4
 // debug log
-#define LOGD(...) __my_log('D', __VA_ARGS__)
+#define LLVMLOGD(...) __my_log('D', __VA_ARGS__)
 #endif
 
 #if LLVMLOG_LEVEL >= 5
@@ -44,8 +44,8 @@ void __my_assert_fail(const char* msg, const char* file_name, int lineno)
 #define LLVMLOGV(...)
 #endif
 
-#ifndef LOGD
-#define LOGD(...)
+#ifndef LLVMLOGD
+#define LLVMLOGD(...)
 #endif
 
 #ifndef LOGP

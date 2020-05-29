@@ -26,7 +26,7 @@ bool DwarfLineMapper::ReadHeader() {
     offset_length_ = 4;
   }
   instr_end_ = offset + cu_length_;
-  cu_version_ = view.read<uint32_t>(offset);
+  cu_version_ = view.read<uint16_t>(offset);
   switch (cu_version_) {
     case 2:
     case 3:
@@ -108,7 +108,7 @@ bool DwarfLineMapper::ProcessInstrs() {
             state_machine_regs_.op_index,
             verbose_view && addrdelta ? " (reset view)" : "");
       }
-      adv = (op_code % line_range_) + line_base_;
+      adv = static_cast<int>(op_code % line_range_) + line_base_;
       state_machine_regs_.line += adv;
       LLVMLOGV(" and Line by %ld to %d", adv, state_machine_regs_.line);
       if (verbose_view || state_machine_regs_.view)
@@ -118,7 +118,7 @@ bool DwarfLineMapper::ProcessInstrs() {
     } else
       switch (op_code) {
         case DW_LNS_extended_op:
-          EMASSERT(false && "DW_LNS_extended_op not support");
+          ProcessExtendedLineOp();
           break;
 
         case DW_LNS_copy:
@@ -154,7 +154,7 @@ bool DwarfLineMapper::ProcessInstrs() {
           break;
 
         case DW_LNS_advance_line:
-          adv = view.ReadULEB128(offset, end);
+          adv = view.ReadSLEB128(offset, end);
           state_machine_regs_.line += adv;
           LLVMLOGV("  Advance Line by %ld to %d\n", adv,
                    state_machine_regs_.line);
@@ -241,208 +241,126 @@ bool DwarfLineMapper::ProcessInstrs() {
 }
 
 bool DwarfLineMapper::ProcessExtendedLineOp() {
-#if 0
   uint8_t op_code;
-  unsigned int bytes_read;
   uint64_t len;
-  unsigned char *name;
-  unsigned char *orig_data = data;
+  const char* name;
   unsigned long adr;
   DataView view(start_);
   unsigned offset_old = offset_current_;
+  const uint8_t* end = start_ + instr_end_;
+  size_t bytes_read;
 
-  len = view.ReadULEB128(offset_current_, start_ + instr_end_);
+  len = view.ReadULEB128(offset_current_, end);
 
-  if (len == 0 || offset_current_ == instr_end_ || len > (uintptr_t) (instr_end_ - offset_current_))
-    {
-      LLVMLOGE(("Badly formed extended line op encountered!\n");
-      return false;
-    }
-  bytes_read = offset_current_ - offset_old
+  if (len == 0 || offset_current_ == instr_end_ ||
+      len > (uintptr_t)(instr_end_ - offset_current_)) {
+    LLVMLOGE("Badly formed extended line op encountered!\n");
+    return false;
+  }
+  bytes_read = view.bytes_read();
   len += bytes_read;
   op_code = view.read<uint8_t>(offset_current_);
 
-  LOGI ("  Extended opcode %d: ", op_code);
+  LLVMLOGD("  Extended opcode %d: ", op_code);
 
-enum dwarf_line_number_x_ops
-  {
+  enum dwarf_line_number_x_ops {
     DW_LNE_end_sequence = 1,
     DW_LNE_set_address = 2,
     DW_LNE_define_file = 3,
     DW_LNE_set_discriminator = 4,
     /* HP extensions.  */
-    DW_LNE_HP_negate_is_UV_update      = 0x11,
-    DW_LNE_HP_push_context             = 0x12,
-    DW_LNE_HP_pop_context              = 0x13,
-    DW_LNE_HP_set_file_line_column     = 0x14,
-    DW_LNE_HP_set_routine_name         = 0x15,
-    DW_LNE_HP_set_sequence             = 0x16,
-    DW_LNE_HP_negate_post_semantics    = 0x17,
-    DW_LNE_HP_negate_function_exit     = 0x18,
+    DW_LNE_HP_negate_is_UV_update = 0x11,
+    DW_LNE_HP_push_context = 0x12,
+    DW_LNE_HP_pop_context = 0x13,
+    DW_LNE_HP_set_file_line_column = 0x14,
+    DW_LNE_HP_set_routine_name = 0x15,
+    DW_LNE_HP_set_sequence = 0x16,
+    DW_LNE_HP_negate_post_semantics = 0x17,
+    DW_LNE_HP_negate_function_exit = 0x18,
     DW_LNE_HP_negate_front_end_logical = 0x19,
-    DW_LNE_HP_define_proc              = 0x20,
-    DW_LNE_HP_source_file_correlation  = 0x80,
+    DW_LNE_HP_define_proc = 0x20,
+    DW_LNE_HP_source_file_correlation = 0x80,
 
     DW_LNE_lo_user = 0x80,
     DW_LNE_hi_user = 0xff
   };
 
-  switch (op_code)
-    {
+  switch (op_code) {
     case DW_LNE_end_sequence:
-      LOGI ("End of Sequence\n\n");
-      ResetStateMachine(is_stmt);
+      LLVMLOGD("End of Sequence\n\n");
+      ResetStateMachine(is_statment_);
       break;
 
     case DW_LNE_set_address:
       /* PR 17512: file: 002-100480-0.004.  */
-      if (len - bytes_read - 1 > 8)
-	{
-	  LLVMLOGV(_("Length (%d) of DW_LNE_set_address op is too long\n"),
-		len - bytes_read - 1);
-	  adr = 0;
-	}
-      else
-      adr = view.read_amount(len - bytes_read - 1);
-      LLVMLOGV ("set Address to 0x%x\n", adr);
-      state_machine_regs.address = adr;
-      state_machine_regs.view = 0;
-      state_machine_regs.op_index = 0;
+      if (len - bytes_read - 1 > 8) {
+        LLVMLOGV("Length (%lld) of DW_LNE_set_address op is too long\n",
+                 static_cast<long long>(len - bytes_read - 1));
+        adr = 0;
+      } else
+        adr = view.read_amount(offset_current_, len - bytes_read - 1);
+      adr = 0;
+      LLVMLOGV("set Address to 0x%lx\n", adr);
+      state_machine_regs_.address = adr;
+      state_machine_regs_.view = 0;
+      state_machine_regs_.op_index = 0;
       break;
 
     case DW_LNE_define_file:
-      ++state_machine_regs.last_file_entry;
+      ++state_machine_regs_.last_file_entry;
       LLVMLOGV("define new File Table entry\n");
-      LLVMLOGV ("  Entry\tDir\tTime\tSize\tName\n");
-      LLVMLOGV ("   %d\t", state_machine_regs.last_file_entry);
+      LLVMLOGV("  Entry\tDir\tTime\tSize\tName\n");
+      LLVMLOGV("   %d\t", state_machine_regs_.last_file_entry);
 
       {
-	size_t l;
+        size_t l;
 
-	name = data;
-	l = strnlen ((char *) data, end - data);
-	data += len + 1;
-	LLVMLOGV ("%s\t", dwarf_vmatoa ("u", read_uleb128 (data, & bytes_read, end)));
-	data += bytes_read;
-	LLVMLOGV ("%s\t", dwarf_vmatoa ("u", read_uleb128 (data, & bytes_read, end)));
-	data += bytes_read;
-	LLVMLOGV ("%s\t", dwarf_vmatoa ("u", read_uleb128 (data, & bytes_read, end)));
-	data += bytes_read;
-	LLVMLOGV ("%.*s\n\n", (int) l, name);
+        name = reinterpret_cast<const char*>(start_ + offset_current_);
+        l = strnlen(name, instr_end_ - offset_current_);
+        offset_current_ += len + 1;
+        uint64_t v0 = view.ReadULEB128(offset_current_, end);
+        uint64_t v1 = view.ReadULEB128(offset_current_, end);
+        uint64_t v2 = view.ReadULEB128(offset_current_, end);
+        (void)v0;
+        (void)v1;
+        (void)v2;
+        LLVMLOGV("%llu\t", static_cast<unsigned long long>(v0));
+        LLVMLOGV("%llu\t", static_cast<unsigned long long>(v1));
+        LLVMLOGV("%llu\t", static_cast<unsigned long long>(v2));
+        LLVMLOGV("%.*s\n\n", (int)l, name);
       }
 
-      if (((unsigned int) (data - orig_data) != len) || data == end)
-	warn (_("DW_LNE_define_file: Bad opcode length\n"));
+      if (((unsigned int)(offset_current_ - offset_old) != len) ||
+          offset_current_ == instr_end_)
+        LLVMLOGE("DW_LNE_define_file: Bad opcode length\n");
       break;
 
-    case DW_LNE_set_discriminator:
-      LLVMLOGV (_("set Discriminator to %s\n"),
-	      dwarf_vmatoa ("u", read_uleb128 (data, & bytes_read, end)));
-      break;
+    case DW_LNE_set_discriminator: {
+      uint64_t discriminator = view.ReadULEB128(offset_current_, end);
+      (void)discriminator;
+      LLVMLOGV("set Discriminator to %llu\n",
+               static_cast<unsigned long long>(discriminator));
+    } break;
 
-    /* HP extensions.  */
-    case DW_LNE_HP_negate_is_UV_update:
-      LLVMLOGV ("DW_LNE_HP_negate_is_UV_update\n");
-      break;
-    case DW_LNE_HP_push_context:
-      LLVMLOGV ("DW_LNE_HP_push_context\n");
-      break;
-    case DW_LNE_HP_pop_context:
-      LLVMLOGV ("DW_LNE_HP_pop_context\n");
-      break;
-    case DW_LNE_HP_set_file_line_column:
-      LLVMLOGV ("DW_LNE_HP_set_file_line_column\n");
-      break;
-    case DW_LNE_HP_set_routine_name:
-      LLVMLOGV ("DW_LNE_HP_set_routine_name\n");
-      break;
-    case DW_LNE_HP_set_sequence:
-      LLVMLOGV ("DW_LNE_HP_set_sequence\n");
-      break;
-    case DW_LNE_HP_negate_post_semantics:
-      LLVMLOGV ("DW_LNE_HP_negate_post_semantics\n");
-      break;
-    case DW_LNE_HP_negate_function_exit:
-      LLVMLOGV ("DW_LNE_HP_negate_function_exit\n");
-      break;
-    case DW_LNE_HP_negate_front_end_logical:
-      LLVMLOGV ("DW_LNE_HP_negate_front_end_logical\n");
-      break;
-    case DW_LNE_HP_define_proc:
-      LLVMLOGV ("DW_LNE_HP_define_proc\n");
-      break;
-    case DW_LNE_HP_source_file_correlation:
-      {
-	unsigned char *edata = data + len - bytes_read - 1;
+    default: {
+      unsigned int rlen = len - bytes_read - 1;
 
-	LLVMLOGV ("DW_LNE_HP_source_file_correlation\n");
-
-	while (data < edata)
-	  {
-	    unsigned int opc;
-
-	    opc = read_uleb128 (data, & bytes_read, edata);
-	    data += bytes_read;
-
-	    switch (opc)
-	      {
-	      case DW_LNE_HP_SFC_formfeed:
-		LLVMLOGV ("    DW_LNE_HP_SFC_formfeed\n");
-		break;
-	      case DW_LNE_HP_SFC_set_listing_line:
-		LLVMLOGV ("    DW_LNE_HP_SFC_set_listing_line (%s)\n",
-			dwarf_vmatoa ("u",
-				      read_uleb128 (data, & bytes_read, edata)));
-		data += bytes_read;
-		break;
-	      case DW_LNE_HP_SFC_associate:
-		LLVMLOGV ("    DW_LNE_HP_SFC_associate ");
-		LLVMLOGV ("(%s",
-			dwarf_vmatoa ("u",
-				      read_uleb128 (data, & bytes_read, edata)));
-		data += bytes_read;
-		LLVMLOGV (",%s",
-			dwarf_vmatoa ("u",
-				      read_uleb128 (data, & bytes_read, edata)));
-		data += bytes_read;
-		LLVMLOGV (",%s)\n",
-			dwarf_vmatoa ("u",
-				      read_uleb128 (data, & bytes_read, edata)));
-		data += bytes_read;
-		break;
-	      default:
-		LLVMLOGV (_("    UNKNOWN DW_LNE_HP_SFC opcode (%u)\n"), opc);
-		data = edata;
-		break;
-	      }
-	  }
-      }
-      break;
-
-    default:
-      {
-	unsigned int rlen = len - bytes_read - 1;
-
-	if (op_code >= DW_LNE_lo_user
-	    /* The test against DW_LNW_hi_user is redundant due to
+      if (op_code >= DW_LNE_lo_user
+          /* The test against DW_LNW_hi_user is redundant due to
 	       the limited range of the unsigned char data type used
 	       for op_code.  */
-	    /*&& op_code <= DW_LNE_hi_user*/)
-	  LLVMLOGV (_("user defined: "));
-	else
-	  LLVMLOGV (_("UNKNOWN: "));
-	LLVMLOGV (_("length %d ["), rlen);
-	for (; rlen; rlen--)
-	  LLVMLOGV (" %02x", *data++);
-	LLVMLOGV ("]\n");
-      }
-      break;
-    }
+          /*&& op_code <= DW_LNE_hi_user*/)
+        LLVMLOGV("user defined: ");
+      else
+        LLVMLOGV("UNKNOWN: ");
+      LLVMLOGV("length %d [", rlen);
+      for (; rlen; rlen--)
+        LLVMLOGV(" %02x", view.read<uint8_t>(offset_current_));
+      LLVMLOGV("]\n");
+    } break;
+  }
 
-  return len;
-#else
-  return false;
-#endif
+  return true;
 }
 
 void DwarfLineMapper::ResetStateMachine(int is_stmt) {

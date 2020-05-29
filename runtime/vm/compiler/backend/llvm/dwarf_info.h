@@ -17,7 +17,7 @@ class DwarfLineMapper {
   ~DwarfLineMapper();
   bool Process(const uint8_t* data);
   // offset, line map
-  inline const std::map<unsigned, unsigned>& GetMap() { return map_; }
+  inline const std::map<unsigned, unsigned>& GetMap() const { return map_; }
   void Dump();
 
  private:

@@ -14,6 +14,7 @@
 
 #include <memory>
 
+#include "vm/compiler/backend/il.h"
 #include "vm/compiler/backend/llvm/dwarf_info.h"
 
 #define SECTION_NAME_PREFIX "."
@@ -32,7 +33,9 @@ static const char* symbolLookupCallback(void* DisInfo,
   return nullptr;
 }
 
-static void disassemble(ByteBuffer& code) {
+static void disassemble(CompilerState& state,
+                        ByteBuffer& code,
+                        const DwarfLineMapper& mapper) {
   LLVMDisasmContextRef DCR = LLVMCreateDisasm(
       "armv8-unknown-unknown-v8", nullptr, 0, nullptr, symbolLookupCallback);
 
@@ -45,7 +48,14 @@ static void disassemble(ByteBuffer& code) {
   printf(
       "========================================================================"
       "========\n");
+  auto& debug_map = mapper.GetMap();
+  auto& debug_instrs_ = state.debug_instrs_;
   while (NumBytes != 0) {
+    auto found = debug_map.find(PC);
+    if (found != debug_map.end() && found->second) {
+      int index = found->second - 1;
+      printf("%s\n", debug_instrs_[index]->ToCString());
+    }
     size_t InstSize = LLVMDisasmInstruction(DCR, BytesP, NumBytes, PC,
                                             OutString, OutStringSize);
     if (InstSize == 0) {
@@ -67,10 +77,11 @@ static void disassemble(ByteBuffer& code) {
   LLVMDisasmDispose(DCR);
 }
 
-static DART_UNUSED void disassemble(CompilerState& state) {
+static DART_UNUSED void disassemble(CompilerState& state,
+                                    const DwarfLineMapper& mapper) {
   printf("Disassemble for function:%s\n", state.function_name_.c_str());
   for (auto& code : state.code_section_list_) {
-    disassemble(code);
+    disassemble(state, code, mapper);
   }
 }
 
@@ -159,7 +170,7 @@ void SaveObjectFile(const State& state) {
     return;
   }
   char file_name_buf[256];
-  snprintf(file_name_buf, 256, "%s.o", state.function_name_);
+  snprintf(file_name_buf, 256, "%s.o", state.function_name_.c_str());
   int fd = open(file_name_buf, O_WRONLY | O_CREAT | O_EXCL,
                 S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
   if (fd == -1) return;
@@ -229,10 +240,9 @@ void Compile(State& state) {
   SaveObjectFile(state);
 #endif  // defined(FEATURE_SAVE_OBJECT_FILE)
   LLVMDisposeExecutionEngine(engine);
-  disassemble(state);
   DwarfLineMapper mapper;
   mapper.Process(state.dwarf_line_->data());
-  mapper.Dump();
+  disassemble(state, mapper);
 }
 }  // namespace dart_llvm
 }  // namespace dart

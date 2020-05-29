@@ -20,12 +20,13 @@ struct CompilerState;
 
 class DataView {
  public:
-  explicit DataView(const uint8_t* data) : data_(data) {}
+  explicit DataView(const uint8_t* data) : data_(data), bytes_read_(0) {}
   template <typename T>
   T read(unsigned& off, bool littenEndian = true) {
     EMASSERT(littenEndian == true);
     T t = *reinterpret_cast<const T*>(data_ + off);
     off += sizeof(T);
+    bytes_read_ = sizeof(T);
     return t;
   }
 
@@ -33,13 +34,17 @@ class DataView {
     unsigned long r = 0;
     memcpy(&r, data_ + off, amount);
     off += amount;
+    bytes_read_ = amount;
     return r;
   }
 
   uint64_t ReadULEB128(unsigned& offset, const uint8_t* end);
+  int64_t ReadSLEB128(unsigned& offset, const uint8_t* end);
+  size_t bytes_read() const { return bytes_read_; }
 
  protected:
   const uint8_t* data_;
+  size_t bytes_read_;
 };
 
 // lower 32 for gerneral purpose register
