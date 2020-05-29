@@ -22,22 +22,24 @@ class DataView {
  public:
   explicit DataView(const uint8_t* data) : data_(data) {}
   template <typename T>
-  T read(unsigned& off, bool littenEndian) {
+  T read(unsigned& off, bool littenEndian = true) {
     EMASSERT(littenEndian == true);
     T t = *reinterpret_cast<const T*>(data_ + off);
     off += sizeof(T);
     return t;
   }
 
+  unsigned long read_amount(unsigned& off, unsigned amount) {
+    unsigned long r = 0;
+    memcpy(&r, data_ + off, amount);
+    off += amount;
+    return r;
+  }
+
+  uint64_t ReadULEB128(unsigned& offset, const uint8_t* end);
+
  protected:
   const uint8_t* data_;
-};
-
-class DataViewULEB128 : public DataView {
- public:
-  DataViewULEB128(const uint8_t* data) : DataView(data) {}
-  ~DataViewULEB128() = default;
-  uint64_t ReadULEB128(unsigned& offset, const uint8_t* end);
 };
 
 // lower 32 for gerneral purpose register

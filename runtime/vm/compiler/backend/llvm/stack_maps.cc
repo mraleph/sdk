@@ -248,7 +248,7 @@ std::string StackMaps::RecordMapToString(const RecordMap& rm) {
   return oss.str();
 }
 
-uint64_t DataViewULEB128::ReadULEB128(unsigned& offset, const uint8_t* end) {
+uint64_t DataView::ReadULEB128(unsigned& offset, const uint8_t* end) {
   const char* error;
   unsigned n;
   uint64_t result = DecodeULEB128(data_ + offset, &n, end, &error);

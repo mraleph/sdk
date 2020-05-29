@@ -11,7 +11,7 @@ ExceptionTableParser::ExceptionTableParser(const uint8_t* content,
                                            size_t length) {
   unsigned offset = 0;
   const uint8_t* end = content + length;
-  DataViewULEB128 view(content);
+  DataView view(content);
   // omit first two words
   view.read<int32_t>(offset, true);
   view.read<int32_t>(offset, true);

@@ -44,13 +44,11 @@ BitVector* LivenessAnalysis::CalculateBlock(BlockEntryInstr* block,
     // Initialize location summary for instruction.
     current->InitializeLocationSummary(zone(), true);  // opt
 
-    LocationSummary* locs = current->locs();
     // Handle uses.
     for (intptr_t j = 0; j < current->InputCount(); j++) {
       Value* input = current->InputAt(j);
 
-      ASSERT(!locs->in(j).IsConstant() || input->BindsToConstant());
-      if (locs->in(j).IsConstant()) continue;
+      if (input->definition()->IsConstant()) continue;
 
       live->Add(input->definition()->ssa_temp_index());
       if (input->definition()->HasPairRepresentation()) {

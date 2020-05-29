@@ -33,6 +33,7 @@ struct CompilerState {
   std::vector<Instruction*> debug_instrs_;
   ByteBuffer* stackMapsSection_;
   ByteBuffer* exception_table_;
+  ByteBuffer* dwarf_line_;
   LLVMModuleRef module_;
   LLVMValueRef function_;
   LLVMContextRef context_;

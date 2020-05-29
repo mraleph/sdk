@@ -5,7 +5,6 @@
 #include "vm/compiler/backend/llvm/compiler_state.h"
 #include "vm/compiler/backend/llvm/llvm_log.h"
 #if defined(DART_ENABLE_LLVM_COMPILER)
-
 #include <assert.h>
 #include <fcntl.h>
 #include <string.h>
@@ -14,6 +13,8 @@
 #include <unistd.h>
 
 #include <memory>
+
+#include "vm/compiler/backend/llvm/dwarf_info.h"
 
 #define SECTION_NAME_PREFIX "."
 #define SECTION_NAME(NAME) (SECTION_NAME_PREFIX NAME)
@@ -110,11 +111,14 @@ static uint8_t* mmAllocateDataSection(void* opaqueState,
 #else
 #error unsupport arch
 #endif
+  static const char kDwarfLine[] = ".debug_line";
   if (!strcmp(sectionName, SECTION_NAME("llvm_stackmaps"))) {
     state.stackMapsSection_ = &bb;
   } else if (!memcmp(sectionName, kExceptionTablePrefix,
                      sizeof(kExceptionTablePrefix) - 1)) {
     state.exception_table_ = &bb;
+  } else if (!memcmp(sectionName, kDwarfLine, sizeof(kDwarfLine) - 1)) {
+    state.dwarf_line_ = &bb;
   }
 
   return const_cast<uint8_t*>(bb.data());
@@ -226,6 +230,9 @@ void Compile(State& state) {
 #endif  // defined(FEATURE_SAVE_OBJECT_FILE)
   LLVMDisposeExecutionEngine(engine);
   disassemble(state);
+  DwarfLineMapper mapper;
+  mapper.Process(state.dwarf_line_->data());
+  mapper.Dump();
 }
 }  // namespace dart_llvm
 }  // namespace dart

@@ -9,6 +9,7 @@ namespace dart_llvm {
 CompilerState::CompilerState(const char* function_name)
     : stackMapsSection_(nullptr),
       exception_table_(nullptr),
+      dwarf_line_(nullptr),
       module_(nullptr),
       function_(nullptr),
       context_(nullptr),

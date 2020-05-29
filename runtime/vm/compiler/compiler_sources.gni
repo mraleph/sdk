@@ -181,6 +181,8 @@ if (uc_build_llvm_compiler) {
     "backend/llvm/compile.h",
     "backend/llvm/compiler_state.cc",
     "backend/llvm/compiler_state.h",
+    "backend/llvm/dwarf_info.h",
+    "backend/llvm/dwarf_info.cc",
     "backend/llvm/exception_table_parser.h",
     "backend/llvm/exception_table_parser_arm.cc",
     "backend/llvm/intrinsic_repository.cc",
