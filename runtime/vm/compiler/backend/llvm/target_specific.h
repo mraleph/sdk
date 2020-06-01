@@ -9,19 +9,20 @@ namespace dart {
 static const int kV8CCRegisterParameterCount = 12;
 static const Register kReceiverReg = R0;
 static const Register kICReg = R9;
-static const size_t kInstanceCallTargetReg = R1;
-static const size_t kNativeCallInstrSize = 12 * Instr::kInstrSize;
-static const size_t kRuntimeCallInstrSize = Instr::kInstrSize;
-static const size_t kRuntimeCallReturnOnStackInstrSize = 2 * Instr::kInstrSize;
 
 // Reg Call
-static const Register kCallTargetReg = R3;
+static const Register kCallTargetReg = R12;
 static const size_t kCallInstrSize = Instr::kInstrSize;
+static const size_t kCallReturnOnStackInstrSize = 2 * Instr::kInstrSize;
 
 // Runtime Call
 static const Register kRuntimeCallArgCountReg = R4;
 static const Register kRuntimeCallEntryReg = R9;
 static const Register kRuntimeCallTargetReg = R0;
+
+// NativeCall
+static const Register kNativeEntryReg = R9;
+static const Register kNativeArgcReg = R1;
 
 // instance of
 static const Register kInstanceOfInstanceReg = R0;

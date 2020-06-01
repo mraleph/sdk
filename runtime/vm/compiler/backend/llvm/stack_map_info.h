@@ -52,9 +52,6 @@ class CallSiteInfo final : public StackMapInfo {
     kCallRelative,
     // relative call target in the code
     kStubRelative,
-    // Code object call is the call that code object alreadly loaded to CODE_REG
-    kCodeObject,
-    kCFunction,
     kNative,
   };
   explicit CallSiteInfo();
@@ -64,9 +61,9 @@ class CallSiteInfo final : public StackMapInfo {
   V(TokenPosition, token_pos)                                                  \
   V(intptr_t, deopt_id)                                                        \
   V(size_t, stack_parameter_count)                                             \
+  V(size_t, instr_size)                                                        \
   V(intptr_t, try_index)                                                       \
   V(RawPcDescriptors::Kind, kind)                                              \
-  V(int, reg)                                                                  \
   V(const Function*, target)                                                   \
   V(const Code*, code)                                                         \
   V(CodeEntryKind, entry_kind)                                                 \
@@ -87,6 +84,7 @@ class CallSiteInfo final : public StackMapInfo {
   intptr_t deopt_id_;
   // for stack maps generate, we will mark the lowest stack_parameter_count's stack slot 1.
   size_t stack_parameter_count_;
+  size_t instr_size_;
   intptr_t try_index_;
   RawPcDescriptors::Kind kind_;
   union {

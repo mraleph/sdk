@@ -15,6 +15,7 @@ CallSiteInfo::CallSiteInfo()
       token_pos_(),
       deopt_id_(0),
       stack_parameter_count_(0),
+      instr_size_(0),
       try_index_(kInvalidTryIndex),
       kind_(RawPcDescriptors::kOther),
       parameter_bits_(0),

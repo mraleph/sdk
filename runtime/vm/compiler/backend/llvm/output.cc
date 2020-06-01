@@ -104,7 +104,7 @@ void Output::initializeFunction(const RegisterParameterDesc& registerParameters,
                                 LType return_type) {
   std::vector<LType> params_types;
   params_types.resize(kV8CCRegisterParameterCount, tagged_type());
-  params_types[static_cast<int>(PP)] = pointerType(tagged_type());
+  params_types[static_cast<int>(PP)] = tagged_type();
   params_types[static_cast<int>(THR)] = repo().ref8;
   EMASSERT(params_types.size() == kV8CCRegisterParameterCount);
   std::vector<LType> float_point_parameter_types;
@@ -580,6 +580,10 @@ LType Output::tagged_pair() const {
 
 void Output::EmitDebugInfo(std::vector<Instruction*>&& debug_instrs) {
   state_.debug_instrs_ = std::move(debug_instrs);
+}
+
+void Output::EmitStackMapInfoMap(StackMapInfoMap&& stack_map_info_map) {
+  state_.stack_map_info_map_ = std::move(stack_map_info_map);
 }
 
 LValue Output::fp() {

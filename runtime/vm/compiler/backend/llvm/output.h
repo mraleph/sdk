@@ -8,6 +8,7 @@
 
 #include "vm/compiler/backend/llvm/intrinsic_repository.h"
 #if defined(DART_ENABLE_LLVM_COMPILER)
+#include "vm/compiler/backend/llvm/stack_map_info.h"
 
 namespace dart {
 class Instruction;
@@ -125,6 +126,7 @@ class Output {
   LValue addFunction(const char* name, LType type);
   LType tagged_pair() const;
   void EmitDebugInfo(std::vector<Instruction*>&& debug_instrs);
+  void EmitStackMapInfoMap(StackMapInfoMap&& stack_map_info_map);
 
   inline IntrinsicRepository& repo() { return repo_; }
   inline LBasicBlock prologue() const { return prologue_; }
