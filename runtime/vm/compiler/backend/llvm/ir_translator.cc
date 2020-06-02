@@ -9,6 +9,7 @@
 #include "vm/compiler/backend/llvm/compiler_state.h"
 #include "vm/compiler/backend/llvm/initialize_llvm.h"
 #include "vm/compiler/backend/llvm/liveness_analysis.h"
+#include "vm/compiler/backend/llvm/llvm_log.h"
 #include "vm/compiler/backend/llvm/output.h"
 #include "vm/compiler/backend/llvm/stack_map_info.h"
 #include "vm/compiler/backend/llvm/target_specific.h"
@@ -3081,6 +3082,7 @@ void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
     LValue argument = impl().GetLLVMValue(instr->ArgumentValueAt(i));
     resolver.AddStackParameter(argument);
   }
+  resolver.AddStackParameter(impl().LoadObject(Object::null_object()));
   impl().SetLLVMValue(instr, resolver.BuildCall());
 }
 

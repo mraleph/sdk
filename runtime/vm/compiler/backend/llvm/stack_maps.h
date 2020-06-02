@@ -120,7 +120,6 @@ struct StackMaps {
   std::vector<StackSize> stackSizes;
   std::vector<Constant> constants;
   std::vector<Record> records;
-  CompilerState* state_;
 
   bool parse(
       DataView*);  // Returns true on parse success, false on failure. Failure

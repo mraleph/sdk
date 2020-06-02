@@ -16,12 +16,12 @@ class ExceptionTableParser {
  public:
   ExceptionTableParser(const uint8_t*, size_t);
   ~ExceptionTableParser() = default;
-  const std::vector<std::tuple<int, int>>& CallSiteHandlerPairs() const {
-    return records_;
+  std::vector<std::tuple<int, int, int>>&& CallSiteHandlerPairs() {
+    return std::move(records_);
   }
 
  private:
-  std::vector<std::tuple<int, int>> records_;
+  std::vector<std::tuple<int, int, int>> records_;
 };
 }  // namespace dart_llvm
 }  // namespace dart

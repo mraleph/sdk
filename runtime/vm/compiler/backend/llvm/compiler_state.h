@@ -12,7 +12,6 @@
 
 #include "vm/compiler/backend/llvm/llvm_headers.h"
 #include "vm/compiler/backend/llvm/stack_map_info.h"
-#include "vm/compiler/backend/llvm/stack_maps.h"
 
 #if defined(DART_ENABLE_LLVM_COMPILER)
 namespace dart {
@@ -29,7 +28,6 @@ struct CompilerState {
   StringList code_section_names_;
   StringList data_section_names_;
   StackMapInfoMap stack_map_info_map_;
-  StackMaps sm_;
   std::vector<Instruction*> debug_instrs_;
   ByteBuffer* stackMapsSection_;
   ByteBuffer* exception_table_;

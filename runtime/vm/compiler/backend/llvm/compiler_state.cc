@@ -24,7 +24,6 @@ CompilerState::CompilerState(const char* function_name)
 #else
 #error unsupported arch
 #endif
-  sm_.state_ = this;
 }
 
 CompilerState::~CompilerState() {

@@ -88,7 +88,6 @@ class CallSiteInfo final : public StackMapInfo {
   intptr_t try_index_;
   RawPcDescriptors::Kind kind_;
   union {
-    int reg_;
     struct {
       const Function* target_;
       Code::EntryKind entry_kind_;

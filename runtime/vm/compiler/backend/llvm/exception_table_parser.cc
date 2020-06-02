@@ -1,7 +1,7 @@
 // Copyright 2019 UCWeb Co., Ltd.
 
 #include "vm/compiler/backend/llvm/exception_table_parser.h"
-#if defined(DART_ENABLE_LLVM_COMPILER) && defined(TARGET_ARCH_ARM)
+#if defined(DART_ENABLE_LLVM_COMPILER)
 #include "vm/compiler/backend/llvm/llvm_log.h"
 #include "vm/compiler/backend/llvm/stack_maps.h"
 
@@ -34,7 +34,7 @@ ExceptionTableParser::ExceptionTableParser(const uint8_t* content,
     uint64_t action = view.ReadULEB128(offset, end);
     EMASSERT(action == 0);  // Only allows cleanup.
     if (landing_pad) {
-      records_.emplace_back(call_begin + call_length, landing_pad);
+      records_.emplace_back(call_begin, call_length, landing_pad);
     }
   }
 }

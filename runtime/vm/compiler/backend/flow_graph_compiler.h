@@ -14,8 +14,16 @@
 #include "vm/compiler/backend/il.h"
 #include "vm/compiler/backend/locations.h"
 #include "vm/runtime_entry.h"
+#if defined(UC_BUILD_LLVM_COMPILER) && defined(DART_PRECOMPILER)
+#include "vm/compiler/backend/llvm/llvm_config.h"
+#endif
 
 namespace dart {
+#if defined(DART_ENABLE_LLVM_COMPILER)
+namespace dart_llvm {
+class CodeAssembler;
+}
+#endif
 
 // Forward declarations.
 class CatchEntryMovesMapBuilder;
@@ -1221,6 +1229,9 @@ class FlowGraphCompiler : public ValueObject {
   // Instruction currently running EmitNativeCode().
   Instruction* current_instruction_ = nullptr;
 
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  friend class dart_llvm::CodeAssembler;
+#endif
   DISALLOW_COPY_AND_ASSIGN(FlowGraphCompiler);
 };
 
