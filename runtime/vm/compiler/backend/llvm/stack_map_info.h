@@ -102,8 +102,6 @@ class CallSiteInfo final : public StackMapInfo {
 };
 
 #undef DEFINE_ACCESSOR
-// By zuojian.lzj, should be int64_t. But I believe there will not be any number
-// greater.
 typedef std::unordered_map<int, std::unique_ptr<StackMapInfo>> StackMapInfoMap;
 }  // namespace dart_llvm
 }  // namespace dart
