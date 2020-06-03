@@ -40,6 +40,7 @@ void CodeAssembler::AssembleCode() {
   if (bytes_left_ != 0) {
     assembler().EmitRange(code_start_ + offset_, bytes_left_);
   }
+  EmitExceptionHandler();
 }
 
 FlowGraphCompiler& CodeAssembler::compiler() {
@@ -217,7 +218,7 @@ static int BranchOffset(const void* code) {
         break;
       }
       offset = Sextract32(insn << 2, 0, 26);
-      offset += 4;
+      offset += 8;
       return offset;
     }
     default:
@@ -234,7 +235,7 @@ static int BranchOffset(const void* code) {
     case 0x0b:
     case 0x4a:
     case 0x4b: {
-      return Sextract32(insn, 0, 26) * 4 - 4;
+      return Sextract32(insn, 0, 26) * 4;
     }
     default:
       break;
@@ -250,14 +251,18 @@ void CodeAssembler::CollectExceptionInfo(const CallSiteInfo* call_site_info) {
     EMASSERT(call_site_info->try_index() == kInvalidTryIndex);
     return;
   }
+  if (call_site_info->try_index() == kInvalidTryIndex) return;
   auto found =
       std::lower_bound(exception_tuples_.begin(), exception_tuples_.end(),
                        assembler().CodeSize(),
                        [](const std::tuple<int, int, int>& lhs, intptr_t rhs) {
                          return std::get<0>(lhs) < rhs;
                        });
-  EMASSERT(found != exception_tuples_.end());
-  EMASSERT(std::get<0>(*found) + std::get<1>(*found) >= assembler().CodeSize());
+  if (found == exception_tuples_.end() ||
+      std::get<0>(*found) != assembler().CodeSize())
+    found -= 1;
+  EMASSERT(assembler().CodeSize() >= std::get<0>(*found));
+  EMASSERT(assembler().CodeSize() <= std::get<0>(*found) + std::get<1>(*found));
   int exception_block_off = std::get<2>(*found);
   int branch_offset = BranchOffset(code_start_ + exception_block_off);
   if (branch_offset != -1) exception_block_off += branch_offset;
@@ -277,8 +282,6 @@ void CodeAssembler::RecordSafePoint(const CallSiteInfo* call_site_info,
   builder->SetLength(slot_count_);
 
   for (auto& location : record.locations) {
-    if (location.kind == StackMaps::Location::Register)
-      LLVMLOGE("Register location! Maybe bug!\n");
     if (location.kind != StackMaps::Location::Indirect) continue;
     // only understand stack slot
     int index;
@@ -299,6 +302,18 @@ void CodeAssembler::RecordSafePoint(const CallSiteInfo* call_site_info,
   }
   compiler().compressed_stackmaps_builder()->AddEntry(assembler().CodeSize(),
                                                       builder, slot_count_);
+}
+
+void CodeAssembler::EmitExceptionHandler() {
+  if (exception_map_.empty()) return;
+  GraphEntryInstr* graph_entry = compiler().flow_graph().graph_entry();
+  for (auto& p : exception_map_) {
+    CatchBlockEntryInstr* catch_block = graph_entry->GetCatchEntry(p.first);
+    compiler().AddExceptionHandler(
+        catch_block->catch_try_index(), catch_block->try_index(), p.second,
+        catch_block->is_generated(), catch_block->catch_handler_types(),
+        catch_block->needs_stacktrace());
+  }
 }
 }  // namespace dart_llvm
 }  // namespace dart

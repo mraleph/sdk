@@ -33,6 +33,7 @@ class CodeAssembler {
   void AddMetaData(const CallSiteInfo*, const StackMaps::Record&);
   void CollectExceptionInfo(const CallSiteInfo*);
   void RecordSafePoint(const CallSiteInfo*, const StackMaps::Record&);
+  void EmitExceptionHandler();
   template <typename T>
   std::function<void()> WrapAction(T f);
 

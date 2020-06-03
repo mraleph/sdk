@@ -2,6 +2,9 @@
 
 #include "vm/compiler/backend/llvm/exception_table_parser.h"
 #if defined(DART_ENABLE_LLVM_COMPILER)
+#include <map>
+#include <tuple>
+
 #include "vm/compiler/backend/llvm/llvm_log.h"
 #include "vm/compiler/backend/llvm/stack_maps.h"
 
@@ -27,6 +30,7 @@ ExceptionTableParser::ExceptionTableParser(const uint8_t* content,
   EMASSERT(offset + landing_pad_size <= length);
   // Update end.
   end = content + offset + landing_pad_size;
+  std::map<int, std::tuple<int, int>> ordered_map;
   while (content + offset < end) {
     uint64_t call_begin = view.ReadULEB128(offset, end);
     uint64_t call_length = view.ReadULEB128(offset, end);
@@ -34,8 +38,13 @@ ExceptionTableParser::ExceptionTableParser(const uint8_t* content,
     uint64_t action = view.ReadULEB128(offset, end);
     EMASSERT(action == 0);  // Only allows cleanup.
     if (landing_pad) {
-      records_.emplace_back(call_begin, call_length, landing_pad);
+      ordered_map.emplace(call_begin,
+                          std::make_tuple(call_length, landing_pad));
     }
+  }
+  for (auto& p : ordered_map) {
+    records_.emplace_back(p.first, std::get<0>(p.second),
+                          std::get<1>(p.second));
   }
 }
 }  // namespace dart_llvm

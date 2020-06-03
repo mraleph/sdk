@@ -1329,7 +1329,7 @@ LValue AnonImpl::LoadObject(const Object& object, bool is_unique) {
     LValue gep = output().buildGEPWithByteOffset(
         output().thread(), output().constIntPtr(offset),
         pointerType(output().tagged_type()));
-    return output().buildInvariantLoad(gep);
+    return output().buildLoad(gep);
   } else if (compiler::target::IsSmi(object)) {
     // Relocation doesn't apply to Smis.
     return WordToTagged(output().constIntPtr(
@@ -1344,7 +1344,7 @@ LValue AnonImpl::LoadObject(const Object& object, bool is_unique) {
     LValue gep = output().buildGEPWithByteOffset(
         output().pp(), output().constIntPtr(offset - kHeapObjectTag),
         pointerType(output().tagged_type()));
-    return output().buildInvariantLoad(gep);
+    return output().buildLoad(gep);
   }
 }
 
@@ -3043,7 +3043,7 @@ void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
             &label, compiler::ObjectPoolBuilderEntry::kPatchable));
     LValue gep = output().buildGEPWithByteOffset(
         output().pp(), output().constIntPtr(offset - kHeapObjectTag),
-        pointerType(output().tagged_type()));
+        pointerType(output().repo().ref8));
     native_entry = output().buildInvariantLoad(gep);
   }
   // Load Code Object & entry
@@ -3056,7 +3056,7 @@ void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
     LValue gep = output().buildGEPWithByteOffset(
         output().pp(), output().constIntPtr(offset - kHeapObjectTag),
         pointerType(output().tagged_type()));
-    code_object = output().buildInvariantLoad(gep);
+    code_object = output().buildLoad(gep);
     LValue entry_gep = output().buildGEPWithByteOffset(
         code_object,
         output().constIntPtr(compiler::target::Code::entry_point_offset() -

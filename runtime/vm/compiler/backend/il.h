@@ -1997,6 +1997,9 @@ class CatchBlockEntryInstr : public BlockEntryWithInitialDefs {
   // Returns try index for the try block to which this catch handler
   // corresponds.
   intptr_t catch_try_index() const { return catch_try_index_; }
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  const Array& catch_handler_types() const { return catch_handler_types_; }
+#endif
 
   PRINT_TO_SUPPORT
 
