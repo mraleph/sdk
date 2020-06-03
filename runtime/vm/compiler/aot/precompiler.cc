@@ -2547,7 +2547,7 @@ bool PrecompileParsedFunctionHelper::Compile(CompilationPipeline* pipeline) {
                             function_stats);
       }
 #if defined(DART_ENABLE_LLVM_COMPILER)
-      {
+      if (flow_graph->llvm_compile_ready()) {
         compiler::Assembler assembler(&object_pool_builder, use_far_branches);
 
         CodeStatistics* function_stats = NULL;

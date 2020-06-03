@@ -455,6 +455,7 @@ class FlowGraph : public ZoneAllocated {
   const dart_llvm::CompilerState& llvm_compiler_state() const {
     return *llvm_compiler_state_;
   }
+  bool llvm_compile_ready() const { return !!llvm_compiler_state_; }
 #endif
 
  private:

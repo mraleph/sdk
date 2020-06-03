@@ -20,6 +20,7 @@ CodeAssembler::CodeAssembler(FlowGraphCompiler* compiler)
   const ByteBuffer& code_buffer = compiler_state().code_section_list_.back();
   code_start_ = code_buffer.data();
   bytes_left_ = code_buffer.size();
+  compiler->InitCompiler();
 }
 
 void CodeAssembler::AssembleCode() {
@@ -69,6 +70,7 @@ void CodeAssembler::PrepareDwarfAction() {
   mapper.Process(compiler_state().dwarf_line_->data());
   auto& debug_instrs_ = compiler_state().debug_instrs_;
   for (auto& p : mapper.GetMap()) {
+    if (p.second == 0) continue;
     unsigned pc_offset = p.first;
     unsigned index = p.second - 1;
     Instruction* instr = debug_instrs_[index];
@@ -91,10 +93,16 @@ void CodeAssembler::PrepareDwarfAction() {
 }
 
 void CodeAssembler::PrepareStackMapAction() {
+  if (!compiler_state().stackMapsSection_) return;
   StackMaps sm;
   DataView dv(compiler_state().stackMapsSection_->data());
   sm.parse(&dv);
   slot_count_ = sm.stackSize() / compiler::target::kWordSize;
+  if (slot_count_ != 0) {
+    EMASSERT(slot_count_ >= 2);
+    // must minus 2 slot for fp and return address.
+    slot_count_ -= 2;
+  }
   compiler().flow_graph().graph_entry()->set_spill_slot_count(slot_count_);
 
   auto rm = sm.computeRecordMap();
@@ -115,11 +123,20 @@ void CodeAssembler::PrepareStackMapAction() {
       case CallSiteInfo::CallTargetType::kReg:
         f = WrapAction([this, call_site_info, record]() {
 #if defined(TARGET_ARCH_ARM)
-          assembler().blx(kCallTargetReg);
+          if (LIKELY(!call_site_info->is_tailcall()))
+            assembler().blx(kCallTargetReg);
+          else
+            assembler().bx(kCallTargetReg);
 #else
 #error unsupported arch
 #endif
           AddMetaData(call_site_info, record);
+          if (call_site_info->return_on_stack()) {
+            assembler().LoadMemoryValue(
+                CallingConventions::kReturnReg, SP,
+                (call_site_info->stack_parameter_count() - 1) *
+                    compiler::target::kWordSize);
+          }
           return call_site_info->instr_size();
         });
         break;
@@ -255,6 +272,7 @@ void CodeAssembler::CollectExceptionInfo(const CallSiteInfo* call_site_info) {
 
 void CodeAssembler::RecordSafePoint(const CallSiteInfo* call_site_info,
                                     const StackMaps::Record& record) {
+  if (UNLIKELY(call_site_info->is_tailcall())) return;
   BitmapBuilder* builder = new BitmapBuilder();
   builder->SetLength(slot_count_);
 

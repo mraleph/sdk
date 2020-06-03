@@ -1774,7 +1774,6 @@ CallResolver::CallResolver(
       parameters_(kV8CCRegisterParameterCount,
                   LLVMGetUndef(output().tagged_type())) {
   // init parameters_.
-  parameters_[static_cast<int>(PP)] = output().pp();
   parameters_[static_cast<int>(THR)] = LLVMGetUndef(output().repo().ref8);
   parameters_[static_cast<int>(FP)] = LLVMGetUndef(output().repo().ref8);
 }
@@ -2620,7 +2619,7 @@ void IRTranslator::VisitTailCall(TailCallInstr* instr) {
       pointerType(output().repo().ref8));
   LValue entry = output().buildLoad(entry_gep);
   callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
-  callsite_info->set_instr_size(kCallTargetReg);
+  callsite_info->set_instr_size(kCallInstrSize);
   CallResolver::CallResolverParameter param(instr, std::move(callsite_info));
   CallResolver resolver(impl(), -1, param);
   resolver.SetGParameter(static_cast<int>(CODE_REG), code_object);
