@@ -3072,6 +3072,7 @@ void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
   callsite_info->set_deopt_id(instr->deopt_id());
   callsite_info->set_stack_parameter_count(argument_count);
   callsite_info->set_instr_size(kCallReturnOnStackInstrSize);
+  callsite_info->set_return_on_stack(true);
   CallResolver::CallResolverParameter param(instr, std::move(callsite_info));
   CallResolver resolver(impl(), instr->ssa_temp_index(), param);
   resolver.SetGParameter(static_cast<int>(kCallTargetReg), entry_val);
