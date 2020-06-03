@@ -240,9 +240,11 @@ void Compile(State& state) {
   SaveObjectFile(state);
 #endif  // defined(FEATURE_SAVE_OBJECT_FILE)
   LLVMDisposeExecutionEngine(engine);
+#if 0
   DwarfLineMapper mapper;
   mapper.Process(state.dwarf_line_->data());
   disassemble(state, mapper);
+#endif
 }
 }  // namespace dart_llvm
 }  // namespace dart

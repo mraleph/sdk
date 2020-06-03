@@ -723,6 +723,7 @@ void AnonImpl::End() {
   output().EmitDebugInfo(std::move(debug_instrs_));
   output().EmitStackMapInfoMap(std::move(stack_map_info_map_));
   Compile(compiler_state());
+  flow_graph_->SetLLVMCompilerState(std::move(compiler_state_));
 }
 
 void AnonImpl::EndCurrentBlock() {

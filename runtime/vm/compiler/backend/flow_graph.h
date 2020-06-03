@@ -14,6 +14,9 @@
 #if defined(UC_BUILD_LLVM_COMPILER) && defined(DART_PRECOMPILER)
 #include "vm/compiler/backend/llvm/llvm_config.h"
 #endif
+#if defined(DART_ENABLE_LLVM_COMPILER)
+#include "vm/compiler/backend/llvm/llvm_code_assembler.h"
+#endif
 
 namespace dart {
 

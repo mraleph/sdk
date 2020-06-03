@@ -5,6 +5,7 @@
 #include <sstream>
 
 #include "vm/compiler/backend/llvm/compiler_state.h"
+#include "vm/compiler/runtime_api.h"
 
 namespace dart {
 namespace dart_llvm {
@@ -89,7 +90,8 @@ void StackMaps::StackSize::parse(StackMaps::ParseContext& context) {
       callSiteCount = -1;
       break;
     case 3:
-      functionOffset = context.view->read<uintptr_t>(context.offset, true);
+      functionOffset = context.view->read_amount(context.offset,
+                                                 compiler::target::kWordSize);
       size = context.view->read<uint64_t>(context.offset, true);
       callSiteCount = context.view->read<uint64_t>(context.offset, true);
       break;

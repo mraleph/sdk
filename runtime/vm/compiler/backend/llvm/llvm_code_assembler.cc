@@ -94,7 +94,7 @@ void CodeAssembler::PrepareStackMapAction() {
   StackMaps sm;
   DataView dv(compiler_state().stackMapsSection_->data());
   sm.parse(&dv);
-  slot_count_ = sm.stackSize() / kWordSize;
+  slot_count_ = sm.stackSize() / compiler::target::kWordSize;
   compiler().flow_graph().graph_entry()->set_spill_slot_count(slot_count_);
 
   auto rm = sm.computeRecordMap();
@@ -266,10 +266,10 @@ void CodeAssembler::RecordSafePoint(const CallSiteInfo* call_site_info,
     int index;
     if (location.dwarfReg == SP) {
       // Remove the effect from safepoint-table.cc
-      index = slot_count_ - 1 - location.offset / kWordSize;
+      index = slot_count_ - 1 - location.offset / compiler::target::kWordSize;
     } else {
       EMASSERT(location.dwarfReg == FP);
-      index = -location.offset / kWordSize - 1;
+      index = -location.offset / compiler::target::kWordSize - 1;
     }
     builder->Set(index, true);
   }
