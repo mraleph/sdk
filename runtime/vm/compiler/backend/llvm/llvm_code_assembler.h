@@ -41,7 +41,11 @@ class CodeAssembler {
   std::function<void()> WrapAction(T f);
 
   std::map<size_t /* offset */, std::function<void()> /* action */> action_map_;
-  std::map<intptr_t /* try_idx */, size_t /* offset */> exception_map_;
+  std::map<intptr_t /* try_idx */,
+           std::tuple<size_t /* ehb offset */, intptr_t /* origin try idx */>>
+      exception_map_;
+  std::map<size_t /* ehb offset */, intptr_t /* extended try index */>
+      emited_idx_crf_;
   std::vector<std::tuple<int, int, int>> exception_tuples_;
   FlowGraphCompiler* compiler_;
   const uint8_t* code_start_ = nullptr;

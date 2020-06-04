@@ -21,6 +21,8 @@ CodeAssembler::CodeAssembler(FlowGraphCompiler* compiler)
   code_start_ = code_buffer.data();
   bytes_left_ = code_buffer.size();
   compiler->InitCompiler();
+  GraphEntryInstr* graph_entry = compiler->flow_graph().graph_entry();
+  exception_extend_id_ = graph_entry->catch_entries().length();
 }
 
 void CodeAssembler::AssembleCode() {
@@ -258,6 +260,7 @@ intptr_t CodeAssembler::CollectExceptionInfo(
   }
   if (call_site_info->try_index() == kInvalidTryIndex) return kInvalidTryIndex;
   intptr_t try_index = call_site_info->try_index();
+  intptr_t origin_try_index = try_index;
 #if 0
   printf("printing exception_tuples_\n");
   for (auto& t : exception_tuples_) {
@@ -278,13 +281,24 @@ intptr_t CodeAssembler::CollectExceptionInfo(
   int exception_block_off = std::get<2>(*found);
   int branch_offset = BranchOffset(code_start_ + exception_block_off);
   if (branch_offset != -1) exception_block_off += branch_offset;
+  auto crf_found = emited_idx_crf_.find(exception_block_off);
+  if (crf_found != emited_idx_crf_.end()) return crf_found->second;
   auto exception_map_found = exception_map_.find(try_index);
-  if (exception_map_found != exception_map_.end()) {
+  if (exception_map_found != exception_map_.end() &&
+      std::get<0>(exception_map_found->second) !=
+          static_cast<size_t>(exception_block_off)) {
     // need a extened try index;
-    intptr_t extended_try_index = ((++exception_extend_id_) << 16) | try_index;
+
+    intptr_t extended_try_index = exception_extend_id_++;
     try_index = extended_try_index;
+#if 0
+    printf("handling extened exception for function:%s\n",
+           compiler().flow_graph().parsed_function().function().ToCString());
+#endif
   }
-  exception_map_.emplace(try_index, exception_block_off);
+  exception_map_.emplace(
+      try_index, std::make_tuple(exception_block_off, origin_try_index));
+  emited_idx_crf_.emplace(exception_block_off, try_index);
   return try_index;
 }
 
@@ -324,13 +338,15 @@ void CodeAssembler::EmitExceptionHandler() {
   GraphEntryInstr* graph_entry = compiler().flow_graph().graph_entry();
   for (auto& p : exception_map_) {
     intptr_t try_index = p.first;
-    intptr_t origin_try_index = try_index & 0xffff;
+    intptr_t origin_try_index;
+    size_t exception_block_off;
+    std::tie(exception_block_off, origin_try_index) = p.second;
     CatchBlockEntryInstr* catch_block =
         graph_entry->GetCatchEntry(origin_try_index);
-    compiler().AddExceptionHandler(catch_block->catch_try_index(), try_index,
-                                   p.second, catch_block->is_generated(),
-                                   catch_block->catch_handler_types(),
-                                   catch_block->needs_stacktrace());
+    compiler().AddExceptionHandler(
+        try_index, catch_block->try_index(), exception_block_off,
+        catch_block->is_generated(), catch_block->catch_handler_types(),
+        catch_block->needs_stacktrace());
   }
 }
 
