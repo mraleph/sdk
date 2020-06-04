@@ -40,6 +40,7 @@ void CodeAssembler::AssembleCode() {
   if (bytes_left_ != 0) {
     assembler().EmitRange(code_start_ + offset_, bytes_left_);
   }
+  EndLastInstr();
   EmitExceptionHandler();
 }
 
@@ -86,8 +87,10 @@ void CodeAssembler::PrepareDwarfAction() {
 #endif
         compiler().EmitComment(instr);
       }
+      EndLastInstr();
       // FIXME: Handle Yield for return!
       compiler().BeginCodeSourceRange();
+      last_instr_ = instr;
       return static_cast<size_t>(0);
     };
     action_map_.emplace(pc_offset, WrapAction(func));
@@ -329,6 +332,12 @@ void CodeAssembler::EmitExceptionHandler() {
                                    catch_block->catch_handler_types(),
                                    catch_block->needs_stacktrace());
   }
+}
+
+void CodeAssembler::EndLastInstr() {
+  if (!last_instr_) return;
+
+  compiler().EndCodeSourceRange(last_instr_->token_pos());
 }
 }  // namespace dart_llvm
 }  // namespace dart

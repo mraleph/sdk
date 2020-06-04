@@ -10,6 +10,7 @@
 #include "vm/compiler/backend/llvm/dwarf_info.h"
 
 namespace dart {
+class Instruction;
 namespace compiler {
 class Assembler;
 }
@@ -35,6 +36,7 @@ class CodeAssembler {
   intptr_t CollectExceptionInfo(const CallSiteInfo*);
   void RecordSafePoint(const CallSiteInfo*, const StackMaps::Record&);
   void EmitExceptionHandler();
+  void EndLastInstr();
   template <typename T>
   std::function<void()> WrapAction(T f);
 
@@ -43,6 +45,7 @@ class CodeAssembler {
   std::vector<std::tuple<int, int, int>> exception_tuples_;
   FlowGraphCompiler* compiler_;
   const uint8_t* code_start_ = nullptr;
+  Instruction* last_instr_ = nullptr;
   size_t offset_ = 0;
   size_t bytes_left_ = 0;
   size_t slot_count_ = 0;
