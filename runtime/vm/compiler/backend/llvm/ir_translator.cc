@@ -1949,7 +1949,8 @@ void CallResolver::EmitPatchPoint() {
       std::move(call_resolver_parameter_.callsite_info));
   callsite_info->set_is_tailcall(tail_call_);
   callsite_info->set_patchid(patchid_);
-  callsite_info->set_try_index(impl().current_bb()->try_index());
+  if (need_invoke())
+    callsite_info->set_try_index(impl().current_bb()->try_index());
   impl().SubmitStackMap(std::move(callsite_info));
 }
 

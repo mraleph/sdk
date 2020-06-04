@@ -31,20 +31,22 @@ class CodeAssembler {
   void PrepareDwarfAction();
   void PrepareStackMapAction();
   void AddMetaData(const CallSiteInfo*, const StackMaps::Record&);
-  void CollectExceptionInfo(const CallSiteInfo*);
+  // returns the try index;
+  intptr_t CollectExceptionInfo(const CallSiteInfo*);
   void RecordSafePoint(const CallSiteInfo*, const StackMaps::Record&);
   void EmitExceptionHandler();
   template <typename T>
   std::function<void()> WrapAction(T f);
 
   std::map<size_t /* offset */, std::function<void()> /* action */> action_map_;
-  std::map<int /* try_idx */, size_t /* offset */> exception_map_;
+  std::map<intptr_t /* try_idx */, size_t /* offset */> exception_map_;
   std::vector<std::tuple<int, int, int>> exception_tuples_;
   FlowGraphCompiler* compiler_;
   const uint8_t* code_start_ = nullptr;
   size_t offset_ = 0;
   size_t bytes_left_ = 0;
   size_t slot_count_ = 0;
+  intptr_t exception_extend_id_ = 0;
 };
 }  // namespace dart_llvm
 }  // namespace dart

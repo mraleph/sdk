@@ -86,6 +86,7 @@ void CodeAssembler::PrepareDwarfAction() {
 #endif
         compiler().EmitComment(instr);
       }
+      // FIXME: Handle Yield for return!
       compiler().BeginCodeSourceRange();
       return static_cast<size_t>(0);
     };
@@ -180,11 +181,11 @@ std::function<void()> CodeAssembler::WrapAction(T f) {
 
 void CodeAssembler::AddMetaData(const CallSiteInfo* call_site_info,
                                 const StackMaps::Record& r) {
-  compiler().AddCurrentDescriptor(call_site_info->kind(),
-                                  call_site_info->deopt_id(),
-                                  call_site_info->token_pos());
+  intptr_t try_index = CollectExceptionInfo(call_site_info);
+  compiler().AddDescriptor(call_site_info->kind(), assembler().CodeSize(),
+                           call_site_info->deopt_id(),
+                           call_site_info->token_pos(), try_index);
   RecordSafePoint(call_site_info, r);
-  CollectExceptionInfo(call_site_info);
 }
 
 static inline uint32_t DART_USED Extract32(uint32_t value,
@@ -246,12 +247,20 @@ static int BranchOffset(const void* code) {
 #error unsupport arch
 #endif
 
-void CodeAssembler::CollectExceptionInfo(const CallSiteInfo* call_site_info) {
+intptr_t CodeAssembler::CollectExceptionInfo(
+    const CallSiteInfo* call_site_info) {
   if (exception_tuples_.empty()) {
     EMASSERT(call_site_info->try_index() == kInvalidTryIndex);
-    return;
+    return kInvalidTryIndex;
   }
-  if (call_site_info->try_index() == kInvalidTryIndex) return;
+  if (call_site_info->try_index() == kInvalidTryIndex) return kInvalidTryIndex;
+  intptr_t try_index = call_site_info->try_index();
+#if 0
+  printf("printing exception_tuples_\n");
+  for (auto& t : exception_tuples_) {
+    printf("0x%x %d 0x%x\n", std::get<0>(t), std::get<1>(t), std::get<2>(t));
+  }
+#endif
   auto found =
       std::lower_bound(exception_tuples_.begin(), exception_tuples_.end(),
                        assembler().CodeSize(),
@@ -266,13 +275,14 @@ void CodeAssembler::CollectExceptionInfo(const CallSiteInfo* call_site_info) {
   int exception_block_off = std::get<2>(*found);
   int branch_offset = BranchOffset(code_start_ + exception_block_off);
   if (branch_offset != -1) exception_block_off += branch_offset;
-  auto exception_map_found = exception_map_.find(call_site_info->try_index());
+  auto exception_map_found = exception_map_.find(try_index);
   if (exception_map_found != exception_map_.end()) {
-    EMASSERT(exception_map_found->second ==
-             static_cast<unsigned>(exception_block_off));
-  } else {
-    exception_map_.emplace(call_site_info->try_index(), exception_block_off);
+    // need a extened try index;
+    intptr_t extended_try_index = ((exception_extend_id_++) << 16) | try_index;
+    try_index = extended_try_index;
   }
+  exception_map_.emplace(try_index, exception_block_off);
+  return try_index;
 }
 
 void CodeAssembler::RecordSafePoint(const CallSiteInfo* call_site_info,
@@ -287,9 +297,11 @@ void CodeAssembler::RecordSafePoint(const CallSiteInfo* call_site_info,
     int index;
     if (location.dwarfReg == SP) {
       // Remove the effect from safepoint-table.cc
+      EMASSERT(location.offset >= 0);
       index = slot_count_ - 1 - location.offset / compiler::target::kWordSize;
     } else {
       EMASSERT(location.dwarfReg == FP);
+      if (location.offset >= 0) continue;
       index = -location.offset / compiler::target::kWordSize - 1;
     }
     builder->Set(index, true);
@@ -308,11 +320,14 @@ void CodeAssembler::EmitExceptionHandler() {
   if (exception_map_.empty()) return;
   GraphEntryInstr* graph_entry = compiler().flow_graph().graph_entry();
   for (auto& p : exception_map_) {
-    CatchBlockEntryInstr* catch_block = graph_entry->GetCatchEntry(p.first);
-    compiler().AddExceptionHandler(
-        catch_block->catch_try_index(), catch_block->try_index(), p.second,
-        catch_block->is_generated(), catch_block->catch_handler_types(),
-        catch_block->needs_stacktrace());
+    intptr_t try_index = p.first;
+    intptr_t origin_try_index = try_index & 0xffff;
+    CatchBlockEntryInstr* catch_block =
+        graph_entry->GetCatchEntry(origin_try_index);
+    compiler().AddExceptionHandler(catch_block->catch_try_index(), try_index,
+                                   p.second, catch_block->is_generated(),
+                                   catch_block->catch_handler_types(),
+                                   catch_block->needs_stacktrace());
   }
 }
 }  // namespace dart_llvm
