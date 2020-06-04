@@ -107,8 +107,6 @@ static uint8_t* mmAllocateDataSection(void* opaqueState,
                                       unsigned,
                                       const char* sectionName,
                                       LLVMBool) {
-  printf("mmAllocateDataSection: %s, %u\n", sectionName,
-         static_cast<unsigned>(size));
   State& state = *static_cast<State*>(opaqueState);
 
   state.data_section_list_.push_back(dart_llvm::ByteBuffer());
