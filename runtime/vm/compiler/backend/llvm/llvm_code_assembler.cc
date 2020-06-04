@@ -281,7 +281,7 @@ intptr_t CodeAssembler::CollectExceptionInfo(
   auto exception_map_found = exception_map_.find(try_index);
   if (exception_map_found != exception_map_.end()) {
     // need a extened try index;
-    intptr_t extended_try_index = ((exception_extend_id_++) << 16) | try_index;
+    intptr_t extended_try_index = ((++exception_extend_id_) << 16) | try_index;
     try_index = extended_try_index;
   }
   exception_map_.emplace(try_index, exception_block_off);
