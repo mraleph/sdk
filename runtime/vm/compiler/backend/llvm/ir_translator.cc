@@ -3713,55 +3713,134 @@ void IRTranslator::VisitCloneContext(CloneContextInstr* instr) {
 
 void IRTranslator::VisitBinarySmiOp(BinarySmiOpInstr* instr) {
   impl().SetDebugLine(instr);
-  LValue left = impl().SmiUntag(impl().GetLLVMValue(instr->left()));
-  LValue right = impl().SmiUntag(impl().GetLLVMValue(instr->right()));
   LValue value;
-  switch (instr->op_kind()) {
-    case Token::kSHL:
-      value = output().buildShl(left, right);
-      break;
-    case Token::kADD:
-      value = output().buildAdd(left, right);
-      break;
-    case Token::kSUB:
-      value = output().buildSub(left, right);
-      break;
-    case Token::kMUL:
-      value = output().buildMul(left, right);
-      break;
-    case Token::kTRUNCDIV: {
-      ConstantInstr* constant = instr->right()->definition()->AsConstant();
+  if (instr->right()->definition()->IsConstant()) {
+    ConstantInstr* constant = instr->right()->definition()->AsConstant();
+    const intptr_t imm = compiler::target::ToRawSmi(constant->value());
+    LValue left = impl().TaggedToWord(impl().GetLLVMValue(instr->left()));
+    switch (instr->op_kind()) {
+      case Token::kADD: {
+        value = output().buildAdd(left, output().constIntPtr(imm));
+        value = impl().WordToTagged(value);
+        break;
+      }
+      case Token::kSUB: {
+        value = output().buildSub(left, output().constIntPtr(imm));
+        value = impl().WordToTagged(value);
+        break;
+      }
+      case Token::kMUL: {
+        // Keep left value tagged and untag right value.
+        const intptr_t actual_value =
+            compiler::target::SmiValue(constant->value());
+        value = output().buildMul(left, output().constIntPtr(actual_value));
+        value = impl().WordToTagged(value);
+        break;
+      }
+      case Token::kTRUNCDIV: {
+        const intptr_t cvalue = compiler::target::SmiValue(constant->value());
+        EMASSERT(cvalue != kIntptrMin);
+        EMASSERT(Utils::IsPowerOfTwo(Utils::Abs(cvalue)));
+        const intptr_t shift_count =
+            Utils::ShiftForPowerOfTwo(Utils::Abs(cvalue)) + kSmiTagSize;
+        LValue left = impl().TaggedToWord(impl().GetLLVMValue(instr->left()));
+        LValue left_asr = output().buildSar(left, output().constIntPtr(31));
+        LValue temp = output().buildAdd(
+            left, output().buildShr(left_asr,
+                                    output().constIntPtr(32 - shift_count)));
+        value = output().buildSar(temp, output().constIntPtr(shift_count));
+        if (cvalue < 0)
+          value = output().buildSub(output().constIntPtr(0), value);
+        value = impl().SmiTag(value);
+      } break;
+      case Token::kBIT_AND: {
+        value = output().buildAnd(left, output().constIntPtr(imm));
+        value = impl().WordToTagged(value);
+        break;
+      }
+      case Token::kBIT_OR: {
+        value = output().buildOr(left, output().constIntPtr(imm));
+        value = impl().WordToTagged(value);
+        break;
+      }
+      case Token::kBIT_XOR: {
+        value = output().buildXor(left, output().constIntPtr(imm));
+        value = impl().WordToTagged(value);
+        break;
+      }
+      case Token::kSHR: {
+        // sarl operation masks the count to 5 bits.
+        const intptr_t kCountLimit = 0x1F;
+        intptr_t actual_value = compiler::target::SmiValue(constant->value());
+        value = output().buildSar(
+            left, output().constIntPtr(
+                      Utils::Minimum(actual_value + kSmiTagSize, kCountLimit)));
+        value = impl().SmiTag(value);
+        break;
+      }
+      case Token::kSHL: {
+        const intptr_t actual_value =
+            compiler::target::SmiValue(constant->value());
+        value = output().buildShl(left, output().constIntPtr(actual_value));
+        value = impl().WordToTagged(value);
+        break;
+      }
 
-      const intptr_t cvalue = compiler::target::SmiValue(constant->value());
-      EMASSERT(cvalue != kIntptrMin);
-      EMASSERT(Utils::IsPowerOfTwo(Utils::Abs(cvalue)));
-      const intptr_t shift_count =
-          Utils::ShiftForPowerOfTwo(Utils::Abs(cvalue)) + kSmiTagSize;
-      LValue left = impl().TaggedToWord(impl().GetLLVMValue(instr->left()));
-      LValue left_asr = output().buildSar(left, output().constIntPtr(31));
-      LValue temp = output().buildAdd(
-          left,
-          output().buildShr(left_asr, output().constIntPtr(32 - shift_count)));
-      value = output().buildSar(temp, output().constIntPtr(shift_count));
-      if (cvalue < 0) value = output().buildSub(output().constIntPtr(0), value);
-    } break;
-    case Token::kBIT_AND:
-      value = output().buildAnd(left, right);
-      break;
-    case Token::kBIT_OR:
-      value = output().buildOr(left, right);
-      break;
-    case Token::kBIT_XOR:
-      value = output().buildXor(left, right);
-      break;
-    case Token::kSHR:
-      value = output().buildShr(left, right);
-      break;
-    default:
-      UNREACHABLE();
-      break;
+      default:
+        UNREACHABLE();
+        break;
+    }
+  } else {
+    LValue left = impl().SmiUntag(impl().GetLLVMValue(instr->left()));
+    LValue right = impl().SmiUntag(impl().GetLLVMValue(instr->right()));
+    switch (instr->op_kind()) {
+      case Token::kSHL:
+        value = output().buildShl(left, right);
+        break;
+      case Token::kADD:
+        value = output().buildAdd(left, right);
+        break;
+      case Token::kSUB:
+        value = output().buildSub(left, right);
+        break;
+      case Token::kMUL:
+        value = output().buildMul(left, right);
+        break;
+      case Token::kTRUNCDIV: {
+        bool support_int_div = true;
+#if defined(TARGET_ARCH_ARM)
+        support_int_div = TargetCPUFeatures::integer_division_supported();
+#endif
+        if (support_int_div) {
+          value = output().buildSDiv(left, right);
+        } else {
+          LValue left_double =
+              output().buildCast(LLVMSIToFP, left, output().repo().doubleType);
+          LValue right_double =
+              output().buildCast(LLVMSIToFP, right, output().repo().doubleType);
+          LValue value_double = output().buildFDiv(left_double, right_double);
+          value = output().buildCast(LLVMFPToSI, value_double,
+                                     output().repo().intPtr);
+        }
+      } break;
+      case Token::kBIT_AND:
+        value = output().buildAnd(left, right);
+        break;
+      case Token::kBIT_OR:
+        value = output().buildOr(left, right);
+        break;
+      case Token::kBIT_XOR:
+        value = output().buildXor(left, right);
+        break;
+      case Token::kSHR:
+        value = output().buildShr(left, right);
+        break;
+      default:
+        UNREACHABLE();
+        break;
+    }
+    value = impl().SmiTag(value);
   }
-  value = impl().SmiTag(value);
   impl().SetLLVMValue(instr, value);
 }
 
