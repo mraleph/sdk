@@ -4839,10 +4839,12 @@ void IRTranslator::VisitReachabilityFence(ReachabilityFenceInstr*) {}
 
 void IRTranslator::VisitDispatchTableCall(DispatchTableCallInstr* instr) {
   impl().SetDebugLine(instr);
-  LValue dispatch_table = impl().LoadFromOffset(
+  LValue dispatch_table_gep = output().buildGEPWithByteOffset(
       output().thread(),
-      compiler::target::Thread::dispatch_table_array_offset(),
+      output().constIntPtr(
+          compiler::target::Thread::dispatch_table_array_offset()),
       pointerType(output().repo().ref8));
+  LValue dispatch_table = output().buildInvariantLoad(dispatch_table_gep);
   intptr_t offset =
       (instr->selector()->offset - DispatchTable::OriginElement()) *
       compiler::target::kWordSize;

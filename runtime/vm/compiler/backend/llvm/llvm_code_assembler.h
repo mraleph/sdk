@@ -37,10 +37,12 @@ class CodeAssembler {
   void RecordSafePoint(const CallSiteInfo*, const StackMaps::Record&);
   void EmitExceptionHandler();
   void EndLastInstr();
+  void AddAction(size_t pc_offset, std::function<void()> action);
   template <typename T>
   std::function<void()> WrapAction(T f);
 
-  std::map<size_t /* offset */, std::function<void()> /* action */> action_map_;
+  std::map<size_t /* offset */, std::vector<std::function<void()>> /* action */>
+      action_map_;
   std::map<intptr_t /* try_idx */,
            std::tuple<size_t /* ehb offset */, intptr_t /* origin try idx */>>
       exception_map_;

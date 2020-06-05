@@ -30,14 +30,15 @@ void CodeAssembler::AssembleCode() {
   PrepareInstrActions();
   for (auto& p : action_map_) {
     unsigned end = p.first;
-    auto& action = p.second;
+    auto& actions = p.second;
     if (offset_ != end) {
       EMASSERT(end > offset_);
       assembler().EmitRange(code_start_ + offset_, end - offset_);
       bytes_left_ -= end - offset_;
       offset_ = end;
     }
-    action();
+    for (auto& action : actions)
+      action();
   }
   if (bytes_left_ != 0) {
     assembler().EmitRange(code_start_ + offset_, bytes_left_);
@@ -104,7 +105,7 @@ void CodeAssembler::PrepareDwarfAction() {
       }
       return static_cast<size_t>(0);
     };
-    action_map_.emplace(pc_offset, WrapAction(func));
+    AddAction(pc_offset, WrapAction(func));
   }
 }
 
@@ -176,7 +177,7 @@ void CodeAssembler::PrepareStackMapAction() {
       default:
         UNREACHABLE();
     }
-    action_map_.emplace(instruction_offset, f);
+    AddAction(instruction_offset, f);
   }
 }
 
@@ -363,6 +364,15 @@ void CodeAssembler::EndLastInstr() {
   if (!last_instr_) return;
 
   compiler().EndCodeSourceRange(last_instr_->token_pos());
+}
+
+void CodeAssembler::AddAction(size_t pc_offset, std::function<void()> action) {
+  auto found = action_map_.find(pc_offset);
+  if (LIKELY(found == action_map_.end())) {
+    action_map_.emplace(pc_offset, std::vector<std::function<void()>>{action});
+  } else {
+    found->second.emplace_back(action);
+  }
 }
 }  // namespace dart_llvm
 }  // namespace dart
