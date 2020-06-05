@@ -79,6 +79,9 @@ void CodeAssembler::PrepareDwarfAction() {
     unsigned index = p.second - 1;
     Instruction* instr = debug_instrs_[index];
     auto func = [this, instr]() -> size_t {
+      EndLastInstr();
+      compiler().code_source_map_builder_->StartInliningInterval(
+          assembler().CodeSize(), instr->inlining_id());
       if (FLAG_code_comments || FLAG_disassemble ||
           FLAG_disassemble_optimized) {
 #if 0
@@ -89,8 +92,6 @@ void CodeAssembler::PrepareDwarfAction() {
 #endif
         compiler().EmitComment(instr);
       }
-      EndLastInstr();
-      // FIXME: Handle Yield for return!
       compiler().BeginCodeSourceRange();
       last_instr_ = instr;
       if (instr->IsReturn()) {
@@ -149,7 +150,7 @@ void CodeAssembler::PrepareStackMapAction() {
           if (call_site_info->return_on_stack()) {
             assembler().LoadMemoryValue(
                 CallingConventions::kReturnReg, SP,
-                (call_site_info->stack_parameter_count() - 1) *
+                call_site_info->stack_parameter_count() *
                     compiler::target::kWordSize);
           }
           return call_site_info->instr_size();
