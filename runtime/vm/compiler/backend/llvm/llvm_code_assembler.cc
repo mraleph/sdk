@@ -93,6 +93,14 @@ void CodeAssembler::PrepareDwarfAction() {
       // FIXME: Handle Yield for return!
       compiler().BeginCodeSourceRange();
       last_instr_ = instr;
+      if (instr->IsReturn()) {
+        ReturnInstr* return_instr = instr->AsReturn();
+        if (return_instr->yield_index() !=
+            RawPcDescriptors::kInvalidYieldIndex) {
+          compiler().EmitYieldPositionMetadata(return_instr->token_pos(),
+                                               return_instr->yield_index());
+        }
+      }
       return static_cast<size_t>(0);
     };
     action_map_.emplace(pc_offset, WrapAction(func));
