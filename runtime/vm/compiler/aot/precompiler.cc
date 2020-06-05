@@ -2536,6 +2536,32 @@ bool PrecompileParsedFunctionHelper::Compile(CompilationPipeline* pipeline) {
           &speculative_policy, pass_state.inline_id_to_function,
           pass_state.inline_id_to_token_pos, pass_state.caller_inline_id,
           ic_data_array, function_stats);
+#if defined(DART_ENABLE_LLVM_COMPILER)
+      if (flow_graph->llvm_compile_ready()) {
+        {
+          TIMELINE_DURATION(thread(), CompilerVerbose, "Assemble Code");
+          dart_llvm::CodeAssembler cs(&graph_compiler);
+          cs.AssembleCode();
+        }
+        {
+          TIMELINE_DURATION(thread(), CompilerVerbose, "FinalizeCompilation");
+          ASSERT(thread()->IsMutatorThread());
+          FinalizeCompilation(&assembler, &graph_compiler, flow_graph,
+                              function_stats);
+        }
+      } else {
+        {
+          TIMELINE_DURATION(thread(), CompilerVerbose, "CompileGraph");
+          graph_compiler.CompileGraph();
+        }
+        {
+          TIMELINE_DURATION(thread(), CompilerVerbose, "FinalizeCompilation");
+          ASSERT(thread()->IsMutatorThread());
+          FinalizeCompilation(&assembler, &graph_compiler, flow_graph,
+                              function_stats);
+        }
+      }
+#else
       {
         TIMELINE_DURATION(thread(), CompilerVerbose, "CompileGraph");
         graph_compiler.CompileGraph();
@@ -2545,34 +2571,6 @@ bool PrecompileParsedFunctionHelper::Compile(CompilationPipeline* pipeline) {
         ASSERT(thread()->IsMutatorThread());
         FinalizeCompilation(&assembler, &graph_compiler, flow_graph,
                             function_stats);
-      }
-#if defined(DART_ENABLE_LLVM_COMPILER)
-      if (flow_graph->llvm_compile_ready()) {
-        compiler::Assembler assembler(&object_pool_builder, use_far_branches);
-
-        CodeStatistics* function_stats = NULL;
-        if (FLAG_print_instruction_stats) {
-          // At the moment we are leaking CodeStatistics objects for
-          // simplicity because this is just a development mode flag.
-          function_stats = new CodeStatistics(&assembler);
-        }
-
-        FlowGraphCompiler graph_compiler(
-            &assembler, flow_graph, *parsed_function(), optimized(),
-            &speculative_policy, pass_state.inline_id_to_function,
-            pass_state.inline_id_to_token_pos, pass_state.caller_inline_id,
-            ic_data_array, function_stats);
-        {
-          TIMELINE_DURATION(thread(), CompilerVerbose, "Assemble Code");
-          dart_llvm::CodeAssembler cs(&graph_compiler);
-          cs.AssembleCode();
-        }
-        {
-          TIMELINE_DURATION(thread(), CompilerVerbose, "FinalizeCompilation");
-          ASSERT(thread()->IsMutatorThread());
-          FinalizeCompilationNoInstall(&assembler, &graph_compiler, flow_graph,
-                                       function_stats);
-        }
       }
 #endif
 

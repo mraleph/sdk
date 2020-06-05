@@ -94,6 +94,7 @@ void CodeAssembler::PrepareDwarfAction() {
         compiler().EmitComment(instr);
       }
       compiler().BeginCodeSourceRange();
+      compiler().StatsBegin(instr);
       last_instr_ = instr;
       if (instr->IsReturn()) {
         ReturnInstr* return_instr = instr->AsReturn();
@@ -363,6 +364,7 @@ void CodeAssembler::EmitExceptionHandler() {
 void CodeAssembler::EndLastInstr() {
   if (!last_instr_) return;
 
+  compiler().StatsEnd(last_instr_);
   compiler().EndCodeSourceRange(last_instr_->token_pos());
 }
 
