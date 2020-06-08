@@ -150,11 +150,10 @@ void CodeAssembler::PrepareStackMapAction() {
 #error unsupported arch
 #endif
           AddMetaData(call_site_info, record);
-          if (call_site_info->return_on_stack()) {
-            assembler().LoadMemoryValue(
-                CallingConventions::kReturnReg, SP,
-                call_site_info->stack_parameter_count() *
-                    compiler::target::kWordSize);
+          if (call_site_info->return_on_stack_pos() != -1) {
+            assembler().LoadMemoryValue(CallingConventions::kReturnReg, SP,
+                                        call_site_info->return_on_stack_pos() *
+                                            compiler::target::kWordSize);
           }
           return call_site_info->instr_size();
         });
@@ -337,8 +336,13 @@ void CodeAssembler::RecordSafePoint(const CallSiteInfo* call_site_info,
   }
   // set up parameters
   // FIXME: only support tagged parameter now.
+  size_t top_of_stack = slot_count_;
   for (size_t i = 0; i < call_site_info->stack_parameter_count(); ++i) {
-    int index = slot_count_ - i - 1;
+    int index = top_of_stack - i - 1;
+    builder->Set(index, true);
+  }
+  if (call_site_info->return_on_stack_pos() != -1) {
+    int index = top_of_stack - call_site_info->stack_parameter_count() - 1;
     builder->Set(index, true);
   }
   compiler().compressed_stackmaps_builder()->AddEntry(assembler().CodeSize(),

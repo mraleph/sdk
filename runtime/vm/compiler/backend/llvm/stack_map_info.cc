@@ -20,8 +20,8 @@ CallSiteInfo::CallSiteInfo()
       kind_(RawPcDescriptors::kOther),
       parameter_bits_(0),
       valid_bits_(0),
-      is_tailcall_(false),
-      return_on_stack_(false) {}
+      return_on_stack_pos_(-1),
+      is_tailcall_(false) {}
 
 void CallSiteInfo::MarkParameterBit(int which, bool set) {
   if (set) parameter_bits_ |= 1ULL << which;

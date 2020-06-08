@@ -1011,7 +1011,7 @@ LValue AnonImpl::GenerateRuntimeCall(Instruction* instr,
   callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
   callsite_info->set_token_pos(token_pos);
   callsite_info->set_deopt_id(deopt_id);
-  callsite_info->set_return_on_stack(return_on_stack);
+  if (return_on_stack) callsite_info->set_return_on_stack_pos(argument_count);
   callsite_info->set_stack_parameter_count(argument_count);
   callsite_info->set_instr_size(return_on_stack ? kCallReturnOnStackInstrSize
                                                 : kCallInstrSize);
@@ -1801,10 +1801,11 @@ void CallResolver::AddStackParameter(LValue v) {
     impl().set_exception_occured();
     THR_Print("FIXME: not supported type(maybe double)");
   }
-  EMASSERT(
-      parameters_.size() - kV8CCRegisterParameterCount <=
-      ((call_resolver_parameter_.callsite_info->return_on_stack() ? 1 : 0) +
-       call_resolver_parameter_.callsite_info->stack_parameter_count()));
+  EMASSERT(parameters_.size() - kV8CCRegisterParameterCount <=
+           ((call_resolver_parameter_.callsite_info->return_on_stack_pos() != -1
+                 ? 1
+                 : 0) +
+            call_resolver_parameter_.callsite_info->stack_parameter_count()));
 }
 
 LValue CallResolver::GetStackParameter(size_t i) {
@@ -1816,10 +1817,11 @@ LValue CallResolver::GetStackParameter(size_t i) {
 LValue CallResolver::BuildCall() {
   EMASSERT(call_resolver_parameter_.callsite_info->type() !=
            CallSiteInfo::CallTargetType::kUnspecify);
-  EMASSERT(
-      parameters_.size() - kV8CCRegisterParameterCount ==
-      ((call_resolver_parameter_.callsite_info->return_on_stack() ? 1 : 0) +
-       call_resolver_parameter_.callsite_info->stack_parameter_count()));
+  EMASSERT(parameters_.size() - kV8CCRegisterParameterCount ==
+           ((call_resolver_parameter_.callsite_info->return_on_stack_pos() != -1
+                 ? 1
+                 : 0) +
+            call_resolver_parameter_.callsite_info->stack_parameter_count()));
   ExtractCallInfo();
   GenerateStatePointFunction();
   patchid_ = impl().NextPatchPoint();
@@ -3073,18 +3075,18 @@ void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
   callsite_info->set_deopt_id(instr->deopt_id());
   callsite_info->set_stack_parameter_count(argument_count);
   callsite_info->set_instr_size(kCallReturnOnStackInstrSize);
-  callsite_info->set_return_on_stack(true);
+  callsite_info->set_return_on_stack_pos(0);
   CallResolver::CallResolverParameter param(instr, std::move(callsite_info));
   CallResolver resolver(impl(), instr->ssa_temp_index(), param);
   resolver.SetGParameter(static_cast<int>(kCallTargetReg), entry_val);
   resolver.SetGParameter(static_cast<int>(kNativeEntryReg), native_entry);
   resolver.SetGParameter(static_cast<int>(kNativeArgcReg),
                          output().constIntPtr(argc_tag));
+  resolver.AddStackParameter(impl().LoadObject(Object::null_object()));
   for (intptr_t i = argument_count - 1; i >= 0; --i) {
     LValue argument = impl().GetLLVMValue(instr->ArgumentValueAt(i));
     resolver.AddStackParameter(argument);
   }
-  resolver.AddStackParameter(impl().LoadObject(Object::null_object()));
   impl().SetLLVMValue(instr, resolver.BuildCall());
 }
 
