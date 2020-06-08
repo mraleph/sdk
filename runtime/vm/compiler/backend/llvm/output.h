@@ -111,7 +111,6 @@ class Output {
   LValue getGCResultFunction(LType return_type);
 
   LValue buildInlineAsm(LType, char*, size_t, char*, size_t, bool);
-  LValue buildLoadMagic(LType, int64_t magic);
 
   void buildUnreachable();
   LValue buildExtractValue(LValue aggVal, unsigned index);

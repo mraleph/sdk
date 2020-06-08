@@ -30,14 +30,6 @@ struct NotMergedPhiDesc {
   LValue phi;
 };
 
-struct GCRelocateDesc {
-  int ssa_index;
-  int where;
-  GCRelocateDesc(int _ssa_index, int w) : ssa_index(_ssa_index), where(w) {}
-};
-
-using GCRelocateDescList = std::vector<GCRelocateDesc>;
-
 enum class ValueType { LLVMValue };
 
 struct ValueDesc {
@@ -55,6 +47,7 @@ struct IRTranslatorBlockImpl {
 
   LBasicBlock native_bb = nullptr;
   LBasicBlock continuation = nullptr;
+
   // exception vals
   LValue exception_val = nullptr;
   LValue stacktrace_val = nullptr;
@@ -235,6 +228,8 @@ class AnonImpl {
   LValue GetLLVMValue(Definition* d) {
     return GetLLVMValue(d->ssa_temp_index());
   }
+
+  LValue GetPPValue() { return GetLLVMValue(liveness().GetPPValueSSAIdx()); }
   void SetLLVMValue(int ssa_id, LValue v);
   void SetLLVMValue(Definition* d, LValue v);
   void SetLazyValue(Definition*);
@@ -454,9 +449,12 @@ class CallResolver : public ContinuationResolver {
   LBasicBlock continuation_block_ = nullptr;
   CatchBlockEntryInstr* catch_block_ = nullptr;
   BitVector* call_live_out_ = nullptr;
-  GCRelocateDescList gc_desc_list_;
+  std::unordered_map<int /* ssa_index */, int /* where */> gc_desc_map_;
+  std::unordered_map<int /* var index */, int /* where */>
+      exception_gc_desc_map_;
   std::vector<LValue> parameters_;
   int patchid_ = 0;
+  int pp_value_at_state_point_ = 0;
   bool tail_call_ = false;
   DISALLOW_COPY_AND_ASSIGN(CallResolver);
 };
@@ -879,6 +877,8 @@ void AnonImpl::CollectExceptionVars() {
       LValue phi = output().buildPhi(output().tagged_type());
       block_impl->exception_params.emplace(param_index, phi);
     }
+    block_impl->SetLLVMValue(liveness().GetPPValueSSAIdx(),
+                             output().buildPhi(output().tagged_type()));
   }
 
   output().positionToBBEnd(prologue);
@@ -958,7 +958,7 @@ LValue AnonImpl::GenerateCall(
             compiler::ObjectPoolBuilderEntry::kNotPatchable));
 
     LValue gep = output().buildGEPWithByteOffset(
-        output().pp(), output().constIntPtr(offset - kHeapObjectTag),
+        GetPPValue(), output().constIntPtr(offset - kHeapObjectTag),
         pointerType(output().tagged_type()));
     LValue code_object = output().buildLoad(gep);
     LValue entry_gep = output().buildGEPWithByteOffset(
@@ -1342,7 +1342,7 @@ LValue AnonImpl::LoadObject(const Object& object, bool is_unique) {
                                  : object_pool_builder().FindObject(object);
     const int32_t offset = compiler::target::ObjectPool::element_offset(index);
     LValue gep = output().buildGEPWithByteOffset(
-        output().pp(), output().constIntPtr(offset - kHeapObjectTag),
+        GetPPValue(), output().constIntPtr(offset - kHeapObjectTag),
         pointerType(output().tagged_type()));
     return output().buildLoad(gep);
   }
@@ -1892,8 +1892,39 @@ void CallResolver::EmitCall() {
     ValueDesc desc = impl().current_bb_impl()->GetValue(live_ssa_index);
     if (desc.type != ValueType::LLVMValue) continue;
     if (typeOf(desc.llvm_value) != output().tagged_type()) continue;
-    gc_desc_list_.emplace_back(live_ssa_index, statepoint_operands.size());
+    if (live_ssa_index == impl().liveness().GetPPValueSSAIdx())
+      pp_value_at_state_point_ = statepoint_operands.size();
+    gc_desc_map_.emplace(live_ssa_index, statepoint_operands.size());
     statepoint_operands.emplace_back(desc.llvm_value);
+  }
+  while (need_invoke()) {
+    IRTranslatorBlockImpl* block_impl =
+        impl().GetTranslatorBlockImpl(catch_block_);
+    auto& exception_params = block_impl->exception_params;
+    if (exception_params.empty()) break;
+    Environment* env = call_resolver_parameter_.call_instruction->env();
+    EMASSERT(env != nullptr);
+    env = env->Outermost();
+    EMASSERT(env != nullptr);
+    FlowGraph* flow_graph = impl().flow_graph();
+    for (intptr_t i = 0; i < flow_graph->variable_count(); ++i) {
+      auto found = exception_params.find(i);
+      if (found == exception_params.end()) continue;
+      Value* use = env->ValueAt(i);
+      Definition* def = use->definition();
+      LValue val;
+      if (def->representation() == kTagged) {
+        val = impl().GetLLVMValue(use);
+      } else {
+        // We can't handle this function anymore.
+        val = LLVMGetUndef(output().tagged_type());
+        impl().set_exception_occured();
+      }
+      // add the exception_gc_desc_map_
+      exception_gc_desc_map_.emplace(i, statepoint_operands.size());
+      statepoint_operands.emplace_back(val);
+    }
+    break;
   }
 
   if (!need_invoke()) {
@@ -1934,12 +1965,12 @@ void CallResolver::EmitTailCall() {
 
 void CallResolver::EmitRelocatesIfNeeded() {
   if (tail_call_) return;
-  for (auto& gc_relocate : gc_desc_list_) {
+  for (auto& gc_relocate : gc_desc_map_) {
     LValue relocated = output().buildCall(
         output().repo().gcRelocateIntrinsic(), statepoint_value_,
-        output().constInt32(gc_relocate.where),
-        output().constInt32(gc_relocate.where));
-    impl().SetLLVMValue(gc_relocate.ssa_index, relocated);
+        output().constInt32(gc_relocate.second),
+        output().constInt32(gc_relocate.second));
+    impl().SetLLVMValue(gc_relocate.first, relocated);
   }
 
   LValue intrinsic = output().getGCResultFunction(return_type_);
@@ -1959,10 +1990,6 @@ void CallResolver::EmitPatchPoint() {
 void CallResolver::EmitExceptionVars() {
   // Emit exception vars.
   if (need_invoke()) {
-    Environment* env = call_resolver_parameter_.call_instruction->env();
-    EMASSERT(env != nullptr);
-    env = env->Outermost();
-    EMASSERT(env != nullptr);
     output().positionToBBEnd(exception_native_bb_);
 
     LValue landing_pad = output().buildLandingPad();
@@ -1978,25 +2005,22 @@ void CallResolver::EmitExceptionVars() {
                 &exception_native_bb_, 1);
     addIncoming(block_impl->exception_val, &exception_val,
                 &exception_native_bb_, 1);
-    FlowGraph* flow_graph = impl().flow_graph();
-    // reset position in case lazy value generate code.
-    LValue terminator = LLVMGetBasicBlockTerminator(from_block_);
-    output().positionBefore(terminator);
-    for (intptr_t i = 0; i < flow_graph->variable_count(); ++i) {
-      auto found = exception_params.find(i);
-      if (found == exception_params.end()) continue;
-      Value* use = env->ValueAt(i);
-      Definition* def = use->definition();
-      LValue val;
-      if (def->representation() == kTagged) {
-        val = impl().GetLLVMValue(use);
-      } else {
-        // We can't handle this function anymore.
-        val = LLVMGetUndef(output().tagged_type());
-        impl().set_exception_occured();
-      }
-      addIncoming(found->second, &val, &exception_native_bb_, 1);
+    for (auto& p : exception_gc_desc_map_) {
+      auto found = exception_params.find(p.first);
+      EMASSERT(found != exception_params.end());
+      LValue relocated = output().buildCall(
+          output().repo().gcRelocateIntrinsic(), statepoint_value_,
+          output().constInt32(p.second), output().constInt32(p.second));
+      addIncoming(found->second, &relocated, &exception_native_bb_, 1);
     }
+    // PP Value
+    LValue new_pp = output().buildCall(
+        output().repo().gcRelocateIntrinsic(), statepoint_value_,
+        output().constInt32(pp_value_at_state_point_),
+        output().constInt32(pp_value_at_state_point_));
+    addIncoming(block_impl->GetLLVMValue(impl().liveness().GetPPValueSSAIdx()),
+                &new_pp, &exception_native_bb_, 1);
+    output().buildBr(block_impl->native_bb);
   }
 }
 
@@ -2480,6 +2504,7 @@ void IRTranslator::VisitBlockEntryWithInitialDefs(
 
 void IRTranslator::VisitGraphEntry(GraphEntryInstr* instr) {
   VisitBlockEntryWithInitialDefs(instr);
+  impl().SetLLVMValue(impl().liveness().GetPPValueSSAIdx(), output().pp());
 }
 
 void IRTranslator::VisitJoinEntry(JoinEntryInstr* instr) {
@@ -3045,7 +3070,7 @@ void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
         impl().object_pool_builder().FindNativeFunction(
             &label, compiler::ObjectPoolBuilderEntry::kPatchable));
     LValue gep = output().buildGEPWithByteOffset(
-        output().pp(), output().constIntPtr(offset - kHeapObjectTag),
+        impl().GetPPValue(), output().constIntPtr(offset - kHeapObjectTag),
         pointerType(output().repo().ref8));
     native_entry = output().buildInvariantLoad(gep);
   }
@@ -3057,7 +3082,7 @@ void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
             compiler::ObjectPoolBuilderEntry::kPatchable));
 
     LValue gep = output().buildGEPWithByteOffset(
-        output().pp(), output().constIntPtr(offset - kHeapObjectTag),
+        impl().GetPPValue(), output().constIntPtr(offset - kHeapObjectTag),
         pointerType(output().tagged_type()));
     code_object = output().buildLoad(gep);
     LValue entry_gep = output().buildGEPWithByteOffset(

@@ -12,8 +12,17 @@
 
 namespace dart {
 namespace dart_llvm {
+static intptr_t ToSecondPairVreg(intptr_t vreg) {
+  // Map vreg to its pair vreg.
+  static const intptr_t kNoVirtualRegister = -1;
+  static const intptr_t kPairVirtualRegisterOffset = 1;
+  EMASSERT((vreg == kNoVirtualRegister) || vreg >= 0);
+  return (vreg == kNoVirtualRegister) ? kNoVirtualRegister
+                                      : (vreg + kPairVirtualRegisterOffset);
+}
+
 LivenessAnalysis::LivenessAnalysis(FlowGraph* flow_graph)
-    : flow_graph_(flow_graph), liveness_(*flow_graph) {}
+    : flow_graph_(flow_graph), liveness_(*this) {}
 
 bool LivenessAnalysis::Analyze() {
   liveness_.Analyze();
@@ -28,8 +37,7 @@ bool LivenessAnalysis::Analyze() {
 template <typename Functor>
 BitVector* LivenessAnalysis::CalculateBlock(BlockEntryInstr* block,
                                             Functor& f) const {
-  BitVector* live = new (zone())
-      BitVector(zone(), flow_graph_->max_virtual_register_number());
+  BitVector* live = new (zone()) BitVector(zone(), MaxSSANumber());
   live->AddAll(liveness_.GetLiveOutSet(block));
   for (BackwardInstructionIterator it(block); !it.Done(); it.Advance()) {
     Instruction* current = it.Current();
@@ -55,6 +63,17 @@ BitVector* LivenessAnalysis::CalculateBlock(BlockEntryInstr* block,
         live->Add(input->definition()->ssa_temp_index() + 1);
       }
     }
+    // Handle uses part2: arguments;
+    intptr_t argument_count = current->ArgumentCount();
+    for (intptr_t j = 0; j < argument_count; ++j) {
+      Definition* argument = current->ArgumentAt(j);
+      live->Add(argument->ssa_temp_index());
+      if (argument->HasPairRepresentation()) {
+        live->Add(ToSecondPairVreg(argument->ssa_temp_index()));
+      }
+    }
+    // All the instructions use PP Value implicitly.
+    live->Add(GetPPValueSSAIdx());
   }
   return live;
 }
@@ -76,8 +95,7 @@ void LivenessAnalysis::AnalyzeCallOut() {
 }
 
 void LivenessAnalysis::SubmitCallsite(Instruction* instr, BitVector* live) {
-  BitVector* call_out_live = new (zone())
-      BitVector(zone(), flow_graph_->max_virtual_register_number());
+  BitVector* call_out_live = new (zone()) BitVector(zone(), MaxSSANumber());
   call_out_live->AddAll(live);
   call_out_map_.emplace(instr, call_out_live);
 }
@@ -132,20 +150,13 @@ BitVector* LivenessAnalysis::CalculateLiveness(Instruction* at) const {
   return CalculateBlock(block, f);
 }
 
-SSALivenessAnalysis::SSALivenessAnalysis(const FlowGraph& flow_graph)
-    : LivenessAnalysis(flow_graph.max_virtual_register_number(),
-                       flow_graph.postorder()),
-      graph_entry_(flow_graph.graph_entry()),
+SSALivenessAnalysis::SSALivenessAnalysis(
+    const dart_llvm::LivenessAnalysis& liveness_analysis)
+    : LivenessAnalysis(liveness_analysis.MaxSSANumber(),
+                       liveness_analysis.flow_graph().postorder()),
+      liveness_analysis_(liveness_analysis),
+      graph_entry_(liveness_analysis.flow_graph().graph_entry()),
       broken_(false) {}
-
-static intptr_t ToSecondPairVreg(intptr_t vreg) {
-  // Map vreg to its pair vreg.
-  static const intptr_t kNoVirtualRegister = -1;
-  static const intptr_t kPairVirtualRegisterOffset = 1;
-  EMASSERT((vreg == kNoVirtualRegister) || vreg >= 0);
-  return (vreg == kNoVirtualRegister) ? kNoVirtualRegister
-                                      : (vreg + kPairVirtualRegisterOffset);
-}
 
 void SSALivenessAnalysis::ComputeInitialSets() {
   const intptr_t block_count = postorder_.length();
@@ -201,6 +212,8 @@ void SSALivenessAnalysis::ComputeInitialSets() {
           live_in->Add(ToSecondPairVreg(argument->ssa_temp_index()));
         }
       }
+      // All the instructions use PP Value implicitly.
+      live_in->Add(liveness_analysis_.GetPPValueSSAIdx());
 
       // Add non-argument uses from the deoptimization environment (pushed
       // arguments are not allocated by the register allocator).
@@ -269,6 +282,14 @@ void SSALivenessAnalysis::ComputeInitialSets() {
       }
     }
   }
+}
+
+int LivenessAnalysis::GetPPValueSSAIdx() const {
+  return flow_graph().max_virtual_register_number();
+}
+
+int LivenessAnalysis::MaxSSANumber() const {
+  return flow_graph().max_virtual_register_number() + 1;
 }
 }  // namespace dart_llvm
 }  // namespace dart

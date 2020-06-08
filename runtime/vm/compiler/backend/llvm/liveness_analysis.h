@@ -16,17 +16,18 @@ class BlockEntryInstr;
 class GraphEntryInstr;
 class Zone;
 namespace dart_llvm {
+class LivenessAnalysis;
 
 class SSALivenessAnalysis : public dart::LivenessAnalysis {
  public:
-  explicit SSALivenessAnalysis(const FlowGraph& flow_graph);
+  explicit SSALivenessAnalysis(const dart_llvm::LivenessAnalysis&);
 
   inline bool broken() const { return broken_; }
 
  private:
   // Compute initial values for live-out, kill and live-in sets.
   void ComputeInitialSets() override;
-
+  const dart_llvm::LivenessAnalysis& liveness_analysis_;
   GraphEntryInstr* graph_entry_;
   bool broken_;
 };
@@ -43,6 +44,10 @@ class LivenessAnalysis final {
   BitVector* GetLiveInSet(BlockEntryInstr*) const;
   BitVector* GetLiveOutSet(BlockEntryInstr*) const;
   BitVector* GetCallOutAt(Instruction* at) const;
+  int GetPPValueSSAIdx() const;
+  int MaxSSANumber() const;
+
+  const FlowGraph& flow_graph() const { return *flow_graph_; }
 
  private:
   void AnalyzeCallOut();

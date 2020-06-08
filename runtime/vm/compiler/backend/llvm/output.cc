@@ -393,16 +393,6 @@ LValue Output::buildInlineAsm(LType type,
   return buildCall(func);
 }
 
-LValue Output::buildLoadMagic(LType type, int64_t magic) {
-  char kAsmString[] = "ldr $0, =${1:c}";
-  char kConstraint[] = "=r,i";
-  LValue func = LLVMGetInlineAsm(functionType(type, repo().intPtr), kAsmString,
-                                 sizeof(kAsmString) - 1, kConstraint,
-                                 sizeof(kConstraint) - 1, false, false,
-                                 LLVMInlineAsmDialectATT);
-  return buildCall(func, constIntPtr(magic));
-}
-
 LValue Output::buildPhi(LType type) {
   return setInstrDebugLoc(dart_llvm::buildPhi(builder_, type));
 }
