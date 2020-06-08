@@ -4959,8 +4959,6 @@ void IRTranslator::VisitDispatchTableCall(DispatchTableCallInstr* instr) {
     LValue argument_desc_val = impl().LoadObject(arguments_descriptor);
     resolver.SetGParameter(static_cast<int>(ARGS_DESC_REG), argument_desc_val);
   }
-  // FIXME: need add this when code assemble.
-  // compiler->AddDispatchTableCallTarget(selector());
   LValue v = resolver.BuildCall();
   impl().SetLLVMValue(instr, v);
 }

@@ -1,6 +1,7 @@
 #include "vm/compiler/backend/llvm/llvm_code_assembler.h"
 #if defined(DART_ENABLE_LLVM_COMPILER)
 #include "vm/bitmap.h"
+#include "vm/compiler/aot/dispatch_table_generator.h"
 #include "vm/compiler/assembler/assembler.h"
 #include "vm/compiler/backend/flow_graph.h"
 #include "vm/compiler/backend/flow_graph_compiler.h"
@@ -364,6 +365,23 @@ void CodeAssembler::EmitExceptionHandler() {
 void CodeAssembler::EndLastInstr() {
   if (!last_instr_) return;
 
+  if (last_instr_->IsDispatchTableCall()) {
+    DispatchTableCallInstr* dispatch_table_call_instr =
+        last_instr_->AsDispatchTableCall();
+    if (dispatch_table_call_instr->selector()->called_on_null &&
+        !dispatch_table_call_instr->selector()->on_null_interface) {
+      Value* receiver = dispatch_table_call_instr->ArgumentValueAt(
+          dispatch_table_call_instr->FirstArgIndex());
+      if (receiver->Type()->is_nullable()) {
+        const String& function_name = String::ZoneHandle(
+            dispatch_table_call_instr->interface_target().name());
+        compiler().AddNullCheck(dispatch_table_call_instr->token_pos(),
+                                function_name);
+      }
+    }
+    compiler().AddDispatchTableCallTarget(
+        dispatch_table_call_instr->selector());
+  }
   compiler().StatsEnd(last_instr_);
   compiler().EndCodeSourceRange(last_instr_->token_pos());
 }
