@@ -304,7 +304,11 @@ intptr_t CodeAssembler::CollectExceptionInfo(
     try_index = extended_try_index;
 #if 0
     printf("handling extened exception for function:%s\n",
-           compiler().flow_graph().parsed_function().function().ToCString());
+           compiler()
+               .flow_graph()
+               .parsed_function()
+               .function()
+               .ToFullyQualifiedCString());
 #endif
   }
   exception_map_.emplace(
