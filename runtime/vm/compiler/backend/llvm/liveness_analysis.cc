@@ -48,6 +48,8 @@ BitVector* LivenessAnalysis::CalculateBlock(BlockEntryInstr* block,
       if (current_def->HasPairRepresentation())
         live->Remove(current_def->ssa_temp_index() + 1);
     }
+    // All the instructions use PP Value implicitly.
+    live->Add(GetPPValueSSAIdx());
     if (f(current, live)) return live;
     // Initialize location summary for instruction.
     current->InitializeLocationSummary(zone(), true);  // opt
@@ -72,8 +74,6 @@ BitVector* LivenessAnalysis::CalculateBlock(BlockEntryInstr* block,
         live->Add(ToSecondPairVreg(argument->ssa_temp_index()));
       }
     }
-    // All the instructions use PP Value implicitly.
-    live->Add(GetPPValueSSAIdx());
   }
   return live;
 }

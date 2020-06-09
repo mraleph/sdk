@@ -51,6 +51,7 @@ struct IRTranslatorBlockImpl {
   // exception vals
   LValue exception_val = nullptr;
   LValue stacktrace_val = nullptr;
+  LValue exception_pp_val = nullptr;
   std::unordered_map<int, LValue> exception_params;
 
   AnonImpl* anon_impl;
@@ -550,6 +551,18 @@ class AssemblerResolver : private ModifiedValuesMergeHelper {
   std::vector<LValue> merge_values_;
 };
 
+// Switch to other block.
+class BlockScope {
+ public:
+  BlockScope(AnonImpl& impl, BlockEntryInstr*);
+  ~BlockScope();
+
+ private:
+  BlockEntryInstr* saved_;
+  AnonImpl& impl_;
+  DISALLOW_COPY_AND_ASSIGN(BlockScope);
+};
+
 LValue IRTranslatorBlockImpl::GetLLVMValue(int ssa_id) {
   auto found = values_.find(ssa_id);
   EMASSERT(found != values_.end());
@@ -754,6 +767,7 @@ LValue AnonImpl::EnsurePhiInput(BlockEntryInstr* pred, int index, LType type) {
     LValue terminator =
         LLVMGetBasicBlockTerminator(GetNativeBBContinuation(pred));
     output().positionBefore(terminator);
+    BlockScope block_scope(*this, pred);
     val = MaterializeDef(found_in_lazy_values->second);
     return val;
   } else {
@@ -869,6 +883,7 @@ void AnonImpl::CollectExceptionVars() {
     output().positionToBBEnd(native_bb);
     block_impl->exception_val = output().buildPhi(output().tagged_type());
     block_impl->stacktrace_val = output().buildPhi(output().tagged_type());
+    block_impl->exception_pp_val = output().buildPhi(output().tagged_type());
     for (Definition* def : *instr->initial_definitions()) {
       ParameterInstr* param = def->AsParameter();
       if (!param) continue;
@@ -878,7 +893,7 @@ void AnonImpl::CollectExceptionVars() {
       block_impl->exception_params.emplace(param_index, phi);
     }
     block_impl->SetLLVMValue(liveness().GetPPValueSSAIdx(),
-                             output().buildPhi(output().tagged_type()));
+                             block_impl->exception_pp_val);
   }
 
   output().positionToBBEnd(prologue);
@@ -1999,7 +2014,6 @@ void CallResolver::EmitExceptionVars() {
         output().repo().gcExceptionDataIntrinsic(), landing_pad);
     IRTranslatorBlockImpl* block_impl =
         impl().GetTranslatorBlockImpl(catch_block_);
-    output().buildBr(block_impl->native_bb);
     auto& exception_params = block_impl->exception_params;
     addIncoming(block_impl->stacktrace_val, &stacktrace_val,
                 &exception_native_bb_, 1);
@@ -2009,17 +2023,18 @@ void CallResolver::EmitExceptionVars() {
       auto found = exception_params.find(p.first);
       EMASSERT(found != exception_params.end());
       LValue relocated = output().buildCall(
-          output().repo().gcRelocateIntrinsic(), statepoint_value_,
+          output().repo().gcRelocateIntrinsic(), landing_pad,
           output().constInt32(p.second), output().constInt32(p.second));
       addIncoming(found->second, &relocated, &exception_native_bb_, 1);
     }
     // PP Value
-    LValue new_pp = output().buildCall(
-        output().repo().gcRelocateIntrinsic(), statepoint_value_,
-        output().constInt32(pp_value_at_state_point_),
-        output().constInt32(pp_value_at_state_point_));
-    addIncoming(block_impl->GetLLVMValue(impl().liveness().GetPPValueSSAIdx()),
-                &new_pp, &exception_native_bb_, 1);
+    EMASSERT(pp_value_at_state_point_ != 0);
+    LValue new_pp =
+        output().buildCall(output().repo().gcRelocateIntrinsic(), landing_pad,
+                           output().constInt32(pp_value_at_state_point_),
+                           output().constInt32(pp_value_at_state_point_));
+    addIncoming(block_impl->exception_pp_val, &new_pp, &exception_native_bb_,
+                1);
     output().buildBr(block_impl->native_bb);
   }
 }
@@ -2408,6 +2423,17 @@ void AssemblerResolver::GotoMergeWithValueIfNot(LValue cond, LValue v) {
   AssignModifiedValueToMerge(current);
   output().buildCondBr(cond, continuation, merge_);
   output().positionToBBEnd(continuation);
+}
+
+BlockScope::BlockScope(AnonImpl& impl, BlockEntryInstr* bb)
+    : saved_(impl.current_bb()), impl_(impl) {
+  impl.current_bb_ = bb;
+  impl.current_bb_impl_ = impl.GetTranslatorBlockImpl(bb);
+}
+
+BlockScope::~BlockScope() {
+  impl_.current_bb_ = saved_;
+  impl_.current_bb_impl_ = impl_.GetTranslatorBlockImpl(saved_);
 }
 }  // namespace
 
