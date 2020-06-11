@@ -590,18 +590,12 @@ void Output::AddFunctionCommonAttr(LValue function) {
 
   static const char kTrue[] = "true";
   static const char kFalse[] = "false";
+  (void)kFalse;
 #if defined(TARGET_ARCH_ARM)
   static const char kFS[] = "target-features";
   static const char kFSValue[] =
-      "+armv7-a,+dsp,+neon,+vfp3,-crypto,-fp-armv8,-thumb-mode,-vfp4";
+      "+armv7-a,+dsp,+neon,+vfp3,-crypto,-fp-armv8,-thumb-mode,-vfp4,-fp-only-sp";
   LLVMAddTargetDependentFunctionAttr(function, kFS, kFSValue);
-
-  static const char kUseSoftFloat[] = "use-soft-float";
-  if (TargetCPUFeatures::hardfp_supported()) {
-    LLVMAddTargetDependentFunctionAttr(function, kUseSoftFloat, kFalse);
-  } else {
-    LLVMAddTargetDependentFunctionAttr(function, kUseSoftFloat, kTrue);
-  }
 #endif
 
   static const char kNoRealignStack[] = "no-realign-stack";
