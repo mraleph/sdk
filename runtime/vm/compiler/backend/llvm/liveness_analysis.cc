@@ -52,7 +52,6 @@ BitVector* LivenessAnalysis::CalculateBlock(BlockEntryInstr* block,
     live->Add(GetPPValueSSAIdx());
     if (f(current, live)) return live;
     // Initialize location summary for instruction.
-    current->InitializeLocationSummary(zone(), true);  // opt
 
     // Handle uses.
     for (intptr_t j = 0; j < current->InputCount(); j++) {
@@ -170,9 +169,6 @@ void SSALivenessAnalysis::ComputeInitialSets() {
     for (BackwardInstructionIterator it(block); !it.Done(); it.Advance()) {
       Instruction* current = it.Current();
 
-      // Initialize location summary for instruction.
-      current->InitializeLocationSummary(zone(), true);  // opt
-
       LocationSummary* locs = current->locs();
 #if defined(DEBUG)
       locs->DiscoverWritableInputs();
@@ -195,8 +191,7 @@ void SSALivenessAnalysis::ComputeInitialSets() {
       for (intptr_t j = 0; j < input_count; j++) {
         Value* input = current->InputAt(j);
 
-        ASSERT(!locs->in(j).IsConstant() || input->BindsToConstant());
-        if (locs->in(j).IsConstant()) continue;
+        if (input->definition()->IsConstant()) continue;
 
         live_in->Add(input->definition()->ssa_temp_index());
         if (input->definition()->HasPairRepresentation()) {
