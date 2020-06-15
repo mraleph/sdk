@@ -339,14 +339,14 @@ void CodeAssembler::RecordSafePoint(const CallSiteInfo* call_site_info,
     builder->Set(index, true);
   }
   // set up parameters
-  // FIXME: only support tagged parameter now.
   size_t top_of_stack = slot_count_;
-  for (size_t i = 0; i < call_site_info->stack_parameter_count(); ++i) {
+  int64_t parameter_bits = call_site_info->parameter_bits();
+  int valid_bits = call_site_info->valid_bits();
+  int i;
+
+  for (i = 0; i < valid_bits; ++i) {
+    if ((parameter_bits & (1ULL << i)) == 0) continue;
     int index = top_of_stack - i - 1;
-    builder->Set(index, true);
-  }
-  if (call_site_info->return_on_stack_pos() != -1) {
-    int index = top_of_stack - call_site_info->stack_parameter_count() - 1;
     builder->Set(index, true);
   }
   compiler().compressed_stackmaps_builder()->AddEntry(assembler().CodeSize(),

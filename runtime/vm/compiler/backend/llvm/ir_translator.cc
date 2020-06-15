@@ -215,6 +215,8 @@ class AnonImpl {
   LValue LoadClassId(LValue o);
   LValue CompareClassId(LValue o, intptr_t clsid);
   LValue CompareObject(LValue, const Object&);
+  LValue BitcastDoubleToInt64(LValue);
+  LValue BitcastInt64ToDouble(LValue);
 
   // expect
   LValue ExpectTrue(LValue);
@@ -454,6 +456,7 @@ class CallResolver : public ContinuationResolver {
   std::unordered_map<int /* var index */, int /* where */>
       exception_gc_desc_map_;
   std::vector<LValue> parameters_;
+  int parameter_current_slot_ = 0;
   int patchid_ = 0;
   int pp_value_at_state_point_ = 0;
   bool tail_call_ = false;
@@ -1275,6 +1278,28 @@ LValue AnonImpl::CompareObject(LValue v, const Object& o) {
   return output().buildICmp(LLVMIntEQ, v, o_val);
 }
 
+LValue AnonImpl::BitcastDoubleToInt64(LValue v) {
+  EMASSERT(typeOf(v) == output().repo().doubleType);
+
+  LValue storage = output().buildBitCast(output().bitcast_space(),
+                                         output().repo().refDouble);
+  output().buildStore(v, storage);
+  LValue int64_storage =
+      output().buildBitCast(output().bitcast_space(), output().repo().ref64);
+  return output().buildLoad(int64_storage);
+}
+
+LValue AnonImpl::BitcastInt64ToDouble(LValue v) {
+  EMASSERT(typeOf(v) == output().repo().int64);
+
+  LValue storage =
+      output().buildBitCast(output().bitcast_space(), output().repo().ref64);
+  output().buildStore(v, storage);
+  LValue double_storage = output().buildBitCast(output().bitcast_space(),
+                                                output().repo().refDouble);
+  return output().buildLoad(double_storage);
+}
+
 LValue AnonImpl::ExpectTrue(LValue cond) {
   EMASSERT(typeOf(cond) == output().repo().boolean);
 
@@ -1804,14 +1829,25 @@ void CallResolver::SetGParameter(int reg, LValue val) {
 }
 
 void CallResolver::AddStackParameter(LValue v) {
+  if (typeOf(v) == output().repo().doubleType)
+    v = impl().BitcastDoubleToInt64(v);
   parameters_.emplace_back(v);
-  int which = parameters_.size() - 1;
+  int which = parameter_current_slot_;
   LType type_of_v = typeOf(v);
   if (type_of_v == output().tagged_type()) {
     call_resolver_parameter_.callsite_info->MarkParameterBit(which, 1);
+    parameter_current_slot_ += 1;
   } else if (type_of_v == output().repo().int64) {
+#if defined(TARGET_ARCH_IS_32_BIT)
     call_resolver_parameter_.callsite_info->MarkParameterBit(which, 0);
     call_resolver_parameter_.callsite_info->MarkParameterBit(which + 1, 0);
+    parameter_current_slot_ += 2;
+#elif defined(TARGET_ARCH_IS_64_BIT)
+    call_resolver_parameter_.callsite_info->MarkParameterBit(which, 0);
+    parameter_current_slot_ += 1;
+#else
+#error unsupported arch
+#endif
   } else {
     impl().set_exception_occured();
     THR_Print("FIXME: not supported type(maybe double)");
@@ -2470,14 +2506,20 @@ IRTranslator::IRTranslator(FlowGraph* flow_graph, Precompiler* precompiler)
   }
   EMASSERT(params.size() ==
            static_cast<size_t>(flow_graph->num_direct_parameters()));
+  std::sort(params.begin(), params.end(),
+            [](const ParameterInstr* lhs, const ParameterInstr* rhs) {
+              return lhs->index() < rhs->index();
+            });
+  int parameter_end = params.size();
   for (ParameterInstr* param : params) {
-    int loc = param->index() + 1;
+    parameter_end -= 1;
     switch (param->representation()) {
+      case kUnboxedDouble:
       case kUnboxedInt64:
-        parameter_desc.emplace_back(-loc, int64_type);
+        parameter_desc.emplace_back(-parameter_end - 1, int64_type);
         break;
       case kTagged:
-        parameter_desc.emplace_back(-loc, tagged_type);
+        parameter_desc.emplace_back(-parameter_end - 1, tagged_type);
         break;
       default:
         impl().output_.reset();
@@ -2485,9 +2527,10 @@ IRTranslator::IRTranslator(FlowGraph* flow_graph, Precompiler* precompiler)
         THR_Print("function %s will not compile for param: %s\n",
                   flow_graph->parsed_function().function().ToCString(),
                   param->ToCString());
-        return;
     }
   }
+  EMASSERT(parameter_end == 0);
+
   // init output().
   output().initializeBuild(parameter_desc, impl().DeduceReturnType());
   // initialize exception vars.
@@ -2620,6 +2663,8 @@ void IRTranslator::VisitParameter(ParameterInstr* instr) {
   IRTranslatorBlockImpl* block_impl = impl().current_bb_impl();
   if (param_index < impl().flow_graph()->num_direct_parameters()) {
     result = output().parameter(param_index);
+    if (instr->representation() == kUnboxedDouble)
+      result = impl().BitcastInt64ToDouble(result);
   } else {
     EMASSERT(block_impl->exception_block);
     auto found = block_impl->exception_params.find(param_index);

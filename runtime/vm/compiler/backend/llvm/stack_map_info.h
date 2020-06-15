@@ -10,6 +10,7 @@
 
 #include "vm/compiler/backend/llvm/llvm_config.h"
 #if defined(DART_ENABLE_LLVM_COMPILER)
+#include "vm/compiler/backend/llvm/llvm_log.h"
 #include "vm/compiler/backend/locations.h"
 #include "vm/object.h"
 #include "vm/token_position.h"
@@ -68,7 +69,9 @@ class CallSiteInfo final : public StackMapInfo {
   V(const Code*, code)                                                         \
   V(CodeEntryKind, entry_kind)                                                 \
   V(bool, is_tailcall)                                                         \
-  V(int, return_on_stack_pos)
+  V(int, return_on_stack_pos)                                                  \
+  V(int64_t, parameter_bits)                                                   \
+  V(int, valid_bits)
 
 #define CALLSITE_WAPPER(type, name) DEFINE_ACCESSOR(type, name, CallSiteInfo)
 

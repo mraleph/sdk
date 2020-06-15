@@ -24,6 +24,7 @@ CallSiteInfo::CallSiteInfo()
       is_tailcall_(false) {}
 
 void CallSiteInfo::MarkParameterBit(int which, bool set) {
+  EMASSERT(which < 64);
   if (set) parameter_bits_ |= 1ULL << which;
   if (which + 1 > valid_bits_) valid_bits_ = which + 1;
 }
