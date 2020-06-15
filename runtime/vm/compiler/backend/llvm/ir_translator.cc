@@ -4678,6 +4678,7 @@ void IRTranslator::VisitGenericCheckBound(GenericCheckBoundInstr* instr) {
   impl().PushArgument(index);
   impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
                              kRangeErrorRuntimeEntry, 2, false);
+  output().buildCall(output().repo().trapIntrinsic());
   resolver.GotoMerge();
   resolver.End();
 }
