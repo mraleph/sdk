@@ -106,6 +106,9 @@ void Output::initializeFunction(const RegisterParameterDesc& registerParameters,
   params_types.resize(kV8CCRegisterParameterCount, tagged_type());
   params_types[static_cast<int>(PP)] = tagged_type();
   params_types[static_cast<int>(THR)] = repo().ref8;
+#if defined(TARGET_SUPPORT_DISPATCH_TABLE_REG)
+  params_types[static_cast<int>(DISPATCH_TABLE_REG)] = repo().ref8;
+#endif
   EMASSERT(params_types.size() == kV8CCRegisterParameterCount);
   std::vector<LType> float_point_parameter_types;
   LType double_type = repo().doubleType;
@@ -608,6 +611,19 @@ LLVMAttributeRef Output::createStringAttr(const char* key,
                                           unsigned value_len) {
   return LLVMCreateStringAttribute(state_.context_, key, key_len, value,
                                    value_len);
+}
+
+LValue Output::GetDispatchTable() {
+#if defined(TARGET_SUPPORT_DISPATCH_TABLE_REG)
+  return LLVMGetParam(state_.function_, static_cast<int>(DISPATCH_TABLE_REG));
+#else
+  LValue dispatch_table_gep = buildGEPWithByteOffset(
+      output().thread(),
+      output().constIntPtr(
+          compiler::target::Thread::dispatch_table_array_offset()),
+      pointerType(output().repo().ref8));
+  return buildInvariantLoad(dispatch_table_gep);
+#endif
 }
 }  // namespace dart_llvm
 }  // namespace dart

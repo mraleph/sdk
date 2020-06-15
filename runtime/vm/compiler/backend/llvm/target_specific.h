@@ -35,6 +35,7 @@ static const Register kCreateArrayElementTypeReg = R1;
 
 // Context Allocation
 static const Register kAllocateContextNumOfContextVarsReg = R1;
+#define TARGET_SUPPORT_DISPATCH_TABLE_REG
 #else
 #error unsupported arch
 #endif
