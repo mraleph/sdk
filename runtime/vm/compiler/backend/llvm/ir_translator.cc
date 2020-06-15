@@ -4215,8 +4215,15 @@ void IRTranslator::VisitCheckNull(CheckNullInstr* instr) {
   resolver.BranchIf(impl().ExpectFalse(cmp), slow_path);
   resolver.GotoMerge();
   resolver.Bind(slow_path);
+  const RuntimeEntry* runtime_entry;
+  if (instr->IsArgumentCheck()) {
+    runtime_entry = &kArgumentNullErrorRuntimeEntry;
+  } else {
+    runtime_entry = &kNullErrorRuntimeEntry;
+  }
   impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
-                             kNullErrorRuntimeEntry, 0, false);
+                             *runtime_entry, 0, false);
+  output().buildCall(output().repo().trapIntrinsic());
   resolver.GotoMerge();
   resolver.End();
 }
