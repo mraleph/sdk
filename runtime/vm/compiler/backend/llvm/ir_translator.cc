@@ -275,6 +275,11 @@ class AnonImpl {
   void SetCurrentBlockContinuation(LBasicBlock continuation);
   LBasicBlock GetCurrentBlockContinuation();
 
+  // Target dependent
+  bool support_integer_div() const;
+  void CallWriteBarrier(LValue object, LValue value);
+  void CallArrayWriteBarrier(LValue object, LValue value, LValue slot);
+
   inline CompilerState& compiler_state() { return *compiler_state_; }
   inline LivenessAnalysis& liveness() { return *liveness_analysis_; }
   inline Output& output() { return *output_; }
@@ -1443,23 +1448,7 @@ void AnonImpl::StoreIntoObject(Instruction* instr,
     });
     resolver.BuildLeft([&]() {
       // should emit
-      LValue entry_gep = output().buildGEPWithByteOffset(
-          output().thread(),
-          compiler::target::Thread::write_barrier_wrappers_thread_offset(
-              kWriteBarrierValueReg),
-          pointerType(output().repo().ref8));
-      LValue entry = output().buildLoad(entry_gep);
-      std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
-      callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
-      callsite_info->set_instr_size(kCallInstrSize);
-
-      CallResolver::CallResolverParameter param(instr,
-                                                std::move(callsite_info));
-      CallResolver call_resolver(*this, -1, param);
-      call_resolver.SetGParameter(kCallTargetReg, entry);
-      call_resolver.SetGParameter(kWriteBarrierObjectReg, object);
-      call_resolver.SetGParameter(kWriteBarrierValueReg, value);
-      call_resolver.BuildCall();
+      CallWriteBarrier(object, value);
       return value;
     });
     resolver.BuildRight([&]() { return value; });
@@ -1512,24 +1501,9 @@ void AnonImpl::StoreIntoArray(Instruction* instr,
     });
     resolver.BuildLeft([&]() {
       // should emit
-      LValue entry_gep = output().buildGEPWithByteOffset(
-          output().thread(),
-          compiler::target::Thread::array_write_barrier_entry_point_offset(),
-          pointerType(output().repo().ref8));
-      LValue entry = output().buildLoad(entry_gep);
-      std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
-      callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
-      callsite_info->set_instr_size(kCallInstrSize);
-      CallResolver::CallResolverParameter param(instr,
-                                                std::move(callsite_info));
-      CallResolver call_resolver(*this, -1, param);
       LValue slot = output().buildAdd(TaggedToWord(object), dest);
       slot = output().buildSub(slot, output().constIntPtr(kHeapObjectTag));
-      call_resolver.SetGParameter(kCallTargetReg, entry);
-      call_resolver.SetGParameter(kWriteBarrierObjectReg, object);
-      call_resolver.SetGParameter(kWriteBarrierValueReg, value);
-      call_resolver.SetGParameter(kWriteBarrierSlotReg, slot);
-      call_resolver.BuildCall();
+      CallArrayWriteBarrier(object, value, slot);
       return value;
     });
     resolver.BuildRight([&]() { return value; });
@@ -2471,6 +2445,11 @@ BlockScope::~BlockScope() {
   impl_.current_bb_ = saved_;
   impl_.current_bb_impl_ = impl_.GetTranslatorBlockImpl(saved_);
 }
+#if defined(TARGET_ARCH_ARM)
+#include "vm/compiler/backend/llvm/ir_translator_arm.cc"
+#else
+#error unsupported arch
+#endif
 }  // namespace
 
 struct IRTranslator::Impl : public AnonImpl {};
@@ -3907,7 +3886,7 @@ void IRTranslator::VisitBinarySmiOp(BinarySmiOpInstr* instr) {
       case Token::kTRUNCDIV: {
         bool support_int_div = true;
 #if defined(TARGET_ARCH_ARM)
-        support_int_div = TargetCPUFeatures::integer_division_supported();
+        support_int_div = impl().support_integer_div();
 #endif
         if (support_int_div) {
           value = output().buildSDiv(left, right);
