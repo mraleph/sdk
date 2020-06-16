@@ -287,31 +287,29 @@ class AnonImpl {
   inline BlockEntryInstr* current_bb() { return current_bb_; }
   inline FlowGraph* flow_graph() { return flow_graph_; }
   inline Thread* thread() { return thread_; }
+  inline ObjectStore* object_store() {
+    return flow_graph()->isolate()->object_store();
+  }
 
   // classes
   const Class& mint_class() {
-    return Class::ZoneHandle(
-        flow_graph()->isolate()->object_store()->mint_class());
+    return Class::ZoneHandle(object_store()->mint_class());
   }
 
   const Class& double_class() {
-    return Class::ZoneHandle(
-        flow_graph()->isolate()->object_store()->double_class());
+    return Class::ZoneHandle(object_store()->double_class());
   }
 
   const Class& float32x4_class() {
-    return Class::ZoneHandle(
-        flow_graph()->isolate()->object_store()->float32x4_class());
+    return Class::ZoneHandle(object_store()->float32x4_class());
   }
 
   const Class& float64x2_class() {
-    return Class::ZoneHandle(
-        flow_graph()->isolate()->object_store()->float64x2_class());
+    return Class::ZoneHandle(object_store()->float64x2_class());
   }
 
   const Class& int32x4_class() {
-    return Class::ZoneHandle(
-        flow_graph()->isolate()->object_store()->int32x4_class());
+    return Class::ZoneHandle(object_store()->int32x4_class());
   }
 
   Zone* zone() { return flow_graph_->zone(); }
@@ -4563,8 +4561,20 @@ void IRTranslator::VisitBoxInt64(BoxInt64Instr* instr) {
     resolver.GotoMergeWithValue(impl().WordToTagged(result));
 
     resolver.Bind(slow_path);
-    BoxAllocationSlowPath allocate(instr, impl().mint_class(), impl());
-    result = allocate.Allocate();
+    if (BoxInt64Instr::SlowPathSharingSupported(true) &&
+        !impl()
+             .object_store()
+             ->allocate_mint_without_fpu_regs_stub()
+             ->InVMIsolateHeap()) {
+      const auto& stub = Code::ZoneHandle(
+          impl().zone(),
+          impl().object_store()->allocate_mint_without_fpu_regs_stub());
+      result = impl().GenerateCall(instr, instr->token_pos(), DeoptId::kNone,
+                                   stub, RawPcDescriptors::kOther, 0, {});
+    } else {
+      BoxAllocationSlowPath allocate(instr, impl().mint_class(), impl());
+      result = allocate.Allocate();
+    }
     impl().StoreToOffset(
         result, compiler::target::Mint::value_offset() - kHeapObjectTag, value);
     resolver.GotoMergeWithValue(result);
