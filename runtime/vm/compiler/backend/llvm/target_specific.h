@@ -23,6 +23,7 @@ static const Register kRuntimeCallTargetReg = R0;
 // NativeCall
 static const Register kNativeEntryReg = R9;
 static const Register kNativeArgcReg = R1;
+static const Register kNativeArgArrayReg = R2;
 
 // instance of
 static const Register kInstanceOfInstanceReg = R0;
