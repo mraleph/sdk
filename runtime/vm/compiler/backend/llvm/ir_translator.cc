@@ -166,7 +166,8 @@ class AnonImpl {
       const Code& stub,
       RawPcDescriptors::Kind kind,
       size_t stack_argument_count,
-      const std::vector<std::pair<Register, LValue>>& gp_parameters);
+      const std::vector<std::pair<Register, LValue>>& gp_parameters,
+      bool is_shared_stub_call = false);
   LValue GenerateRuntimeCall(Instruction*,
                              TokenPosition token_pos,
                              intptr_t deopt_id,
@@ -429,6 +430,7 @@ class CallResolver : public ContinuationResolver {
   void AddStackParameter(LValue);
   LValue GetStackParameter(size_t i);
   LValue BuildCall();
+  void set_shared_stub_call() { is_shared_stub_call_ = true; }
 
  private:
   void GenerateStatePointFunction();
@@ -438,6 +440,7 @@ class CallResolver : public ContinuationResolver {
   void EmitRelocatesIfNeeded();
   void EmitPatchPoint();
   void EmitExceptionVars();
+  void EmitIfSharedStubCall();
   bool need_invoke() { return tail_call_ == false && catch_block_ != nullptr; }
 
   CallResolverParameter& call_resolver_parameter_;
@@ -463,6 +466,7 @@ class CallResolver : public ContinuationResolver {
   int patchid_ = 0;
   int pp_value_at_state_point_ = 0;
   bool tail_call_ = false;
+  bool is_shared_stub_call_ = false;
   DISALLOW_COPY_AND_ASSIGN(CallResolver);
 };
 
@@ -951,7 +955,8 @@ LValue AnonImpl::GenerateCall(
     const Code& stub,
     RawPcDescriptors::Kind kind,
     size_t stack_argument_count,
-    const std::vector<std::pair<Register, LValue>>& gp_parameters) {
+    const std::vector<std::pair<Register, LValue>>& gp_parameters,
+    bool is_shared_stub_call) {
   if (!stub.InVMIsolateHeap()) {
     std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
     callsite_info->set_type(CallSiteInfo::CallTargetType::kStubRelative);
@@ -968,6 +973,7 @@ LValue AnonImpl::GenerateCall(
       pushed_arguments_.pop_back();
       resolver.AddStackParameter(argument);
     }
+    if (is_shared_stub_call) resolver.set_shared_stub_call();
     for (auto p : gp_parameters) {
       resolver.SetGParameter(p.first, p.second);
     }
@@ -1446,7 +1452,23 @@ void AnonImpl::StoreIntoObject(Instruction* instr,
     });
     resolver.BuildLeft([&]() {
       // should emit
-      CallWriteBarrier(object, value);
+      LValue entry_gep = output().buildGEPWithByteOffset(
+          output().thread(),
+          compiler::target::Thread::write_barrier_entry_point_offset(),
+          pointerType(output().repo().ref8));
+      LValue entry = output().buildLoad(entry_gep);
+      std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
+      callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
+      callsite_info->set_instr_size(kCallInstrSize);
+
+      CallResolver::CallResolverParameter param(instr,
+                                                std::move(callsite_info));
+      CallResolver call_resolver(*this, -1, param);
+      call_resolver.SetGParameter(kCallTargetReg, entry);
+      call_resolver.SetGParameter(kWriteBarrierObjectReg, object);
+      call_resolver.SetGParameter(kWriteBarrierValueReg, value);
+      call_resolver.set_shared_stub_call();
+      call_resolver.BuildCall();
       return value;
     });
     resolver.BuildRight([&]() { return value; });
@@ -1501,6 +1523,24 @@ void AnonImpl::StoreIntoArray(Instruction* instr,
       // should emit
       LValue slot = output().buildAdd(TaggedToWord(object), dest);
       slot = output().buildSub(slot, output().constIntPtr(kHeapObjectTag));
+      LValue entry_gep = output().buildGEPWithByteOffset(
+          output().thread(),
+          compiler::target::Thread::array_write_barrier_entry_point_offset(),
+          pointerType(output().repo().ref8));
+      LValue entry = output().buildLoad(entry_gep);
+      std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
+      callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
+      callsite_info->set_instr_size(kCallInstrSize);
+      CallResolver::CallResolverParameter param(instr,
+                                                std::move(callsite_info));
+      CallResolver call_resolver(*this, -1, param);
+      call_resolver.SetGParameter(kCallTargetReg, entry);
+      call_resolver.SetGParameter(kWriteBarrierObjectReg, object);
+      call_resolver.SetGParameter(kWriteBarrierValueReg, value);
+      call_resolver.SetGParameter(kWriteBarrierSlotReg, slot);
+      call_resolver.set_shared_stub_call();
+      call_resolver.BuildCall();
+
       CallArrayWriteBarrier(object, value, slot);
       return value;
     });
@@ -1863,6 +1903,7 @@ LValue CallResolver::BuildCall() {
   }
   EmitRelocatesIfNeeded();
   EmitPatchPoint();
+  EmitIfSharedStubCall();
   return call_value_;
 }
 
@@ -2045,6 +2086,14 @@ void CallResolver::EmitExceptionVars() {
                 1);
     output().buildBr(block_impl->native_bb);
   }
+}
+
+void CallResolver::EmitIfSharedStubCall() {
+  if (LIKELY(!is_shared_stub_call_)) return;
+  static const char kDartSharedStubCall[] = "dart-shared-stub-call";
+  LLVMAttributeRef attr = output().createStringAttr(
+      kDartSharedStubCall, sizeof(kDartSharedStubCall) - 1, nullptr, 0);
+  LLVMAddCallSiteAttribute(statepoint_value_, ~0U, attr);
 }
 
 BoxAllocationSlowPath::BoxAllocationSlowPath(Instruction* instruction,
