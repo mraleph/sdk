@@ -4637,10 +4637,10 @@ void IRTranslator::VisitBoxInt64(BoxInt64Instr* instr) {
     LValue cmp_1 = output().buildICmp(
         LLVMIntEQ, output().buildSar(result, output().constInt32(kSmiTagSize)),
         value_lo);
-    LValue cmp_2 =
+    resolver.BranchIfNot(impl().ExpectTrue(cmp_1), slow_path);
+    LValue cmp =
         output().buildICmp(LLVMIntEQ, value_hi,
                            output().buildSar(result, output().constInt32(31)));
-    LValue cmp = output().buildAnd(cmp_1, cmp_2);
 #else
     result = output().buildShl(value, output().constInt64(kSmiTagSize));
     LValue cmp = output().buildICmp(
