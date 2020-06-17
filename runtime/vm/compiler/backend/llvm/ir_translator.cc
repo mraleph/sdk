@@ -1529,14 +1529,13 @@ void AnonImpl::StoreIntoArray(Instruction* instr,
         pointerType(output().repo().intPtr));
     LValue barrier_mask = output().buildLoad(barrier_mask_gep);
     DiamondContinuationResolver resolver(*this, -1);
+    resolver.RightHint();
     resolver.BuildCmp([&]() {
       LValue test_value = output().buildAnd(and_value, barrier_mask);
       return output().buildICmp(LLVMIntNE, test_value, output().constIntPtr(0));
     });
     resolver.BuildLeft([&]() {
       // should emit
-      LValue slot = output().buildAdd(TaggedToWord(object), dest);
-      slot = output().buildSub(slot, output().constIntPtr(kHeapObjectTag));
       LValue entry_gep = output().buildGEPWithByteOffset(
           output().thread(),
           compiler::target::Thread::array_write_barrier_entry_point_offset(),
@@ -1551,7 +1550,7 @@ void AnonImpl::StoreIntoArray(Instruction* instr,
       call_resolver.SetGParameter(kCallTargetReg, entry);
       call_resolver.SetGParameter(kWriteBarrierObjectReg, object);
       call_resolver.SetGParameter(kWriteBarrierValueReg, value);
-      call_resolver.SetGParameter(kWriteBarrierSlotReg, slot);
+      call_resolver.SetGParameter(kWriteBarrierSlotReg, gep);
       call_resolver.set_shared_stub_call();
       call_resolver.BuildCall();
 
