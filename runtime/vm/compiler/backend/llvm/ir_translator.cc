@@ -291,8 +291,6 @@ class AnonImpl {
 
   // Target dependent
   bool support_integer_div() const;
-  void CallWriteBarrier(LValue object, LValue value);
-  void CallArrayWriteBarrier(LValue object, LValue value, LValue slot);
 
   inline CompilerState& compiler_state() { return *compiler_state_; }
   inline LivenessAnalysis& liveness() { return *liveness_analysis_; }
@@ -1557,7 +1555,6 @@ void AnonImpl::StoreIntoArray(Instruction* instr,
       call_resolver.set_shared_stub_call();
       call_resolver.BuildCall();
 
-      CallArrayWriteBarrier(object, value, slot);
       return value;
     });
     resolver.BuildRight([&]() { return value; });
