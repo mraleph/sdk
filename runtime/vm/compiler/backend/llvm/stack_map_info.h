@@ -67,6 +67,7 @@ class CallSiteInfo final : public StackMapInfo {
   V(RawPcDescriptors::Kind, kind)                                              \
   V(const Function*, target)                                                   \
   V(const Code*, code)                                                         \
+  V(const Code*, fpu_code)                                                     \
   V(CodeEntryKind, entry_kind)                                                 \
   V(bool, is_tailcall)                                                         \
   V(int, return_on_stack_pos)                                                  \
@@ -95,7 +96,10 @@ class CallSiteInfo final : public StackMapInfo {
       const Function* target_;
       Code::EntryKind entry_kind_;
     };
-    const Code* code_;
+    struct {
+      const Code* code_;
+      const Code* fpu_code_;
+    };
   };
   int64_t parameter_bits_;
   int valid_bits_;

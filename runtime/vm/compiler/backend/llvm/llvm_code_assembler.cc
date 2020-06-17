@@ -14,6 +14,7 @@
 #include "vm/compiler/backend/llvm/target_specific.h"
 
 namespace dart {
+DECLARE_FLAG(bool, source_lines);
 namespace dart_llvm {
 CodeAssembler::CodeAssembler(FlowGraphCompiler* compiler)
     : compiler_(compiler) {
@@ -86,12 +87,10 @@ void CodeAssembler::PrepareDwarfAction() {
           assembler().CodeSize(), instr->inlining_id());
       if (FLAG_code_comments || FLAG_disassemble ||
           FLAG_disassemble_optimized) {
-#if 0
         // This flag is not defined as global.
         if (FLAG_source_lines) {
           compiler().EmitSourceLine(instr);
         }
-#endif
         compiler().EmitComment(instr);
       }
       compiler().BeginCodeSourceRange();
@@ -169,8 +168,21 @@ void CodeAssembler::PrepareStackMapAction() {
         break;
       case CallSiteInfo::CallTargetType::kStubRelative:
         f = WrapAction([this, call_site_info, record]() {
+          auto IsLiveOutHasNoneGPRegister =
+              [](const std::vector<StackMaps::LiveOut>& liveouts) {
+                for (auto& e : liveouts) {
+                  if (e.dwarfReg > kDwarfGenernalRegEnd) {
+                    return true;
+                  }
+                }
+                return false;
+              };
+          bool should_use_fp_stub = IsLiveOutHasNoneGPRegister(record.liveOuts);
           assembler().GenerateUnRelocatedPcRelativeCall();
-          compiler().AddPcRelativeCallStubTarget(*call_site_info->code());
+          const Code* stub = call_site_info->code();
+          if (should_use_fp_stub && call_site_info->fpu_code())
+            stub = call_site_info->fpu_code();
+          compiler().AddPcRelativeCallStubTarget(*stub);
           AddMetaData(call_site_info, record);
           return call_site_info->instr_size();
         });

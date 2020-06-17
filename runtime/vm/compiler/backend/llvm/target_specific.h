@@ -7,6 +7,8 @@
 namespace dart {
 #if defined(TARGET_ARCH_ARM)
 static const int kV8CCRegisterParameterCount = 12;
+static const int kDwarfGenernalRegEnd = 15;
+
 static const Register kReceiverReg = R0;
 static const Register kICReg = R9;
 

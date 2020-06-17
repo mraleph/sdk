@@ -160,14 +160,27 @@ class AnonImpl {
   void SubmitStackMap(std::unique_ptr<StackMapInfo> info);
   void PushArgument(LValue v);
   LValue GenerateCall(
-      Instruction*,
+      Instruction* instr,
       TokenPosition token_pos,
       intptr_t deopt_id,
       const Code& stub,
       RawPcDescriptors::Kind kind,
       size_t stack_argument_count,
-      const std::vector<std::pair<Register, LValue>>& gp_parameters,
-      bool is_shared_stub_call = false);
+      const std::vector<std::pair<Register, LValue>>& gp_parameters) {
+    return GenerateCall(instr, token_pos, deopt_id, false, stub, nullptr, kind,
+                        stack_argument_count, gp_parameters);
+  }
+
+  LValue GenerateCall(
+      Instruction*,
+      TokenPosition token_pos,
+      intptr_t deopt_id,
+      bool is_shared_stub_call,
+      const Code& stub,
+      const Code* fpu_stub,
+      RawPcDescriptors::Kind kind,
+      size_t stack_argument_count,
+      const std::vector<std::pair<Register, LValue>>& gp_parameters);
   LValue GenerateRuntimeCall(Instruction*,
                              TokenPosition token_pos,
                              intptr_t deopt_id,
@@ -952,16 +965,18 @@ LValue AnonImpl::GenerateCall(
     Instruction* instr,
     TokenPosition token_pos,
     intptr_t deopt_id,
+    bool is_shared_stub_call,
     const Code& stub,
+    const Code* fpu_stub,
     RawPcDescriptors::Kind kind,
     size_t stack_argument_count,
-    const std::vector<std::pair<Register, LValue>>& gp_parameters,
-    bool is_shared_stub_call) {
+    const std::vector<std::pair<Register, LValue>>& gp_parameters) {
   if (!stub.InVMIsolateHeap()) {
     std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
     callsite_info->set_type(CallSiteInfo::CallTargetType::kStubRelative);
     callsite_info->set_token_pos(token_pos);
     callsite_info->set_code(&stub);
+    callsite_info->set_fpu_code(fpu_stub);
     callsite_info->set_kind(kind);
     callsite_info->set_deopt_id(deopt_id);
     callsite_info->set_stack_parameter_count(stack_argument_count);
@@ -973,6 +988,7 @@ LValue AnonImpl::GenerateCall(
       pushed_arguments_.pop_back();
       resolver.AddStackParameter(argument);
     }
+    EMASSERT(fpu_stub == nullptr || is_shared_stub_call);
     if (is_shared_stub_call) resolver.set_shared_stub_call();
     for (auto p : gp_parameters) {
       resolver.SetGParameter(p.first, p.second);
@@ -4618,8 +4634,12 @@ void IRTranslator::VisitBoxInt64(BoxInt64Instr* instr) {
       const auto& stub = Code::ZoneHandle(
           impl().zone(),
           impl().object_store()->allocate_mint_without_fpu_regs_stub());
-      result = impl().GenerateCall(instr, instr->token_pos(), DeoptId::kNone,
-                                   stub, RawPcDescriptors::kOther, 0, {});
+      const auto& fpu_stub = Code::ZoneHandle(
+          impl().zone(),
+          impl().object_store()->allocate_mint_with_fpu_regs_stub());
+      result =
+          impl().GenerateCall(instr, instr->token_pos(), DeoptId::kNone, true,
+                              stub, &fpu_stub, RawPcDescriptors::kOther, 0, {});
     } else {
       BoxAllocationSlowPath allocate(instr, impl().mint_class(), impl());
       result = allocate.Allocate();
