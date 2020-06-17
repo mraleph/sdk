@@ -27,6 +27,10 @@ static const Register kNativeEntryReg = R9;
 static const Register kNativeArgcReg = R1;
 static const Register kNativeArgArrayReg = R2;
 
+// Thread offset Call
+static const size_t kThreadOffsetCallInstrSize =
+    kCallInstrSize + Instr::kInstrSize;
+
 // instance of
 static const Register kInstanceOfInstanceReg = R0;
 static const Register kInstanceOfFunctionTypeReg = R1;

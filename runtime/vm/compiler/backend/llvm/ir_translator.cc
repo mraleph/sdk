@@ -4204,14 +4204,20 @@ void IRTranslator::VisitCheckStackOverflow(CheckStackOverflowInstr* instr) {
     impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
                                kStackOverflowRuntimeEntry, 0, false);
   } else {
-    const auto& stub = Code::ZoneHandle(
-        impl().zone(),
-        impl().object_store()->stack_overflow_stub_without_fpu_regs_stub());
-    const auto& fpu_stub = Code::ZoneHandle(
-        impl().zone(),
-        impl().object_store()->stack_overflow_stub_with_fpu_regs_stub());
-    impl().GenerateCall(instr, instr->token_pos(), DeoptId::kNone, true, stub,
-                        &fpu_stub, RawPcDescriptors::kOther, 0, {});
+    std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
+    callsite_info->set_type(CallSiteInfo::CallTargetType::kThreadOffset);
+    callsite_info->set_instr_size(kThreadOffsetCallInstrSize);
+    callsite_info->set_thread_offset(
+        compiler::target::Thread::stack_overflow_shared_stub_entry_point_offset(
+            false));
+    callsite_info->set_fpu_thread_offset(
+        compiler::target::Thread::stack_overflow_shared_stub_entry_point_offset(
+            true));
+
+    CallResolver::CallResolverParameter param(instr, std::move(callsite_info));
+    CallResolver call_resolver(impl(), -1, param);
+    call_resolver.set_shared_stub_call();
+    call_resolver.BuildCall();
   }
   resolver.GotoMerge();
   resolver.End();

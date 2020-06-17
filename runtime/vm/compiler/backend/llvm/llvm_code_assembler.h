@@ -38,6 +38,7 @@ class CodeAssembler {
   void EmitExceptionHandler();
   void EndLastInstr();
   void AddAction(size_t pc_offset, std::function<void()> action);
+  void CallWithCallReg(const CallSiteInfo*);
   template <typename T>
   std::function<void()> WrapAction(T f);
 

@@ -110,6 +110,16 @@ void CodeAssembler::PrepareDwarfAction() {
   }
 }
 
+static bool IsLiveOutHasNoneGPRegister(
+    const std::vector<StackMaps::LiveOut>& liveouts) {
+  for (auto& e : liveouts) {
+    if (e.dwarfReg > kDwarfGenernalRegEnd) {
+      return true;
+    }
+  }
+  return false;
+};
+
 void CodeAssembler::PrepareStackMapAction() {
   if (!compiler_state().stackMapsSection_) return;
   StackMaps sm;
@@ -140,14 +150,7 @@ void CodeAssembler::PrepareStackMapAction() {
     switch (call_site_info->type()) {
       case CallSiteInfo::CallTargetType::kReg:
         f = WrapAction([this, call_site_info, record]() {
-#if defined(TARGET_ARCH_ARM)
-          if (LIKELY(!call_site_info->is_tailcall()))
-            assembler().blx(kCallTargetReg);
-          else
-            assembler().bx(kCallTargetReg);
-#else
-#error unsupported arch
-#endif
+          CallWithCallReg(call_site_info);
           AddMetaData(call_site_info, record);
           if (call_site_info->return_on_stack_pos() != -1) {
             assembler().LoadMemoryValue(CallingConventions::kReturnReg, SP,
@@ -168,15 +171,6 @@ void CodeAssembler::PrepareStackMapAction() {
         break;
       case CallSiteInfo::CallTargetType::kStubRelative:
         f = WrapAction([this, call_site_info, record]() {
-          auto IsLiveOutHasNoneGPRegister =
-              [](const std::vector<StackMaps::LiveOut>& liveouts) {
-                for (auto& e : liveouts) {
-                  if (e.dwarfReg > kDwarfGenernalRegEnd) {
-                    return true;
-                  }
-                }
-                return false;
-              };
           bool should_use_fp_stub = IsLiveOutHasNoneGPRegister(record.liveOuts);
           assembler().GenerateUnRelocatedPcRelativeCall();
           const Code* stub = call_site_info->code();
@@ -184,6 +178,19 @@ void CodeAssembler::PrepareStackMapAction() {
             stub = call_site_info->fpu_code();
           compiler().AddPcRelativeCallStubTarget(*stub);
           AddMetaData(call_site_info, record);
+          return call_site_info->instr_size();
+        });
+        break;
+      case CallSiteInfo::CallTargetType::kThreadOffset:
+        f = WrapAction([this, call_site_info, record]() {
+          bool should_use_fp_thread_offset =
+              IsLiveOutHasNoneGPRegister(record.liveOuts);
+          intptr_t thread_offset = call_site_info->thread_offset();
+          if (should_use_fp_thread_offset &&
+              call_site_info->fpu_thread_offset())
+            thread_offset = call_site_info->fpu_thread_offset();
+          assembler().LoadMemoryValue(kCallTargetReg, THR, thread_offset);
+          CallWithCallReg(call_site_info);
           return call_site_info->instr_size();
         });
         break;
@@ -413,6 +420,17 @@ void CodeAssembler::AddAction(size_t pc_offset, std::function<void()> action) {
   } else {
     found->second.emplace_back(action);
   }
+}
+
+void CodeAssembler::CallWithCallReg(const CallSiteInfo* call_site_info) {
+#if defined(TARGET_ARCH_ARM)
+  if (LIKELY(!call_site_info->is_tailcall()))
+    assembler().blx(kCallTargetReg);
+  else
+    assembler().bx(kCallTargetReg);
+#else
+#error unsupported arch
+#endif
 }
 }  // namespace dart_llvm
 }  // namespace dart

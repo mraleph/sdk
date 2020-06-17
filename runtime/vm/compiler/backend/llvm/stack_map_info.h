@@ -53,7 +53,7 @@ class CallSiteInfo final : public StackMapInfo {
     kCallRelative,
     // relative call target in the code
     kStubRelative,
-    kNative,
+    kThreadOffset,
   };
   explicit CallSiteInfo();
   ~CallSiteInfo() override = default;
@@ -72,7 +72,9 @@ class CallSiteInfo final : public StackMapInfo {
   V(bool, is_tailcall)                                                         \
   V(int, return_on_stack_pos)                                                  \
   V(int64_t, parameter_bits)                                                   \
-  V(int, valid_bits)
+  V(int, valid_bits)                                                           \
+  V(intptr_t, thread_offset)                                                   \
+  V(intptr_t, fpu_thread_offset)
 
 #define CALLSITE_WAPPER(type, name) DEFINE_ACCESSOR(type, name, CallSiteInfo)
 
@@ -99,6 +101,10 @@ class CallSiteInfo final : public StackMapInfo {
     struct {
       const Code* code_;
       const Code* fpu_code_;
+    };
+    struct {
+      intptr_t thread_offset_;
+      intptr_t fpu_thread_offset_;
     };
   };
   int64_t parameter_bits_;
