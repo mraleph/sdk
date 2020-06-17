@@ -4200,6 +4200,18 @@ void IRTranslator::VisitCheckStackOverflow(CheckStackOverflowInstr* instr) {
   if (!instr->UseSharedSlowPathStub(true)) {
     impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
                                kStackOverflowRuntimeEntry, 0, false);
+  } else if (!impl()
+                  .object_store()
+                  ->stack_overflow_stub_without_fpu_regs_stub()
+                  ->InVMIsolateHeap()) {
+    const auto& stub = Code::ZoneHandle(
+        impl().zone(),
+        impl().object_store()->stack_overflow_stub_without_fpu_regs_stub());
+    const auto& fpu_stub = Code::ZoneHandle(
+        impl().zone(),
+        impl().object_store()->stack_overflow_stub_with_fpu_regs_stub());
+    impl().GenerateCall(instr, instr->token_pos(), DeoptId::kNone, true, stub,
+                        &fpu_stub, RawPcDescriptors::kOther, 0, {});
   } else {
     std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
     callsite_info->set_type(CallSiteInfo::CallTargetType::kThreadOffset);
