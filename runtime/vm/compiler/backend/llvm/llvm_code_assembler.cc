@@ -152,6 +152,8 @@ void CodeAssembler::PrepareStackMapAction() {
         f = WrapAction([this, call_site_info, record]() {
           CallWithCallReg(call_site_info);
           AddMetaData(call_site_info, record);
+          if (call_site_info->code() != nullptr)
+            compiler().AddStubCallTarget(*call_site_info->code());
           if (call_site_info->return_on_stack_pos() != -1) {
             assembler().LoadMemoryValue(CallingConventions::kReturnReg, SP,
                                         call_site_info->return_on_stack_pos() *

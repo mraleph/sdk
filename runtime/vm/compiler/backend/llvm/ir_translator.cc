@@ -1016,6 +1016,7 @@ LValue AnonImpl::GenerateCall(
     callsite_info->set_kind(kind);
     callsite_info->set_stack_parameter_count(stack_argument_count);
     callsite_info->set_instr_size(kCallInstrSize);
+    callsite_info->set_code(&stub);
     CallResolver::CallResolverParameter param(instr, std::move(callsite_info));
     CallResolver resolver(*this, -1, param);
     resolver.SetGParameter(static_cast<int>(CODE_REG), code_object);

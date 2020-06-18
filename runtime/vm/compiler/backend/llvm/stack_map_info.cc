@@ -18,6 +18,7 @@ CallSiteInfo::CallSiteInfo()
       instr_size_(0),
       try_index_(kInvalidTryIndex),
       kind_(RawPcDescriptors::kOther),
+      code_(nullptr),
       parameter_bits_(0),
       valid_bits_(0),
       return_on_stack_pos_(-1),
