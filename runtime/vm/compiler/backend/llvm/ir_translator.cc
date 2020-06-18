@@ -3218,11 +3218,11 @@ void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
                          output().constIntPtr(argc_tag));
   LValue stack_pointer =
       output().buildCall(output().repo().stackSaveIntrinsic());
-  LValue stack_pointer_int =
-      output().buildCast(LLVMPtrToInt, stack_pointer, output().repo().intPtr);
-  LValue arg_array = output().buildAdd(
-      stack_pointer_int, output().constIntPtr(instr->ArgumentCount() *
-                                              compiler::target::kWordSize));
+  LValue arg_array = output().buildGEPWithByteOffset(
+      stack_pointer,
+      output().constIntPtr(instr->ArgumentCount() *
+                           compiler::target::kWordSize),
+      output().repo().ref8);
   resolver.SetGParameter(static_cast<int>(kNativeArgArrayReg), arg_array);
   resolver.AddStackParameter(impl().LoadObject(Object::null_object()));
   for (intptr_t i = argument_count - 1; i >= 0; --i) {
