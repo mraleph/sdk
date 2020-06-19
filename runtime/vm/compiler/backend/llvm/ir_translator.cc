@@ -438,6 +438,7 @@ class CallResolver : public ContinuationResolver {
                         CallResolverParameter& call_resolver_parameter);
   ~CallResolver() = default;
   void SetGParameter(int reg, LValue);
+  void SetCallTarget(LValue call_target) { call_target_ = call_target; }
   void AddStackParameter(LValue);
   LValue GetStackParameter(size_t i);
   LValue BuildCall();
@@ -462,6 +463,7 @@ class CallResolver : public ContinuationResolver {
   LType return_type_ = nullptr;
   LValue call_value_ = nullptr;
   LValue statepoint_value_ = nullptr;
+  LValue call_target_ = nullptr;
   LBasicBlock from_block_ = nullptr;
   // exception blocks
   IRTranslatorBlockImpl* catch_block_impl_ = nullptr;
@@ -1020,7 +1022,7 @@ LValue AnonImpl::GenerateCall(
     CallResolver::CallResolverParameter param(instr, std::move(callsite_info));
     CallResolver resolver(*this, -1, param);
     resolver.SetGParameter(static_cast<int>(CODE_REG), code_object);
-    resolver.SetGParameter(static_cast<int>(kCallTargetReg), entry);
+    resolver.SetCallTarget(entry);
     for (size_t i = 0; i < stack_argument_count; ++i) {
       LValue argument = pushed_arguments_.back();
       pushed_arguments_.pop_back();
@@ -1059,7 +1061,7 @@ LValue AnonImpl::GenerateRuntimeCall(Instruction* instr,
                                                 : kCallInstrSize);
   CallResolver::CallResolverParameter param(instr, std::move(callsite_info));
   CallResolver resolver(*this, -1, param);
-  resolver.SetGParameter(static_cast<int>(kCallTargetReg), target);
+  resolver.SetCallTarget(target);
   resolver.SetGParameter(static_cast<int>(kRuntimeCallEntryReg),
                          runtime_entry_point);
   resolver.SetGParameter(static_cast<int>(kRuntimeCallArgCountReg),
@@ -1148,7 +1150,7 @@ LValue AnonImpl::GenerateMegamorphicInstanceCall(
 
   CallResolver::CallResolverParameter param(instr, std::move(callsite_info));
   CallResolver resolver(*this, -1, param);
-  resolver.SetGParameter(kCallTargetReg, entry);
+  resolver.SetCallTarget(entry);
   for (int i = 0; i < argument_count; ++i) {
     LValue argument = pushed_arguments_.back();
     pushed_arguments_.pop_back();
@@ -1479,7 +1481,7 @@ void AnonImpl::StoreIntoObject(Instruction* instr,
       CallResolver::CallResolverParameter param(instr,
                                                 std::move(callsite_info));
       CallResolver call_resolver(*this, -1, param);
-      call_resolver.SetGParameter(kCallTargetReg, entry);
+      call_resolver.SetCallTarget(entry);
       call_resolver.SetGParameter(kWriteBarrierObjectReg, object);
       call_resolver.SetGParameter(kWriteBarrierValueReg, value);
       call_resolver.set_shared_stub_call();
@@ -1548,7 +1550,7 @@ void AnonImpl::StoreIntoArray(Instruction* instr,
       CallResolver::CallResolverParameter param(instr,
                                                 std::move(callsite_info));
       CallResolver call_resolver(*this, -1, param);
-      call_resolver.SetGParameter(kCallTargetReg, entry);
+      call_resolver.SetCallTarget(entry);
       call_resolver.SetGParameter(kWriteBarrierObjectReg, object);
       call_resolver.SetGParameter(kWriteBarrierValueReg, value);
       call_resolver.SetGParameter(kWriteBarrierSlotReg, gep);
@@ -1845,10 +1847,8 @@ CallResolver::CallResolver(
 
 void CallResolver::SetGParameter(int reg, LValue val) {
   EMASSERT(reg >= 0);
-  if (reg < kV8CCRegisterParameterCount - 1)
+  if (reg < kV8CCRegisterParameterCount)
     parameters_[reg] = val;
-  else if (reg == R12)
-    parameters_[11] = val;
   else
     EMASSERT(false && "invalid reg");
 }
@@ -1954,7 +1954,20 @@ void CallResolver::EmitCall() {
   statepoint_operands.push_back(output().constInt64(patchid_));
   statepoint_operands.push_back(output().constInt32(
       call_resolver_parameter_.callsite_info->instr_size()));
-  statepoint_operands.push_back(constNull(callee_type_));
+  if (call_target_ == nullptr)
+    statepoint_operands.push_back(LLVMGetUndef(callee_type_));
+  else {
+    LValue call_target = call_target_;
+    if (typeOf(call_target) == output().tagged_type()) {
+      call_target =
+          output().buildCast(LLVMAddrSpaceCast, call_target, callee_type_);
+    } else {
+      call_target = output().buildBitCast(call_target, callee_type_);
+    }
+
+    statepoint_operands.push_back(call_target);
+  }
+
   statepoint_operands.push_back(
       output().constInt32(parameters_.size()));           // # call params
   statepoint_operands.push_back(output().constInt32(0));  // flags
@@ -2761,7 +2774,7 @@ void IRTranslator::VisitTailCall(TailCallInstr* instr) {
   CallResolver::CallResolverParameter param(instr, std::move(callsite_info));
   CallResolver resolver(impl(), -1, param);
   resolver.SetGParameter(static_cast<int>(CODE_REG), code_object);
-  resolver.SetGParameter(static_cast<int>(kCallTargetReg), entry);
+  resolver.SetCallTarget(entry);
   // add register parameter.
   resolver.SetGParameter(static_cast<int>(ARGS_DESC_REG), output().args_desc());
   resolver.BuildCall();
@@ -2898,7 +2911,7 @@ void IRTranslator::VisitClosureCall(ClosureCallInstr* instr) {
   LValue argument_descriptor_obj = impl().LoadObject(arguments_descriptor);
   resolver.SetGParameter(ARGS_DESC_REG, argument_descriptor_obj);
   resolver.SetGParameter(kICReg, output().constTagged(0));
-  resolver.SetGParameter(static_cast<int>(kCallTargetReg), entry);
+  resolver.SetCallTarget(entry);
   for (intptr_t i = argument_count - 1; i >= 0; --i) {
     LValue param = impl().GetLLVMValue(instr->ArgumentValueAt(i));
     resolver.AddStackParameter(param);
@@ -2941,7 +2954,7 @@ void IRTranslator::VisitInstanceCallBase(InstanceCallBaseInstr* instr) {
   LValue data_val = impl().LoadObject(data, true);
   LValue initial_stub_val = impl().LoadObject(initial_stub, true);
   resolver.SetGParameter(kICReg, data_val);
-  resolver.SetGParameter(kCallTargetReg, initial_stub_val);
+  resolver.SetCallTarget(initial_stub_val);
   for (intptr_t i = argument_count - 1; i >= 0; --i) {
     LValue param = impl().GetLLVMValue(instr->ArgumentValueAt(i));
     resolver.AddStackParameter(param);
@@ -3213,7 +3226,7 @@ void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
   callsite_info->set_return_on_stack_pos(0);
   CallResolver::CallResolverParameter param(instr, std::move(callsite_info));
   CallResolver resolver(impl(), instr->ssa_temp_index(), param);
-  resolver.SetGParameter(static_cast<int>(kCallTargetReg), entry_val);
+  resolver.SetCallTarget(entry_val);
   resolver.SetGParameter(static_cast<int>(kNativeEntryReg), native_entry);
   resolver.SetGParameter(static_cast<int>(kNativeArgcReg),
                          output().constIntPtr(argc_tag));
@@ -5138,7 +5151,7 @@ void IRTranslator::VisitDispatchTableCall(DispatchTableCallInstr* instr) {
   callsite_info->set_instr_size(kCallInstrSize);
   CallResolver::CallResolverParameter param(instr, std::move(callsite_info));
   CallResolver resolver(impl(), instr->ssa_temp_index(), param);
-  resolver.SetGParameter(kCallTargetReg, entry);
+  resolver.SetCallTarget(entry);
   for (intptr_t i = argument_count - 1; i >= 0; --i) {
     LValue param = impl().GetLLVMValue(instr->ArgumentValueAt(i));
     resolver.AddStackParameter(param);

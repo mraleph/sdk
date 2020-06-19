@@ -7,6 +7,7 @@
 #include <map>
 #include <tuple>
 
+#include "vm/compiler/assembler/assembler.h"
 #include "vm/compiler/backend/llvm/dwarf_info.h"
 
 namespace dart {
@@ -38,7 +39,7 @@ class CodeAssembler {
   void EmitExceptionHandler();
   void EndLastInstr();
   void AddAction(size_t pc_offset, std::function<void()> action);
-  void CallWithCallReg(const CallSiteInfo*);
+  void CallWithCallReg(const CallSiteInfo*, dart::Register);
   template <typename T>
   std::function<void()> WrapAction(T f);
 

@@ -2,7 +2,6 @@
 #if defined(DART_ENABLE_LLVM_COMPILER)
 #include "vm/bitmap.h"
 #include "vm/compiler/aot/dispatch_table_generator.h"
-#include "vm/compiler/assembler/assembler.h"
 #include "vm/compiler/backend/flow_graph.h"
 #include "vm/compiler/backend/flow_graph_compiler.h"
 #include "vm/compiler/backend/il.h"
@@ -120,6 +119,20 @@ static bool IsLiveOutHasNoneGPRegister(
   return false;
 };
 
+static Register DwarfToRegister(DWARFRegister dwarf) {
+#if defined(TARGET_ARCH_ARM)
+  return static_cast<Register>(dwarf);
+#else
+#error unsupported arch
+#endif
+}
+static Register GetCallTargetRegFromRecordForRegType(
+    const StackMaps::Record& record) {
+  auto& location = record.locations[0];
+  EMASSERT(location.kind == StackMaps::Location::Register);
+  return DwarfToRegister(location.dwarfReg);
+}
+
 void CodeAssembler::PrepareStackMapAction() {
   if (!compiler_state().stackMapsSection_) return;
   StackMaps sm;
@@ -150,7 +163,8 @@ void CodeAssembler::PrepareStackMapAction() {
     switch (call_site_info->type()) {
       case CallSiteInfo::CallTargetType::kReg:
         f = WrapAction([this, call_site_info, record]() {
-          CallWithCallReg(call_site_info);
+          CallWithCallReg(call_site_info,
+                          GetCallTargetRegFromRecordForRegType(record));
           AddMetaData(call_site_info, record);
           if (call_site_info->code() != nullptr)
             compiler().AddStubCallTarget(*call_site_info->code());
@@ -192,7 +206,7 @@ void CodeAssembler::PrepareStackMapAction() {
               call_site_info->fpu_thread_offset())
             thread_offset = call_site_info->fpu_thread_offset();
           assembler().LoadMemoryValue(kCallTargetReg, THR, thread_offset);
-          CallWithCallReg(call_site_info);
+          CallWithCallReg(call_site_info, kCallTargetReg);
           return call_site_info->instr_size();
         });
         break;
@@ -424,12 +438,13 @@ void CodeAssembler::AddAction(size_t pc_offset, std::function<void()> action) {
   }
 }
 
-void CodeAssembler::CallWithCallReg(const CallSiteInfo* call_site_info) {
+void CodeAssembler::CallWithCallReg(const CallSiteInfo* call_site_info,
+                                    dart::Register reg) {
 #if defined(TARGET_ARCH_ARM)
   if (LIKELY(!call_site_info->is_tailcall()))
-    assembler().blx(kCallTargetReg);
+    assembler().blx(reg);
   else
-    assembler().bx(kCallTargetReg);
+    assembler().bx(reg);
 #else
 #error unsupported arch
 #endif
