@@ -54,6 +54,7 @@ class CallSiteInfo final : public StackMapInfo {
     // relative call target in the code
     kStubRelative,
     kThreadOffset,
+    kNative,
   };
   explicit CallSiteInfo();
   ~CallSiteInfo() override = default;

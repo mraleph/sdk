@@ -9,6 +9,10 @@
 #include "vm/bitfield.h"
 #include "vm/hash_map.h"
 
+#if defined(UC_BUILD_LLVM_COMPILER) && defined(DART_PRECOMPILER)
+#include "vm/compiler/backend/llvm/llvm_config.h"
+#endif
+
 namespace dart {
 
 class Object;
@@ -178,6 +182,9 @@ class ObjectPoolBuilder : public ValueObject {
     }
     return object_pool_[i - used_from_parent_.length()];
   }
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  intptr_t NextIndex() const { return base_index_ + object_pool_.length(); }
+#endif
 
   intptr_t AddObject(ObjectPoolBuilderEntry entry);
 

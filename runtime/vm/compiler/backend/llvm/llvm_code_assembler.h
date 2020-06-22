@@ -40,6 +40,7 @@ class CodeAssembler {
   void EndLastInstr();
   void AddAction(size_t pc_offset, std::function<void()> action);
   void CallWithCallReg(const CallSiteInfo*, dart::Register);
+  void GenerateNativeCall(const CallSiteInfo* call_site_info);
   template <typename T>
   std::function<void()> WrapAction(T f);
 

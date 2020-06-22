@@ -3178,66 +3178,22 @@ void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
   const intptr_t argument_count =
       instr->ArgumentCount();  // Includes type args.
 
-  const Code* stub;
-  uword entry;
-  LValue code_object;
-  LValue native_entry;
-  LValue entry_val;
-
-  stub = &StubCode::CallBootstrapNative();
-  entry = NativeEntry::LinkNativeCallEntry();
-  compiler::ExternalLabel label(entry);
-  // Load NativeEntry to kNativeEntryReg
-  {
-    const int32_t offset = compiler::target::ObjectPool::element_offset(
-        impl().object_pool_builder().FindNativeFunction(
-            &label, compiler::ObjectPoolBuilderEntry::kPatchable));
-    LValue gep = output().buildGEPWithByteOffset(
-        impl().GetPPValue(), output().constIntPtr(offset - kHeapObjectTag),
-        pointerType(output().repo().ref8));
-    native_entry = output().buildInvariantLoad(gep);
-  }
-  // Load Code Object & entry
-  {
-    const int32_t offset = compiler::target::ObjectPool::element_offset(
-        impl().object_pool_builder().FindObject(
-            compiler::ToObject(*stub),
-            compiler::ObjectPoolBuilderEntry::kPatchable));
-
-    LValue gep = output().buildGEPWithByteOffset(
-        impl().GetPPValue(), output().constIntPtr(offset - kHeapObjectTag),
-        pointerType(output().tagged_type()));
-    code_object = output().buildLoad(gep);
-    LValue entry_gep = output().buildGEPWithByteOffset(
-        code_object,
-        output().constIntPtr(compiler::target::Code::entry_point_offset() -
-                             kHeapObjectTag),
-        pointerType(output().repo().ref8));
-    entry_val = output().buildLoad(entry_gep);
-  }
   const intptr_t argc_tag = NativeArguments::ComputeArgcTag(instr->function());
 
   std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
-  callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
+  callsite_info->set_type(CallSiteInfo::CallTargetType::kNative);
   callsite_info->set_token_pos(instr->token_pos());
   callsite_info->set_deopt_id(instr->deopt_id());
   callsite_info->set_stack_parameter_count(argument_count);
-  callsite_info->set_instr_size(kCallReturnOnStackInstrSize);
+  callsite_info->set_instr_size(impl().object_pool_builder().NextIndex() >=
+                                        kNativeCallLongThreshold
+                                    ? kNativeCallLongInstrSize
+                                    : kNativeCallInstrSize);
   callsite_info->set_return_on_stack_pos(0);
   CallResolver::CallResolverParameter param(instr, std::move(callsite_info));
   CallResolver resolver(impl(), instr->ssa_temp_index(), param);
-  resolver.SetCallTarget(entry_val);
-  resolver.SetGParameter(static_cast<int>(kNativeEntryReg), native_entry);
   resolver.SetGParameter(static_cast<int>(kNativeArgcReg),
                          output().constIntPtr(argc_tag));
-  LValue stack_pointer =
-      output().buildCall(output().repo().stackSaveIntrinsic());
-  LValue arg_array = output().buildGEPWithByteOffset(
-      stack_pointer,
-      output().constIntPtr(instr->ArgumentCount() *
-                           compiler::target::kWordSize),
-      output().repo().ref8);
-  resolver.SetGParameter(static_cast<int>(kNativeArgArrayReg), arg_array);
   resolver.AddStackParameter(impl().LoadObject(Object::null_object()));
   for (intptr_t i = argument_count - 1; i >= 0; --i) {
     LValue argument = impl().GetLLVMValue(instr->ArgumentValueAt(i));

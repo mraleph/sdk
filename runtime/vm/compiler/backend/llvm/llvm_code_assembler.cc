@@ -207,6 +207,17 @@ void CodeAssembler::PrepareStackMapAction() {
             thread_offset = call_site_info->fpu_thread_offset();
           assembler().LoadMemoryValue(kCallTargetReg, THR, thread_offset);
           CallWithCallReg(call_site_info, kCallTargetReg);
+          AddMetaData(call_site_info, record);
+          return call_site_info->instr_size();
+        });
+        break;
+      case CallSiteInfo::CallTargetType::kNative:
+        f = WrapAction([this, call_site_info, record]() {
+          GenerateNativeCall(call_site_info);
+          AddMetaData(call_site_info, record);
+          assembler().LoadMemoryValue(CallingConventions::kReturnReg, SP,
+                                      call_site_info->return_on_stack_pos() *
+                                          compiler::target::kWordSize);
           return call_site_info->instr_size();
         });
         break;
@@ -445,6 +456,24 @@ void CodeAssembler::CallWithCallReg(const CallSiteInfo* call_site_info,
     assembler().blx(reg);
   else
     assembler().bx(reg);
+#else
+#error unsupported arch
+#endif
+}
+
+void CodeAssembler::GenerateNativeCall(const CallSiteInfo* call_site_info) {
+#if defined(TARGET_ARCH_ARM)
+  assembler().add(R2, SP,
+                  compiler::Operand(call_site_info->stack_parameter_count() *
+                                    compiler::target::kWordSize));
+  uword entry;
+  const Code* stub;
+  stub = &StubCode::CallBootstrapNative();
+  entry = NativeEntry::LinkNativeCallEntry();
+  compiler::ExternalLabel label(entry);
+  assembler().LoadNativeEntry(R9, &label,
+                              compiler::ObjectPoolBuilderEntry::kPatchable);
+  assembler().BranchLinkPatchable(*stub);
 #else
 #error unsupported arch
 #endif
