@@ -231,6 +231,8 @@ class AnonImpl {
   LValue CompareObject(LValue, const Object&);
   LValue BitcastDoubleToInt64(LValue);
   LValue BitcastInt64ToDouble(LValue);
+  LValue BitcastFloatToInt32(LValue);
+  LValue BitcastInt32ToFloat(LValue);
 
   // expect
   LValue ExpectTrue(LValue);
@@ -1324,6 +1326,28 @@ LValue AnonImpl::BitcastInt64ToDouble(LValue v) {
   LValue double_storage = output().buildBitCast(output().bitcast_space(),
                                                 output().repo().refDouble);
   return output().buildLoad(double_storage);
+}
+
+LValue AnonImpl::BitcastFloatToInt32(LValue v) {
+  EMASSERT(typeOf(v) == output().repo().floatType);
+
+  LValue storage =
+      output().buildBitCast(output().bitcast_space(), output().repo().refFloat);
+  output().buildStore(v, storage);
+  LValue int32_storage =
+      output().buildBitCast(output().bitcast_space(), output().repo().ref32);
+  return output().buildLoad(int32_storage);
+}
+
+LValue AnonImpl::BitcastInt32ToFloat(LValue v) {
+  EMASSERT(typeOf(v) == output().repo().int32);
+
+  LValue storage =
+      output().buildBitCast(output().bitcast_space(), output().repo().ref32);
+  output().buildStore(v, storage);
+  LValue float_storage =
+      output().buildBitCast(output().bitcast_space(), output().repo().refFloat);
+  return output().buildLoad(float_storage);
 }
 
 LValue AnonImpl::ExpectTrue(LValue cond) {
@@ -3228,12 +3252,131 @@ void IRTranslator::VisitLoadIndexed(LoadIndexedInstr* instr) {
     index = output().buildShl(index, output().constIntPtr(shift));
   }
   LValue offset_value = output().buildAdd(output().constIntPtr(offset), index);
-  Representation rep = instr->representation();
-  if (rep == kUnboxedDouble && instr->class_id() == kTypedDataFloat32ArrayCid) {
-    rep = kUnboxedFloat;
+  LValue val;
+  if ((instr->representation() == kUnboxedDouble) ||
+      (instr->representation() == kUnboxedFloat32x4) ||
+      (instr->representation() == kUnboxedInt32x4) ||
+      (instr->representation() == kUnboxedFloat64x2)) {
+    switch (instr->class_id()) {
+      case kTypedDataFloat32ArrayCid:
+        // Load single precision float.
+        // vldrs does not support indexed addressing.
+        if (instr->aligned()) {
+          LValue gep =
+              impl().BuildAccessPointer(array, offset_value, kUnboxedFloat);
+          val = output().buildLoad(gep);
+        } else {
+          LValue gep =
+              impl().BuildAccessPointer(array, offset_value, kUnboxedInt32);
+          val = output().buildLoad(gep);
+          val = impl().BitcastInt32ToFloat(val);
+        }
+        break;
+      case kTypedDataFloat64ArrayCid:
+        // vldrd does not support indexed addressing.
+        if (instr->aligned()) {
+          LValue gep =
+              impl().BuildAccessPointer(array, offset_value, kUnboxedDouble);
+          val = output().buildLoad(gep);
+        } else {
+          LValue gep =
+              impl().BuildAccessPointer(array, offset_value, kUnboxedInt64);
+          val = output().buildLoad(gep);
+          val = impl().BitcastInt64ToDouble(val);
+        }
+        break;
+      case kTypedDataFloat64x2ArrayCid: {
+        EMASSERT(instr->aligned());
+        LValue gep =
+            impl().BuildAccessPointer(array, offset_value, kUnboxedFloat64x2);
+        val = output().buildLoad(gep);
+        break;
+      }
+      case kTypedDataInt32x4ArrayCid: {
+        EMASSERT(instr->aligned());
+        LValue gep =
+            impl().BuildAccessPointer(array, offset_value, kUnboxedInt32x4);
+        val = output().buildLoad(gep);
+        break;
+      }
+      case kTypedDataFloat32x4ArrayCid: {
+        EMASSERT(instr->aligned());
+        LValue gep =
+            impl().BuildAccessPointer(array, offset_value, kUnboxedFloat32x4);
+        val = output().buildLoad(gep);
+        break;
+      }
+
+      default:
+        UNREACHABLE();
+    }
+    impl().SetLLVMValue(instr, val);
+    return;
   }
-  LValue gep = impl().BuildAccessPointer(array, offset_value, rep);
-  LValue val = output().buildLoad(gep);
+  switch (instr->class_id()) {
+    case kTypedDataUint32ArrayCid:
+    case kTypedDataInt32ArrayCid: {
+      LValue gep =
+          impl().BuildAccessPointer(array, offset_value, kUnboxedInt32);
+      val = output().buildLoad(gep);
+      break;
+    }
+    case kTypedDataInt64ArrayCid:
+    case kTypedDataUint64ArrayCid: {
+      EMASSERT(instr->representation() == kUnboxedInt64);
+      LValue gep =
+          impl().BuildAccessPointer(array, offset_value, kUnboxedInt64);
+      val = output().buildLoad(gep);
+      break;
+    }
+    case kTypedDataInt8ArrayCid: {
+      EMASSERT(instr->representation() == kUnboxedIntPtr);
+      LValue gep =
+          impl().BuildAccessPointer(array, offset_value, output().repo().ref8);
+      val = output().buildLoad(gep);
+      val = output().buildCast(LLVMSExt, val, output().repo().intPtr);
+      break;
+    }
+    case kTypedDataUint8ArrayCid:
+    case kTypedDataUint8ClampedArrayCid:
+    case kExternalTypedDataUint8ArrayCid:
+    case kExternalTypedDataUint8ClampedArrayCid:
+    case kOneByteStringCid:
+    case kExternalOneByteStringCid: {
+      EMASSERT(instr->representation() == kUnboxedIntPtr);
+      LValue gep =
+          impl().BuildAccessPointer(array, offset_value, output().repo().ref8);
+      val = output().buildLoad(gep);
+      val = output().buildCast(LLVMZExt, val, output().repo().intPtr);
+      break;
+    }
+    case kTypedDataInt16ArrayCid: {
+      EMASSERT(instr->representation() == kUnboxedIntPtr);
+      LValue gep =
+          impl().BuildAccessPointer(array, offset_value, output().repo().ref16);
+      val = output().buildLoad(gep);
+      val = output().buildCast(LLVMSExt, val, output().repo().intPtr);
+      break;
+    }
+    case kTypedDataUint16ArrayCid:
+    case kTwoByteStringCid:
+    case kExternalTwoByteStringCid: {
+      EMASSERT(instr->representation() == kUnboxedIntPtr);
+      LValue gep =
+          impl().BuildAccessPointer(array, offset_value, output().repo().ref16);
+      val = output().buildLoad(gep);
+      val = output().buildCast(LLVMZExt, val, output().repo().intPtr);
+      break;
+    }
+    default: {
+      EMASSERT(instr->representation() == kTagged);
+      EMASSERT((instr->class_id() == kArrayCid) ||
+               (instr->class_id() == kImmutableArrayCid));
+      LValue gep = impl().BuildAccessPointer(array, offset_value, kTagged);
+      val = output().buildLoad(gep);
+      break;
+    }
+  }
   impl().SetLLVMValue(instr, val);
 }
 
