@@ -2964,22 +2964,32 @@ void IRTranslator::VisitInstanceCallBase(InstanceCallBaseInstr* instr) {
 
   std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
   // use kReg type.
-  callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
+  callsite_info->set_type(CallSiteInfo::CallTargetType::kPatchable);
   callsite_info->set_token_pos(instr->token_pos());
   callsite_info->set_deopt_id(instr->deopt_id());
   callsite_info->set_stack_parameter_count(argument_count);
   callsite_info->set_kind(RawPcDescriptors::kIcCall);
-  callsite_info->set_instr_size(kCallInstrSize);
-  CallResolver::CallResolverParameter param(instr, std::move(callsite_info));
-  CallResolver resolver(impl(), instr->ssa_temp_index(), param);
 
   const Code& initial_stub = StubCode::UnlinkedCall();
   const UnlinkedCall& data =
       UnlinkedCall::ZoneHandle(zone, ic_data.AsUnlinkedCall());
-  LValue data_val = impl().LoadObject(data, true);
-  LValue initial_stub_val = impl().LoadObject(initial_stub, true);
-  resolver.SetGParameter(kICReg, data_val);
-  resolver.SetCallTarget(initial_stub_val);
+  intptr_t ic_pool_offset, target_stub_pool_offset;
+  ic_pool_offset = compiler::target::ObjectPool::element_offset(
+      impl().object_pool_builder().AddObject(data));
+  target_stub_pool_offset = compiler::target::ObjectPool::element_offset(
+      impl().object_pool_builder().AddObject(initial_stub));
+  callsite_info->set_ic_pool_offset(ic_pool_offset);
+  callsite_info->set_target_stub_pool_offset(target_stub_pool_offset);
+  size_t instr_size = kInstanceCallInstrSize;
+  if (UNLIKELY(!impl().CanHoldLoadOffset(ic_pool_offset))) {
+    instr_size += kLoadInstrSize;
+  }
+  if (UNLIKELY(!impl().CanHoldLoadOffset(target_stub_pool_offset))) {
+    instr_size += kLoadInstrSize;
+  }
+  callsite_info->set_instr_size(instr_size);
+  CallResolver::CallResolverParameter param(instr, std::move(callsite_info));
+  CallResolver resolver(impl(), instr->ssa_temp_index(), param);
   for (intptr_t i = argument_count - 1; i >= 0; --i) {
     LValue param = impl().GetLLVMValue(instr->ArgumentValueAt(i));
     resolver.AddStackParameter(param);
@@ -3225,10 +3235,10 @@ void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
           *stub, compiler::ObjectPoolBuilderEntry::kPatchable));
 
   if (UNLIKELY(!impl().CanHoldLoadOffset(native_entry_pool_offset))) {
-    instr_size += kNativeCallIncrement;
+    instr_size += kLoadInstrSize;
   }
   if (UNLIKELY(!impl().CanHoldLoadOffset(stub_pool_offset))) {
-    instr_size += kNativeCallIncrement;
+    instr_size += kLoadInstrSize;
   }
   callsite_info->set_native_entry_pool_offset(native_entry_pool_offset);
   callsite_info->set_stub_pool_offset(stub_pool_offset);

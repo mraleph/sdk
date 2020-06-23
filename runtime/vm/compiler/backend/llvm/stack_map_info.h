@@ -55,6 +55,7 @@ class CallSiteInfo final : public StackMapInfo {
     kStubRelative,
     kThreadOffset,
     kNative,
+    kPatchable,
   };
   explicit CallSiteInfo();
   ~CallSiteInfo() override = default;
@@ -77,7 +78,9 @@ class CallSiteInfo final : public StackMapInfo {
   V(intptr_t, thread_offset)                                                   \
   V(intptr_t, fpu_thread_offset)                                               \
   V(intptr_t, native_entry_pool_offset)                                        \
-  V(intptr_t, stub_pool_offset)
+  V(intptr_t, stub_pool_offset)                                                \
+  V(intptr_t, ic_pool_offset)                                                  \
+  V(intptr_t, target_stub_pool_offset)
 
 #define CALLSITE_WAPPER(type, name) DEFINE_ACCESSOR(type, name, CallSiteInfo)
 
@@ -111,9 +114,15 @@ class CallSiteInfo final : public StackMapInfo {
       intptr_t thread_offset_;
       intptr_t fpu_thread_offset_;
     };
+    // native calls
     struct {
       intptr_t native_entry_pool_offset_;
       intptr_t stub_pool_offset_;
+    };
+    // patchable calls
+    struct {
+      intptr_t ic_pool_offset_;
+      intptr_t target_stub_pool_offset_;
     };
   };
   int64_t parameter_bits_;

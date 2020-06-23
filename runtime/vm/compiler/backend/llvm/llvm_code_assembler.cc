@@ -227,6 +227,13 @@ void CodeAssembler::PrepareStackMapAction() {
           return call_site_info->instr_size();
         });
         break;
+      case CallSiteInfo::CallTargetType::kPatchable:
+        f = WrapAction([this, call_site_info, record]() {
+          GeneratePatchableCall(call_site_info);
+          AddMetaData(call_site_info, record);
+          return call_site_info->instr_size();
+        });
+        break;
       default:
         UNREACHABLE();
     }
@@ -454,37 +461,11 @@ void CodeAssembler::AddAction(size_t pc_offset, std::function<void()> action) {
     found->second.emplace_back(action);
   }
 }
-
-void CodeAssembler::CallWithCallReg(const CallSiteInfo* call_site_info,
-                                    dart::Register reg) {
 #if defined(TARGET_ARCH_ARM)
-  if (LIKELY(!call_site_info->is_tailcall()))
-    assembler().blx(reg);
-  else
-    assembler().bx(reg);
+#include "vm/compiler/backend/llvm/llvm_code_assembler_arm.cc"
 #else
 #error unsupported arch
 #endif
-}
-
-void CodeAssembler::GenerateNativeCall(const CallSiteInfo* call_site_info) {
-#if defined(TARGET_ARCH_ARM)
-  assembler().add(R2, SP,
-                  compiler::Operand(call_site_info->stack_parameter_count() *
-                                    compiler::target::kWordSize));
-  assembler().LoadWordFromPoolOffset(
-      R9, call_site_info->native_entry_pool_offset() - kHeapObjectTag, PP, AL);
-  assembler().LoadWordFromPoolOffset(
-      CODE_REG, call_site_info->stub_pool_offset() - kHeapObjectTag, PP, AL);
-  assembler().ldr(LR, compiler::FieldAddress(
-                          CODE_REG, compiler::target::Code::entry_point_offset(
-                                        CodeEntryKind::kNormal)));
-  assembler().blx(
-      LR);  // Use blx instruction so that the return branch prediction works.
-#else
-#error unsupported arch
-#endif
-}
 }  // namespace dart_llvm
 }  // namespace dart
 #endif
