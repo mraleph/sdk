@@ -32,6 +32,7 @@ void CodeAssembler::AssembleCode() {
   }
   PrepareExceptionTable();
   PrepareInstrActions();
+  SetupEntryCodeRange();
   for (auto& p : action_map_) {
     unsigned end = p.first;
     auto& actions = p.second;
@@ -78,9 +79,9 @@ void CodeAssembler::PrepareDwarfAction() {
   mapper.Process(compiler_state().dwarf_line_->data());
   auto& debug_instrs_ = compiler_state().debug_instrs_;
   for (auto& p : mapper.GetMap()) {
-    if (p.second == 0) continue;
+    if (p.second <= 1) continue;
     unsigned pc_offset = p.first;
-    unsigned index = p.second - 1;
+    unsigned index = p.second - 2;
     Instruction* instr = debug_instrs_[index];
     auto func = [this, instr]() -> size_t {
       EndLastInstr();
@@ -260,6 +261,11 @@ void CodeAssembler::AddMetaData(const CallSiteInfo* call_site_info,
   compiler().AddDescriptor(call_site_info->kind(), assembler().CodeSize(),
                            call_site_info->deopt_id(),
                            call_site_info->token_pos(), try_index);
+  if (try_index != kInvalidTryIndex) {
+    compiler().catch_entry_moves_maps_builder_->NewMapping(
+        assembler().CodeSize());
+    compiler().catch_entry_moves_maps_builder_->EndMapping();
+  }
   RecordSafePoint(call_site_info, r);
 }
 
@@ -460,6 +466,13 @@ void CodeAssembler::AddAction(size_t pc_offset, std::function<void()> action) {
   } else {
     found->second.emplace_back(action);
   }
+}
+
+void CodeAssembler::SetupEntryCodeRange() {
+  const FlowGraph& flow_graph = compiler().flow_graph();
+  GraphEntryInstr* graph_entry = flow_graph.graph_entry();
+  FunctionEntryInstr* normal_entry = graph_entry->normal_entry();
+  last_instr_ = normal_entry;
 }
 #if defined(TARGET_ARCH_ARM)
 #include "vm/compiler/backend/llvm/llvm_code_assembler_arm.cc"

@@ -927,7 +927,8 @@ void AnonImpl::CollectExceptionVars() {
 
 void AnonImpl::SetDebugLine(Instruction* instr) {
   debug_instrs_.emplace_back(instr);
-  output().setDebugInfo(debug_instrs_.size(), nullptr);
+  // line one is too special, ignore it.
+  output().setDebugInfo(debug_instrs_.size() + 1, nullptr);
 }
 
 Instruction* AnonImpl::CurrentDebugInstr() {
@@ -2633,7 +2634,6 @@ Output& IRTranslator::output() {
 }
 
 void IRTranslator::VisitBlockEntry(BlockEntryInstr* block) {
-  impl().SetDebugLine(block);
   impl().StartTranslate(block);
   IRTranslatorBlockImpl* block_impl = impl().current_bb_impl();
   block_impl->try_index = block->try_index();
