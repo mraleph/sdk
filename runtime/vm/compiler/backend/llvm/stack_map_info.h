@@ -75,7 +75,9 @@ class CallSiteInfo final : public StackMapInfo {
   V(int64_t, parameter_bits)                                                   \
   V(int, valid_bits)                                                           \
   V(intptr_t, thread_offset)                                                   \
-  V(intptr_t, fpu_thread_offset)
+  V(intptr_t, fpu_thread_offset)                                               \
+  V(intptr_t, native_entry_pool_offset)                                        \
+  V(intptr_t, stub_pool_offset)
 
 #define CALLSITE_WAPPER(type, name) DEFINE_ACCESSOR(type, name, CallSiteInfo)
 
@@ -99,13 +101,19 @@ class CallSiteInfo final : public StackMapInfo {
       const Function* target_;
       Code::EntryKind entry_kind_;
     };
+    // shared stubs
     struct {
       const Code* code_;
       const Code* fpu_code_;
     };
+    // thread offset shared stubs
     struct {
       intptr_t thread_offset_;
       intptr_t fpu_thread_offset_;
+    };
+    struct {
+      intptr_t native_entry_pool_offset_;
+      intptr_t stub_pool_offset_;
     };
   };
   int64_t parameter_bits_;

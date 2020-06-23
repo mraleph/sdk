@@ -182,9 +182,6 @@ class ObjectPoolBuilder : public ValueObject {
     }
     return object_pool_[i - used_from_parent_.length()];
   }
-#if defined(DART_ENABLE_LLVM_COMPILER)
-  intptr_t NextIndex() const { return base_index_ + object_pool_.length(); }
-#endif
 
   intptr_t AddObject(ObjectPoolBuilderEntry entry);
 

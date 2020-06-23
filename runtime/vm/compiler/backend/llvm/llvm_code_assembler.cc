@@ -66,7 +66,6 @@ void CodeAssembler::PrepareExceptionTable() {
   ExceptionTableParser parser(compiler_state().exception_table_->data(),
                               compiler_state().exception_table_->size());
   exception_tuples_ = std::move(parser.CallSiteHandlerPairs());
-  // should I sort it?
 }
 
 void CodeAssembler::PrepareInstrActions() {
@@ -469,14 +468,15 @@ void CodeAssembler::GenerateNativeCall(const CallSiteInfo* call_site_info) {
   assembler().add(R2, SP,
                   compiler::Operand(call_site_info->stack_parameter_count() *
                                     compiler::target::kWordSize));
-  uword entry;
-  const Code* stub;
-  stub = &StubCode::CallBootstrapNative();
-  entry = NativeEntry::LinkNativeCallEntry();
-  compiler::ExternalLabel label(entry);
-  assembler().LoadNativeEntry(R9, &label,
-                              compiler::ObjectPoolBuilderEntry::kPatchable);
-  assembler().BranchLinkPatchable(*stub);
+  assembler().LoadWordFromPoolOffset(
+      R9, call_site_info->native_entry_pool_offset() - kHeapObjectTag, PP, AL);
+  assembler().LoadWordFromPoolOffset(
+      CODE_REG, call_site_info->stub_pool_offset() - kHeapObjectTag, PP, AL);
+  assembler().ldr(LR, compiler::FieldAddress(
+                          CODE_REG, compiler::target::Code::entry_point_offset(
+                                        CodeEntryKind::kNormal)));
+  assembler().blx(
+      LR);  // Use blx instruction so that the return branch prediction works.
 #else
 #error unsupported arch
 #endif

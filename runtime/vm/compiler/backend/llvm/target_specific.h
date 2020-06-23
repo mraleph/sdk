@@ -25,8 +25,7 @@ static const Register kRuntimeCallTargetReg = R0;
 // NativeCall
 static const Register kNativeArgcReg = R1;
 static const size_t kNativeCallInstrSize = 6 * Instr::kInstrSize;
-static const size_t kNativeCallLongInstrSize = 8 * Instr::kInstrSize;
-static const intptr_t kNativeCallLongThreshold = 1024;
+static const size_t kNativeCallIncrement = Instr::kInstrSize;
 
 // Thread offset Call
 static const size_t kThreadOffsetCallInstrSize =

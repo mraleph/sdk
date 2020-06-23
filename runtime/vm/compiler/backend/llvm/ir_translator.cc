@@ -293,6 +293,7 @@ class AnonImpl {
 
   // Target dependent
   bool support_integer_div() const;
+  bool CanHoldLoadOffset(intptr_t offset) const;
 
   inline CompilerState& compiler_state() { return *compiler_state_; }
   inline LivenessAnalysis& liveness() { return *liveness_analysis_; }
@@ -2913,7 +2914,8 @@ void IRTranslator::VisitClosureCall(ClosureCallInstr* instr) {
   impl().SetDebugLine(instr);
   const intptr_t argument_count =
       instr->ArgumentCount();  // Includes type args.
-  LValue function = impl().GetLLVMValue(instr->InputAt(0));
+  LValue function =
+      impl().GetLLVMValue(instr->InputAt(instr->InputCount() - 1));
   LValue entry_gep = output().buildGEPWithByteOffset(
       function,
       output().constIntPtr(
@@ -2934,7 +2936,6 @@ void IRTranslator::VisitClosureCall(ClosureCallInstr* instr) {
       Array::ZoneHandle(impl().zone(), instr->GetArgumentsDescriptor());
   LValue argument_descriptor_obj = impl().LoadObject(arguments_descriptor);
   resolver.SetGParameter(ARGS_DESC_REG, argument_descriptor_obj);
-  resolver.SetGParameter(kICReg, output().constTagged(0));
   resolver.SetCallTarget(entry);
   for (intptr_t i = argument_count - 1; i >= 0; --i) {
     LValue param = impl().GetLLVMValue(instr->ArgumentValueAt(i));
@@ -3209,10 +3210,29 @@ void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
   callsite_info->set_token_pos(instr->token_pos());
   callsite_info->set_deopt_id(instr->deopt_id());
   callsite_info->set_stack_parameter_count(argument_count);
-  callsite_info->set_instr_size(impl().object_pool_builder().NextIndex() >=
-                                        kNativeCallLongThreshold
-                                    ? kNativeCallLongInstrSize
-                                    : kNativeCallInstrSize);
+  size_t instr_size = kNativeCallInstrSize;
+  int32_t native_entry_pool_offset, stub_pool_offset;
+  uword entry;
+  const Code* stub;
+  stub = &StubCode::CallBootstrapNative();
+  entry = NativeEntry::LinkNativeCallEntry();
+  compiler::ExternalLabel label(entry);
+  native_entry_pool_offset = compiler::target::ObjectPool::element_offset(
+      impl().object_pool_builder().FindNativeFunction(
+          &label, compiler::ObjectPoolBuilderEntry::kPatchable));
+  stub_pool_offset = compiler::target::ObjectPool::element_offset(
+      impl().object_pool_builder().FindObject(
+          *stub, compiler::ObjectPoolBuilderEntry::kPatchable));
+
+  if (UNLIKELY(!impl().CanHoldLoadOffset(native_entry_pool_offset))) {
+    instr_size += kNativeCallIncrement;
+  }
+  if (UNLIKELY(!impl().CanHoldLoadOffset(stub_pool_offset))) {
+    instr_size += kNativeCallIncrement;
+  }
+  callsite_info->set_native_entry_pool_offset(native_entry_pool_offset);
+  callsite_info->set_stub_pool_offset(stub_pool_offset);
+  callsite_info->set_instr_size(instr_size);
   callsite_info->set_return_on_stack_pos(0);
   CallResolver::CallResolverParameter param(instr, std::move(callsite_info));
   CallResolver resolver(impl(), instr->ssa_temp_index(), param);
