@@ -3785,21 +3785,23 @@ void IRTranslator::VisitCreateArray(CreateArrayInstr* instr) {
 
 void IRTranslator::VisitAllocateObject(AllocateObjectInstr* instr) {
   impl().SetDebugLine(instr);
-
-  if (instr->ArgumentCount() == 1) {
+  std::vector<std::pair<Register, LValue>> args;
+  if (instr->type_arguments() != nullptr) {
     TypeUsageInfo* type_usage_info = impl().thread()->type_usage_info();
     if (type_usage_info != nullptr) {
       RegisterTypeArgumentsUse(
           impl().flow_graph()->parsed_function().function(), type_usage_info,
-          instr->cls(), instr->ArgumentAt(0));
+          instr->cls(), instr->type_arguments()->definition());
     }
+    args.emplace_back(kAllocationStubTypeArgumentsReg,
+                      impl().GetLLVMValue(instr->type_arguments()));
   }
   const Code& stub = Code::ZoneHandle(
       impl().zone(), StubCode::GetAllocationStubForClass(instr->cls()));
 
-  LValue result =
-      impl().GenerateCall(instr, instr->token_pos(), instr->deopt_id(), stub,
-                          RawPcDescriptors::kOther, instr->ArgumentCount(), {});
+  LValue result = impl().GenerateCall(
+      instr, instr->token_pos(), instr->deopt_id(), stub,
+      RawPcDescriptors::kOther, instr->ArgumentCount(), args);
   impl().SetLLVMValue(instr, result);
 }
 
