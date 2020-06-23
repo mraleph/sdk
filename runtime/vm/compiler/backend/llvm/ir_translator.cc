@@ -3729,8 +3729,6 @@ void IRTranslator::VisitLoadStaticField(LoadStaticFieldInstr* instr) {
 
 void IRTranslator::VisitStoreStaticField(StoreStaticFieldInstr* instr) {
   impl().SetDebugLine(instr);
-  // FIXME: need this when in assemble phase:
-  // compiler->used_static_fields().Add(&field());
   const intptr_t field_table_offset =
       compiler::target::Thread::field_table_values_offset();
   LValue field_table = impl().LoadFromOffset(

@@ -105,6 +105,10 @@ void CodeAssembler::PrepareDwarfAction() {
                                                return_instr->yield_index());
         }
       }
+      if (instr->IsStoreStaticField()) {
+        compiler().used_static_fields().Add(
+            &instr->AsStoreStaticField()->field());
+      }
       return static_cast<size_t>(0);
     };
     AddAction(pc_offset, WrapAction(func));
