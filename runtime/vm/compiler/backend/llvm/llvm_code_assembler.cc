@@ -27,6 +27,9 @@ CodeAssembler::CodeAssembler(FlowGraphCompiler* compiler)
 }
 
 void CodeAssembler::AssembleCode() {
+  if (compiler().TryIntrinsify() && compiler().skip_body_compilation()) {
+    return;
+  }
   PrepareExceptionTable();
   PrepareInstrActions();
   for (auto& p : action_map_) {
