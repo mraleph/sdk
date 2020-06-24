@@ -255,11 +255,13 @@ void SSALivenessAnalysis::ComputeInitialSets() {
           if (!kill_[pred->postorder_number()]->Contains(use)) {
             live_in_[pred->postorder_number()]->Add(use);
           }
+          live_out_[pred->postorder_number()]->Add(use);
           if (phi->HasPairRepresentation()) {
             const intptr_t second_use = ToSecondPairVreg(use);
             if (!kill_[pred->postorder_number()]->Contains(second_use)) {
               live_in_[pred->postorder_number()]->Add(second_use);
             }
+            live_out_[pred->postorder_number()]->Add(second_use);
           }
         }
       }
