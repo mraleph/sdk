@@ -53,6 +53,7 @@ struct IRTranslatorBlockImpl {
   LValue stacktrace_val = nullptr;
   LValue exception_pp_val = nullptr;
   std::unordered_map<int, LValue> exception_params;
+  bool request_exception_env_ = false;
 
   AnonImpl* anon_impl;
   int try_index = kInvalidTryIndex;
@@ -914,9 +915,11 @@ void AnonImpl::CollectExceptionVars() {
       ParameterInstr* param = def->AsParameter();
       if (!param) continue;
       int param_index = param->index();
+      if (param_index < flow_graph()->num_direct_parameters()) continue;
 
       LValue phi = output().buildPhi(output().tagged_type());
       block_impl->exception_params.emplace(param_index, phi);
+      block_impl->request_exception_env_ = true;
     }
     block_impl->SetLLVMValue(liveness().GetPPValueSSAIdx(),
                              block_impl->exception_pp_val);
@@ -2018,6 +2021,7 @@ void CallResolver::EmitCall() {
         impl().GetTranslatorBlockImpl(catch_block_);
     auto& exception_params = block_impl->exception_params;
     if (exception_params.empty()) break;
+    if (!block_impl->request_exception_env_) break;
     Environment* env = call_resolver_parameter_.call_instruction->env();
     EMASSERT(env != nullptr);
     env = env->Outermost();
