@@ -37,7 +37,7 @@ bool LivenessAnalysis::Analyze() {
 template <typename Functor>
 BitVector* LivenessAnalysis::CalculateBlock(BlockEntryInstr* block,
                                             Functor& f) const {
-  BitVector* live = new (zone()) BitVector(zone(), MaxSSANumber());
+  BitVector* live = NewLiveBitVector();
   live->AddAll(liveness_.GetLiveOutSet(block));
   for (BackwardInstructionIterator it(block); !it.Done(); it.Advance()) {
     Instruction* current = it.Current();
@@ -94,7 +94,7 @@ void LivenessAnalysis::AnalyzeCallOut() {
 }
 
 void LivenessAnalysis::SubmitCallsite(Instruction* instr, BitVector* live) {
-  BitVector* call_out_live = new (zone()) BitVector(zone(), MaxSSANumber());
+  BitVector* call_out_live = NewLiveBitVector();
   call_out_live->AddAll(live);
   call_out_map_.emplace(instr, call_out_live);
 }
@@ -287,6 +287,11 @@ int LivenessAnalysis::GetPPValueSSAIdx() const {
 
 int LivenessAnalysis::MaxSSANumber() const {
   return flow_graph().max_virtual_register_number() + 1;
+}
+
+BitVector* LivenessAnalysis::NewLiveBitVector() const {
+  BitVector* live = new (zone()) BitVector(zone(), MaxSSANumber());
+  return live;
 }
 }  // namespace dart_llvm
 }  // namespace dart

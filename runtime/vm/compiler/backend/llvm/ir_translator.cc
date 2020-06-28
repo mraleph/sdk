@@ -1702,8 +1702,7 @@ LBasicBlock AnonImpl::GetCurrentBlockContinuation() {
 
 ModifiedValuesMergeHelper::ModifiedValuesMergeHelper(AnonImpl& impl)
     : impl_(impl) {
-  values_modified_ = new (impl.zone())
-      BitVector(impl.zone(), impl.flow_graph()->max_virtual_register_number());
+  values_modified_ = impl.liveness().NewLiveBitVector();
 }
 
 ModifiedValuesMergeHelper::~ModifiedValuesMergeHelper() {

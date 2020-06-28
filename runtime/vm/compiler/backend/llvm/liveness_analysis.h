@@ -48,6 +48,7 @@ class LivenessAnalysis final {
   int MaxSSANumber() const;
 
   const FlowGraph& flow_graph() const { return *flow_graph_; }
+  BitVector* NewLiveBitVector() const;
 
  private:
   void AnalyzeCallOut();
