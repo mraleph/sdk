@@ -45,9 +45,10 @@ void Output::initializeBuild(const RegisterParameterDesc& registerParameters,
 
   prologue_ = appendBasicBlock("Prologue");
   positionToBBEnd(prologue_);
-  thread_ = LLVMGetParam(state_.function_, static_cast<int>(THR));
-  pp_ = LLVMGetParam(state_.function_, static_cast<int>(PP));
-  args_desc_ = LLVMGetParam(state_.function_, static_cast<int>(ARGS_DESC_REG));
+  thread_ = LLVMGetParam(state_.function_, RegisterToParameterLoc(THR));
+  pp_ = LLVMGetParam(state_.function_, RegisterToParameterLoc(PP));
+  args_desc_ =
+      LLVMGetParam(state_.function_, RegisterToParameterLoc(ARGS_DESC_REG));
 
   enum class LateParameterType { Stack, FloatPoint };
   // type, position in stack/double registers, position in parameters;
@@ -64,7 +65,7 @@ void Output::initializeBuild(const RegisterParameterDesc& registerParameters,
       late_parameters.emplace_back(LateParameterType::FloatPoint, name,
                                    parameters_.size() - 1);
     } else if ((registerParameter.name >= 0)) {
-      EMASSERT(registerParameter.name < 10);
+      EMASSERT(registerParameter.name < kV8CCRegisterParameterCount);
       LValue rvalue = LLVMGetParam(state_.function_, registerParameter.name);
       parameters_.emplace_back(rvalue);
     } else {
@@ -104,10 +105,16 @@ void Output::initializeFunction(const RegisterParameterDesc& registerParameters,
                                 LType return_type) {
   std::vector<LType> params_types;
   params_types.resize(kV8CCRegisterParameterCount, tagged_type());
-  params_types[static_cast<int>(PP)] = tagged_type();
-  params_types[static_cast<int>(THR)] = repo().ref8;
+  params_types[RegisterToParameterLoc(PP)] = tagged_type();
+  params_types[RegisterToParameterLoc(THR)] = repo().ref8;
 #if defined(TARGET_SUPPORT_DISPATCH_TABLE_REG)
-  params_types[static_cast<int>(DISPATCH_TABLE_REG)] = repo().ref8;
+  params_types[RegisterToParameterLoc(DISPATCH_TABLE_REG)] = repo().ref8;
+#endif
+#if defined(TARGET_SUPPORT_NULL_OBJECT_REG)
+  params_types[RegisterToParameterLoc(NULL_REG)] = tagged_type();
+#endif
+#if defined(TARGET_SUPPORT_BARRIER_MASK_REG)
+  params_types[RegisterToParameterLoc(BARRIER_MASK)] = repo().intPtr;
 #endif
   EMASSERT(params_types.size() == kV8CCRegisterParameterCount);
   std::vector<LType> float_point_parameter_types;
@@ -579,6 +586,11 @@ void Output::EmitStackMapInfoMap(StackMapInfoMap&& stack_map_info_map) {
   state_.stack_map_info_map_ = std::move(stack_map_info_map);
 }
 
+LValue Output::GetRegisterParameter(Register r) {
+  int loc = RegisterToParameterLoc(r);
+  return LLVMGetParam(state_.function_, loc);
+}
+
 LValue Output::fp() {
   return buildCall(repo().frameAddressIntrinsic(), constInt32(0));
 }
@@ -599,6 +611,10 @@ void Output::AddFunctionCommonAttr(LValue function) {
   static const char kFSValue[] =
       "+armv7-a,+dsp,+neon,+vfp3,-crypto,-fp-armv8,-thumb-mode,-vfp4,-fp-only-sp";
   LLVMAddTargetDependentFunctionAttr(function, kFS, kFSValue);
+#elif defined(TARGET_ARCH_ARM64)
+  static const char kFS[] = "target-features";
+  static const char kFSValue[] = "+neon";
+  LLVMAddTargetDependentFunctionAttr(function, kFS, kFSValue);
 #endif
 
   static const char kNoRealignStack[] = "no-realign-stack";
@@ -613,16 +629,32 @@ LLVMAttributeRef Output::createStringAttr(const char* key,
                                    value_len);
 }
 
-LValue Output::GetDispatchTable() {
-#if defined(TARGET_SUPPORT_DISPATCH_TABLE_REG)
-  return LLVMGetParam(state_.function_, static_cast<int>(DISPATCH_TABLE_REG));
-#else
-  LValue dispatch_table_gep = buildGEPWithByteOffset(
-      output().thread(),
-      output().constIntPtr(
-          compiler::target::Thread::dispatch_table_array_offset()),
-      pointerType(output().repo().ref8));
-  return buildInvariantLoad(dispatch_table_gep);
+int Output::RegisterToParameterLoc(Register r) {
+#if defined(TARGET_ARCH_ARM)
+  // all register listed in the parameter
+  return r;
+#elif defined(TARGET_ARCH_ARM64)
+  int r_value = r;
+  // [X0, X7] listed in the arguments
+  if (r_value < 8) return r_value;
+  switch (r) {
+    case DISPATCH_TABLE_REG:
+      return 8;
+    case NULL_REG:
+      return 9;
+    case CODE_REG:
+      return 10;
+    case kWriteBarrierSlotReg:
+      return 11;
+    case THR:
+      return 12;
+    case PP:
+      return 13;
+    case BARRIER_MASK:
+      return 14;
+    default:
+      UNREACHABLE();
+  }
 #endif
 }
 }  // namespace dart_llvm

@@ -133,6 +133,8 @@ static bool IsLiveOutHasNoneGPRegister(
 static Register DwarfToRegister(DWARFRegister dwarf) {
 #if defined(TARGET_ARCH_ARM)
   return static_cast<Register>(dwarf);
+#elif defined(TARGET_ARCH_ARM64)
+  return static_cast<Register>(dwarf);
 #else
 #error unsupported arch
 #endif
@@ -396,12 +398,12 @@ void CodeAssembler::RecordSafePoint(const CallSiteInfo* call_site_info,
     if (location.kind != StackMaps::Location::Indirect) continue;
     // only understand stack slot
     int index;
-    if (location.dwarfReg == SP) {
+    if (location.dwarfReg == kDwarfSP) {
       // Remove the effect from safepoint-table.cc
       EMASSERT(location.offset >= 0);
       index = slot_count_ - 1 - location.offset / compiler::target::kWordSize;
     } else {
-      EMASSERT(location.dwarfReg == FP);
+      EMASSERT(location.dwarfReg == kDwarfFP);
       if (location.offset >= 0) continue;
       index = -location.offset / compiler::target::kWordSize - 1;
     }
@@ -480,6 +482,8 @@ void CodeAssembler::SetupEntryCodeRange() {
 }
 #if defined(TARGET_ARCH_ARM)
 #include "vm/compiler/backend/llvm/llvm_code_assembler_arm.cc"
+#elif defined(TARGET_ARCH_ARM64)
+#include "vm/compiler/backend/llvm/llvm_code_assembler_arm64.cc"
 #else
 #error unsupported arch
 #endif

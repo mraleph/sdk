@@ -1,4 +1,3 @@
-
 void CodeAssembler::CallWithCallReg(const CallSiteInfo* call_site_info,
                                     dart::Register reg) {
   if (LIKELY(!call_site_info->is_tailcall()))

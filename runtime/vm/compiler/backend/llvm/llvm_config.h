@@ -8,6 +8,7 @@
 // test arch
 #if defined(DART_ENABLE_LLVM_COMPILER)
 #if defined(TARGET_ARCH_ARM)
+#elif defined(TARGET_ARCH_ARM64)
 #else
 #undef DART_ENABLE_LLVM_COMPILER
 #endif

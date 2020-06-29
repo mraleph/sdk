@@ -126,7 +126,7 @@ class Output {
   LType tagged_pair() const;
   void EmitDebugInfo(std::vector<Instruction*>&& debug_instrs);
   void EmitStackMapInfoMap(StackMapInfoMap&& stack_map_info_map);
-  LValue GetDispatchTable();
+  LValue GetRegisterParameter(Register r);
 
   inline IntrinsicRepository& repo() { return repo_; }
   inline LBasicBlock prologue() const { return prologue_; }
@@ -139,6 +139,7 @@ class Output {
   inline LValue pp() { return pp_; }
   inline LValue bitcast_space() { return bitcast_space_; }
   inline int stack_parameter_count() const { return stack_parameter_count_; }
+  static int RegisterToParameterLoc(Register);
 
  private:
   LValue setInstrDebugLoc(LValue);

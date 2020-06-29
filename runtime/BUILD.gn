@@ -62,6 +62,9 @@ config("dart_precompiler_config") {
     if (dart_target_arch == "arm") {
       enable_llvm = true
     }
+    if (dart_target_arch == "arm64") {
+      enable_llvm = true
+    }
   }
   if (enable_llvm) {
     include_dirs = [ "vm/compiler/backend/llvm/include" ]

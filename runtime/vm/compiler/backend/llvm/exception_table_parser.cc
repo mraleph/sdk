@@ -16,8 +16,10 @@ ExceptionTableParser::ExceptionTableParser(const uint8_t* content,
   const uint8_t* end = content + length;
   DataView view(content);
   // omit first two words
+#if defined(TARGET_ARCH_ARM)
   view.read<int32_t>(offset, true);
   view.read<int32_t>(offset, true);
+#endif
   static const uint8_t kDW_EH_PE_omit = 0xff;
   static const uint8_t kDW_EH_PE_uleb128 = 0x01;
   uint8_t lp_start = view.read<uint8_t>(offset, true);

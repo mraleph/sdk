@@ -35,15 +35,28 @@ static void InitializeAndGetLLVMAPI(void) {
   // cross-compilation situations.
   LLVMLinkInMCJIT();
 #if defined(TARGET_ARCH_ARM)
-  LLVMInitializeARMTargetInfo();
-  LLVMInitializeARMTarget();
-  LLVMInitializeARMTargetMC();
-  LLVMInitializeARMAsmPrinter();
-  LLVMInitializeARMDisassembler();
-  LLVMInitializeARMAsmParser();
+#define TARGET_NAME ARM
+#elif defined(TARGET_ARCH_ARM64)
+#define TARGET_NAME AArch64
 #else
 #error unsupported arch
 #endif
+
+#define INITIALIZE_TARGET(target_name)                                         \
+  LLVMInitialize##target_name##TargetInfo();                                   \
+  LLVMInitialize##target_name##Target();                                       \
+  LLVMInitialize##target_name##TargetMC();                                     \
+  LLVMInitialize##target_name##AsmPrinter();                                   \
+  LLVMInitialize##target_name##Disassembler();                                 \
+  LLVMInitialize##target_name##AsmParser();
+
+#define CALL_INITIALIZE(func, name) func(name)
+
+  CALL_INITIALIZE(INITIALIZE_TARGET, TARGET_NAME)
+
+#undef CALL_INITIALIZE
+#undef INITIALIZE_TARGET
+#undef TARGET_NAME
 }
 
 namespace {

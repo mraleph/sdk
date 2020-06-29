@@ -36,8 +36,15 @@ static const char* symbolLookupCallback(void* DisInfo,
 static void disassemble(CompilerState& state,
                         ByteBuffer& code,
                         const DwarfLineMapper& mapper) {
+#if defined(TARGET_ARCH_ARM)
   LLVMDisasmContextRef DCR = LLVMCreateDisasm(
       "armv8-unknown-unknown-v8", nullptr, 0, nullptr, symbolLookupCallback);
+#elif defined(TARGET_ARCH_ARM64)
+  LLVMDisasmContextRef DCR = LLVMCreateDisasm(
+      "aarch64-unknown-unknown-v8", nullptr, 0, nullptr, symbolLookupCallback);
+#else
+#error unsupport arch
+#endif
 
   uint8_t* BytesP = code.data();
 
@@ -52,8 +59,8 @@ static void disassemble(CompilerState& state,
   auto& debug_instrs_ = state.debug_instrs_;
   while (NumBytes != 0) {
     auto found = debug_map.find(PC);
-    if (found != debug_map.end() && found->second) {
-      int index = found->second - 1;
+    if (found != debug_map.end() && found->second > 1) {
+      int index = found->second - 2;
       printf("%s\n", debug_instrs_[index]->ToCString());
     }
     size_t InstSize = LLVMDisasmInstruction(DCR, BytesP, NumBytes, PC,
@@ -117,6 +124,8 @@ static uint8_t* mmAllocateDataSection(void* opaqueState,
   EMASSERT((reinterpret_cast<uintptr_t>(bb.data()) & (alignment - 1)) == 0);
 #if defined(TARGET_ARCH_ARM)
   static const char kExceptionTablePrefix[] = SECTION_NAME("ARM.extab");
+#elif defined(TARGET_ARCH_ARM64)
+  static const char kExceptionTablePrefix[] = SECTION_NAME("gcc_except_table");
 #else
 #error unsupport arch
 #endif
