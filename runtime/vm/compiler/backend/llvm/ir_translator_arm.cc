@@ -24,3 +24,10 @@ void AnonImpl::AdjustInstrSizeForLoadFromConsecutiveAddress(
   f(offset);
   f(offset + compiler::target::kWordSize);
 }
+
+LValue AnonImpl::LoadObjectFromPool(intptr_t offset) {
+  LValue gep = output().buildGEPWithByteOffset(
+      GetPPValue(), output().constIntPtr(offset - kHeapObjectTag),
+      pointerType(output().tagged_type()));
+  return output().buildLoad(gep);
+}

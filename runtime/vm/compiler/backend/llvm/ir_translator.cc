@@ -268,6 +268,7 @@ class AnonImpl {
                         LType type,
                         bool invariant = false);
   LValue LoadObject(const Object& object, bool is_unique = false);
+  LValue LoadObjectFromPool(intptr_t offset);
   LValue GetDispatchTable();
   LValue GetNull();
   LValue GetBarrierMask();
@@ -1031,10 +1032,7 @@ LValue AnonImpl::GenerateCall(
             compiler::ToObject(stub),
             compiler::ObjectPoolBuilderEntry::kNotPatchable));
 
-    LValue gep = output().buildGEPWithByteOffset(
-        GetPPValue(), output().constIntPtr(offset - kHeapObjectTag),
-        pointerType(output().tagged_type()));
-    LValue code_object = output().buildLoad(gep);
+    LValue code_object = LoadObjectFromPool(offset);
     LValue entry_gep = output().buildGEPWithByteOffset(
         code_object,
         output().constIntPtr(
@@ -1468,10 +1466,7 @@ LValue AnonImpl::LoadObject(const Object& object, bool is_unique) {
     const auto index = is_unique ? object_pool_builder().AddObject(object)
                                  : object_pool_builder().FindObject(object);
     const int32_t offset = compiler::target::ObjectPool::element_offset(index);
-    LValue gep = output().buildGEPWithByteOffset(
-        GetPPValue(), output().constIntPtr(offset - kHeapObjectTag),
-        pointerType(output().tagged_type()));
-    return output().buildLoad(gep);
+    return LoadObjectFromPool(offset);
   }
 }
 
@@ -1556,18 +1551,26 @@ void AnonImpl::StoreIntoObject(Instruction* instr,
     });
     resolver.BuildLeft([&]() {
       // should emit
-      LValue entry = LoadFromOffset(
-          output().thread(),
-          compiler::target::Thread::write_barrier_entry_point_offset(),
-          pointerType(output().repo().ref8), true);
+      LValue entry = nullptr;
+      const auto& stub = Code::ZoneHandle(object_store()->write_barrier_stub());
       std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
-      callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
+      if (!stub.InVMIsolateHeap()) {
+        callsite_info->set_type(CallSiteInfo::CallTargetType::kStubRelative);
+        callsite_info->set_code(&stub);
+        callsite_info->set_fpu_code(nullptr);
+      } else {
+        entry = LoadFromOffset(
+            output().thread(),
+            compiler::target::Thread::write_barrier_entry_point_offset(),
+            pointerType(output().repo().ref8), true);
+        callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
+      }
       callsite_info->set_instr_size(kCallInstrSize);
 
       CallResolver::CallResolverParameter param(instr,
                                                 std::move(callsite_info));
       CallResolver call_resolver(*this, -1, param);
-      call_resolver.SetCallTarget(entry);
+      if (entry) call_resolver.SetCallTarget(entry);
       call_resolver.SetGParameter(
           Output::RegisterToParameterLoc(kWriteBarrierObjectReg), object);
       call_resolver.SetGParameter(
@@ -1621,17 +1624,26 @@ void AnonImpl::StoreIntoArray(Instruction* instr,
     });
     resolver.BuildLeft([&]() {
       // should emit
-      LValue entry = LoadFromOffset(
-          output().thread(),
-          compiler::target::Thread::array_write_barrier_entry_point_offset(),
-          pointerType(output().repo().ref8), true);
       std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
-      callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
+      LValue entry = nullptr;
+      const auto& stub =
+          Code::ZoneHandle(object_store()->array_write_barrier_stub());
+      if (!stub.InVMIsolateHeap()) {
+        callsite_info->set_type(CallSiteInfo::CallTargetType::kStubRelative);
+        callsite_info->set_code(&stub);
+        callsite_info->set_fpu_code(nullptr);
+      } else {
+        entry = LoadFromOffset(
+            output().thread(),
+            compiler::target::Thread::array_write_barrier_entry_point_offset(),
+            pointerType(output().repo().ref8), true);
+        callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
+      }
       callsite_info->set_instr_size(kCallInstrSize);
       CallResolver::CallResolverParameter param(instr,
                                                 std::move(callsite_info));
       CallResolver call_resolver(*this, -1, param);
-      call_resolver.SetCallTarget(entry);
+      if (entry) call_resolver.SetCallTarget(entry);
       call_resolver.SetGParameter(
           Output::RegisterToParameterLoc(kWriteBarrierObjectReg), object);
       call_resolver.SetGParameter(

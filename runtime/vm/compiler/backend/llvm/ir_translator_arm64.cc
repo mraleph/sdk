@@ -26,3 +26,10 @@ void AnonImpl::AdjustInstrSizeForLoadFromConsecutiveAddress(
     instr_size += increment;
   }
 }
+
+LValue AnonImpl::LoadObjectFromPool(intptr_t offset) {
+  LValue gep = output().buildGEPWithByteOffset(
+      GetPPValue(), output().constIntPtr(offset),
+      pointerType(output().tagged_type()));
+  return output().buildLoad(gep);
+}

@@ -358,6 +358,11 @@ void Precompiler::DoCompileAll() {
         stub_code = StubCode::BuildIsolateSpecificArrayWriteBarrierStub(
             global_object_pool_builder());
         I->object_store()->set_array_write_barrier_stub(stub_code);
+#if defined(DART_ENABLE_LLVM_COMPILER)
+        stub_code = StubCode::BuildIsolateSpecificWriteBarrierStub(
+            global_object_pool_builder());
+        I->object_store()->set_write_barrier_stub(stub_code);
+#endif
       }
 
       CollectDynamicFunctionNames();
