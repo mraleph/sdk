@@ -2857,7 +2857,9 @@ void IRTranslator::VisitLoadIndexedUnsafe(LoadIndexedUnsafeInstr* instr) {
   impl().SetDebugLine(instr);
   LValue index_smi = impl().TaggedToWord(impl().GetLLVMValue(instr->index()));
   EMASSERT(instr->base_reg() == FP);
-  LValue offset = output().buildShl(index_smi, output().constIntPtr(1));
+  LValue offset = output().buildShl(
+      index_smi,
+      output().constIntPtr(compiler::target::kWordSizeLog2 - kSmiTagSize));
   offset = output().buildAdd(offset, output().constIntPtr(instr->offset()));
   LValue access =
       impl().BuildAccessPointer(output().fp(), offset, instr->representation());
