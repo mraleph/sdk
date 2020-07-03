@@ -615,6 +615,9 @@ void Output::AddFunctionCommonAttr(LValue function) {
   static const char kFS[] = "target-features";
   static const char kFSValue[] = "+neon";
   LLVMAddTargetDependentFunctionAttr(function, kFS, kFSValue);
+
+  static const char kNoJumpTables[] = "no-jump-tables";
+  LLVMAddTargetDependentFunctionAttr(function, kNoJumpTables, kTrue);
 #endif
 
   static const char kNoRealignStack[] = "no-realign-stack";
