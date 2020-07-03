@@ -1454,7 +1454,16 @@ LValue AnonImpl::LoadObject(const Object& object, bool is_unique) {
     LValue gep = output().buildGEPWithByteOffset(
         output().thread(), output().constIntPtr(offset),
         pointerType(output().tagged_type()));
-    return output().buildLoad(gep);
+    bool invariant_load = false;
+    if (compiler::IsSameObject(compiler::TrueObject(), object))
+      invariant_load = true;
+    else if (compiler::IsSameObject(compiler::FalseObject(), object))
+      invariant_load = true;
+
+    if (!invariant_load)
+      return output().buildLoad(gep);
+    else
+      return output().buildInvariantLoad(gep);
   } else if (compiler::target::IsSmi(object)) {
     // Relocation doesn't apply to Smis.
     return WordToTagged(output().constIntPtr(
