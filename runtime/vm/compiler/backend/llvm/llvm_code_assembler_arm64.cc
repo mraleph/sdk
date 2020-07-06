@@ -13,8 +13,10 @@ void CodeAssembler::GenerateNativeCall(const CallSiteInfo* call_site_info) {
   assembler().add(R2, SP,
                   compiler::Operand(call_site_info->stack_parameter_count() *
                                     compiler::target::kWordSize));
-  assembler().LoadDoubleWordFromPoolOffset(
-      R5, CODE_REG, call_site_info->native_entry_pool_offset());
+  assembler().LoadWordFromPoolOffset(
+      R5, call_site_info->native_entry_pool_offset());
+  assembler().LoadWordFromPoolOffset(CODE_REG,
+                                     call_site_info->stub_pool_offset());
   assembler().ldr(TMP, compiler::FieldAddress(
                            CODE_REG, compiler::target::Code::entry_point_offset(
                                          CodeEntryKind::kNormal)));

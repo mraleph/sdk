@@ -304,6 +304,7 @@ class AnonImpl {
   void AdjustInstrSizeForLoadFromConsecutiveAddress(size_t& instr_size,
                                                     intptr_t offset) const;
 
+  void AdjustInstrSizeForLoad(size_t& instr_size, intptr_t offset) const;
   inline CompilerState& compiler_state() { return *compiler_state_; }
   inline LivenessAnalysis& liveness() { return *liveness_analysis_; }
   inline Output& output() { return *output_; }
@@ -3015,13 +3016,10 @@ void IRTranslator::VisitClosureCall(ClosureCallInstr* instr) {
       instr->ArgumentCount();  // Includes type args.
   LValue function =
       impl().GetLLVMValue(instr->InputAt(instr->InputCount() - 1));
-  LValue entry_gep = output().buildGEPWithByteOffset(
+  LValue entry = impl().LoadFieldFromOffset(
       function,
-      output().constIntPtr(
-          compiler::target::Function::entry_point_offset(instr->entry_kind()) -
-          kHeapObjectTag),
+      compiler::target::Function::entry_point_offset(instr->entry_kind()),
       pointerType(output().repo().ref8));
-  LValue entry = output().buildLoad(entry_gep);
 
   std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
   callsite_info->set_type(CallSiteInfo::CallTargetType::kReg);
@@ -3216,8 +3214,8 @@ void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
       impl().object_pool_builder().FindObject(
           *stub, compiler::ObjectPoolBuilderEntry::kPatchable));
 
-  impl().AdjustInstrSizeForLoadFromConsecutiveAddress(instr_size,
-                                                      native_entry_pool_offset);
+  impl().AdjustInstrSizeForLoad(instr_size, native_entry_pool_offset);
+  impl().AdjustInstrSizeForLoad(instr_size, stub_pool_offset);
   callsite_info->set_native_entry_pool_offset(native_entry_pool_offset);
   callsite_info->set_stub_pool_offset(stub_pool_offset);
   callsite_info->set_instr_size(instr_size);

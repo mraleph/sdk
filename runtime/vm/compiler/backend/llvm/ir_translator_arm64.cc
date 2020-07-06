@@ -27,6 +27,22 @@ void AnonImpl::AdjustInstrSizeForLoadFromConsecutiveAddress(
   }
 }
 
+void AnonImpl::AdjustInstrSizeForLoad(size_t& instr_size,
+                                      intptr_t offset) const {
+  static const constexpr size_t increment = Instr::kInstrSize;
+  const uint32_t upper20 = offset & 0xfffff000;
+  compiler::Operand op;
+  if (LIKELY(compiler::Address::CanHoldOffset(offset))) {
+    return;
+  } else if (compiler::Operand::CanHold(upper20, kXRegSizeInBits, &op) ==
+             compiler::Operand::Immediate) {
+    instr_size += increment;
+  } else {
+    instr_size += increment;
+    instr_size += increment;
+  }
+}
+
 LValue AnonImpl::LoadObjectFromPool(intptr_t offset) {
   LValue gep = output().buildGEPWithByteOffset(
       GetPPValue(), output().constIntPtr(offset),
