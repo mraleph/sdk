@@ -47,6 +47,7 @@ static const Register kAllocateContextNumOfContextVarsReg = R1;
 
 static const int kDwarfSP = SP;
 static const int kDwarfFP = FP;
+static const int kDwarfFPFixup = 1;
 #define TARGET_SUPPORT_DISPATCH_TABLE_REG
 #elif defined(TARGET_ARCH_ARM64)
 static const int kV8CCRegisterParameterCount = 15;
@@ -90,6 +91,7 @@ static const Register kAllocateContextNumOfContextVarsReg = R1;
 
 static const int kDwarfSP = 15;
 static const int kDwarfFP = 31;
+static const int kDwarfFPFixup = 3;
 #define TARGET_SUPPORT_DISPATCH_TABLE_REG
 #define TARGET_SUPPORT_NULL_OBJECT_REG
 #define TARGET_SUPPORT_BARRIER_MASK_REG

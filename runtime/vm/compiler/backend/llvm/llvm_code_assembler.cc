@@ -409,7 +409,7 @@ void CodeAssembler::RecordSafePoint(const CallSiteInfo* call_site_info,
     } else {
       EMASSERT(location.dwarfReg == kDwarfFP);
       if (location.offset >= 0) continue;
-      index = -location.offset / compiler::target::kWordSize - 1;
+      index = -location.offset / compiler::target::kWordSize - kDwarfFPFixup;
     }
     builder->Set(index, true);
   }
