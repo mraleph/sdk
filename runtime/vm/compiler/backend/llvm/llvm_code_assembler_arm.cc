@@ -29,3 +29,6 @@ void CodeAssembler::GeneratePatchableCall(const CallSiteInfo* call_site_info) {
   assembler().blx(
       LR);  // Use blx instruction so that the return branch prediction works.
 }
+
+void CodeAssembler::PrepareLoadCPAction() {}
+void CodeAssembler::EmitCP() {}

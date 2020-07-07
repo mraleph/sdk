@@ -43,6 +43,8 @@ struct CompilerState {
   ~CompilerState();
   CompilerState(const CompilerState&) = delete;
   const CompilerState& operator=(const CompilerState&) = delete;
+  const ByteBuffer* FindByteBuffer(const char* name) const;
+  void DumpData() const;
 };
 }  // namespace dart_llvm
 }  // namespace dart

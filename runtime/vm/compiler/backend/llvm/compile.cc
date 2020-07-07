@@ -191,6 +191,7 @@ void Compile(State& state) {
   LLVMMCJITCompilerOptions options;
   LLVMInitializeMCJITCompilerOptions(&options, sizeof(options));
   options.OptLevel = 3;
+  options.CodeModel = LLVMCodeModelTiny;
   options.NoFramePointerElim = true;
   LLVMExecutionEngineRef engine;
   char* error = 0;

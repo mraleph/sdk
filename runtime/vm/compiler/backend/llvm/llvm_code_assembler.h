@@ -32,11 +32,13 @@ class CodeAssembler {
   void PrepareInstrActions();
   void PrepareDwarfAction();
   void PrepareStackMapAction();
+  void PrepareLoadCPAction();
   void AddMetaData(const CallSiteInfo*, const StackMaps::Record&);
   // returns the try index;
   intptr_t CollectExceptionInfo(const CallSiteInfo*);
   void RecordSafePoint(const CallSiteInfo*, const StackMaps::Record&);
   void EmitExceptionHandler();
+  void EmitCP();
   void EndLastInstr();
   void AddAction(size_t pc_offset, std::function<void()> action);
   void CallWithCallReg(const CallSiteInfo*, dart::Register);
@@ -59,6 +61,7 @@ class CodeAssembler {
   Instruction* last_instr_ = nullptr;
   size_t offset_ = 0;
   size_t bytes_left_ = 0;
+  size_t code_size_ = 0;
   size_t slot_count_ = 0;
   intptr_t exception_extend_id_ = 0;
 };

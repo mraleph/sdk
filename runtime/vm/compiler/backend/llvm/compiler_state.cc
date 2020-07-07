@@ -2,6 +2,8 @@
 
 #include "vm/compiler/backend/llvm/compiler_state.h"
 
+#include <iostream>
+
 #if defined(DART_ENABLE_LLVM_COMPILER)
 namespace dart {
 namespace dart_llvm {
@@ -30,6 +32,28 @@ CompilerState::CompilerState(const char* function_name)
 
 CompilerState::~CompilerState() {
   LLVMContextDispose(context_);
+}
+
+const ByteBuffer* CompilerState::FindByteBuffer(const char* name) const {
+  auto it = data_section_list_.begin();
+  for (auto& s : data_section_names_) {
+    if (s == name) break;
+    ++it;
+  }
+  // Check no relocate.
+  if (it == data_section_list_.end()) return nullptr;
+  return &*it;
+}
+
+void CompilerState::DumpData() const {
+  auto it = data_section_list_.begin();
+  for (auto& s : data_section_names_) {
+    using namespace std;
+    cerr << "Data Section " << s << " starts at "
+         << static_cast<const void*>(it->data()) << "; size: " << it->size()
+         << endl;
+    ++it;
+  }
 }
 }  // namespace dart_llvm
 }  // namespace dart

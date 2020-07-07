@@ -1,5 +1,7 @@
 #include "vm/compiler/backend/llvm/llvm_code_assembler.h"
 #if defined(DART_ENABLE_LLVM_COMPILER)
+#include <elf.h>
+
 #include "vm/bitmap.h"
 #include "vm/compiler/aot/dispatch_table_generator.h"
 #include "vm/compiler/backend/flow_graph.h"
@@ -20,7 +22,7 @@ CodeAssembler::CodeAssembler(FlowGraphCompiler* compiler)
   EMASSERT(compiler_state().code_section_list_.size() == 1);
   const ByteBuffer& code_buffer = compiler_state().code_section_list_.back();
   code_start_ = code_buffer.data();
-  bytes_left_ = code_buffer.size();
+  code_size_ = bytes_left_ = code_buffer.size();
   compiler->InitCompiler();
   GraphEntryInstr* graph_entry = compiler->flow_graph().graph_entry();
   exception_extend_id_ = graph_entry->catch_entries().length();
@@ -49,6 +51,7 @@ void CodeAssembler::AssembleCode() {
     assembler().EmitRange(code_start_ + offset_, bytes_left_);
   }
   EndLastInstr();
+  EmitCP();
   EmitExceptionHandler();
 }
 
@@ -72,6 +75,7 @@ void CodeAssembler::PrepareExceptionTable() {
 void CodeAssembler::PrepareInstrActions() {
   PrepareDwarfAction();
   PrepareStackMapAction();
+  PrepareLoadCPAction();
 }
 
 void CodeAssembler::PrepareDwarfAction() {
