@@ -1751,7 +1751,13 @@ LValue AnonImpl::BoxInteger32(Instruction* instr,
     result = resolver.End();
   }
 #else
-  LValue result = output().buildCast(LLVMSExt, value, output().repo().int64);
+  LLVMOpcode opcode;
+  if (kUnboxedInt32 == rep) {
+    opcode = LLVMSExt;
+  } else {
+    opcode = LLVMZExt;
+  }
+  LValue result = output().buildCast(opcode, value, output().repo().int64);
   result = output().buildShl(result, output().constInt64(kSmiTagSize));
   result = WordToTagged(result);
 #endif
@@ -2874,7 +2880,9 @@ void IRTranslator::VisitStoreIndexedUnsafe(StoreIndexedUnsafeInstr* instr) {
   impl().SetDebugLine(instr);
   LValue index_smi = impl().GetLLVMValue(instr->index());
   EMASSERT(instr->base_reg() == FP);
-  LValue offset = output().buildShl(index_smi, output().constInt32(1));
+  LValue offset = output().buildShl(
+      index_smi,
+      output().constInt32(compiler::target::kWordSizeLog2 - kSmiTagSize));
   offset = output().buildAdd(offset, output().constIntPtr(instr->offset()));
   LValue gep =
       impl().BuildAccessPointer(output().fp(), offset, instr->representation());
@@ -3243,9 +3251,12 @@ void IRTranslator::VisitLoadIndexed(LoadIndexedInstr* instr) {
   LValue index = impl().GetLLVMValue(instr->index());
   EMASSERT(typeOf(index) == output().tagged_type());
   index = impl().TaggedToWord(index);
+  // Found out the input representation for index.
+  Representation index_rep = instr->RequiredInputRepresentation(1);
 
+  const intptr_t boxing_shift = index_rep != kTagged ? 0 : -kSmiTagShift;
   const intptr_t shift =
-      Utils::ShiftForPowerOfTwo(instr->index_scale()) - kSmiTagShift;
+      Utils::ShiftForPowerOfTwo(instr->index_scale()) + boxing_shift;
   int32_t offset =
       instr->IsExternal()
           ? 0
@@ -3390,8 +3401,10 @@ void IRTranslator::VisitLoadCodeUnits(LoadCodeUnitsInstr* instr) {
   impl().SetDebugLine(instr);
   LValue array = impl().GetLLVMValue(instr->array());
   LValue index = impl().GetLLVMValue(instr->index());
+  Representation index_rep = instr->RequiredInputRepresentation(1);
+  const intptr_t boxing_shift = index_rep != kTagged ? 0 : -kSmiTagShift;
   const intptr_t shift =
-      Utils::ShiftForPowerOfTwo(instr->index_scale()) - kSmiTagShift;
+      Utils::ShiftForPowerOfTwo(instr->index_scale()) + boxing_shift;
   int32_t offset =
       instr->IsExternal()
           ? 0
@@ -3483,8 +3496,10 @@ void IRTranslator::VisitStoreIndexed(StoreIndexedInstr* instr) {
   LValue array = impl().GetLLVMValue(instr->array());
   LValue index = impl().TaggedToWord(impl().GetLLVMValue(instr->index()));
   LValue value = impl().GetLLVMValue(instr->value());
+  Representation index_rep = instr->RequiredInputRepresentation(1);
+  const intptr_t boxing_shift = index_rep != kTagged ? 0 : -kSmiTagShift;
   const intptr_t shift =
-      Utils::ShiftForPowerOfTwo(instr->index_scale()) - kSmiTagShift;
+      Utils::ShiftForPowerOfTwo(instr->index_scale()) + boxing_shift;
   int32_t offset =
       instr->IsExternal()
           ? 0
