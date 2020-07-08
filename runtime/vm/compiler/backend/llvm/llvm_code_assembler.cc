@@ -17,8 +17,15 @@
 namespace dart {
 DECLARE_FLAG(bool, source_lines);
 namespace dart_llvm {
+#if defined(TARGET_ARCH_ARM)
+#include "vm/compiler/backend/llvm/llvm_code_assembler_arm.cc"
+#elif defined(TARGET_ARCH_ARM64)
+#include "vm/compiler/backend/llvm/llvm_code_assembler_arm64.cc"
+#else
+#error unsupported arch
+#endif
 CodeAssembler::CodeAssembler(FlowGraphCompiler* compiler)
-    : compiler_(compiler) {
+    : compiler_(compiler), arch_impl_(new ArchImpl) {
   EMASSERT(compiler_state().code_section_list_.size() == 1);
   const ByteBuffer& code_buffer = compiler_state().code_section_list_.back();
   code_start_ = code_buffer.data();
@@ -27,6 +34,8 @@ CodeAssembler::CodeAssembler(FlowGraphCompiler* compiler)
   GraphEntryInstr* graph_entry = compiler->flow_graph().graph_entry();
   exception_extend_id_ = graph_entry->catch_entries().length();
 }
+
+CodeAssembler::~CodeAssembler() {}
 
 void CodeAssembler::AssembleCode() {
   if (compiler().TryIntrinsify() && compiler().skip_body_compilation()) {
@@ -484,13 +493,6 @@ void CodeAssembler::SetupEntryCodeRange() {
   FunctionEntryInstr* normal_entry = graph_entry->normal_entry();
   last_instr_ = normal_entry;
 }
-#if defined(TARGET_ARCH_ARM)
-#include "vm/compiler/backend/llvm/llvm_code_assembler_arm.cc"
-#elif defined(TARGET_ARCH_ARM64)
-#include "vm/compiler/backend/llvm/llvm_code_assembler_arm64.cc"
-#else
-#error unsupported arch
-#endif
 }  // namespace dart_llvm
 }  // namespace dart
 #endif

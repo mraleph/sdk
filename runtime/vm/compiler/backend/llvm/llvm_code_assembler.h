@@ -21,12 +21,15 @@ class CallSiteInfo;
 class CodeAssembler {
  public:
   explicit CodeAssembler(FlowGraphCompiler* compiler);
+  ~CodeAssembler();
   void AssembleCode();
 
  private:
+  struct ArchImpl;
   FlowGraphCompiler& compiler();
   const CompilerState& compiler_state();
   compiler::Assembler& assembler();
+  ArchImpl& arch_impl() { return *arch_impl_; }
 
   void PrepareExceptionTable();
   void PrepareInstrActions();
@@ -57,6 +60,7 @@ class CodeAssembler {
       emited_idx_crf_;
   std::vector<std::tuple<int, int, int>> exception_tuples_;
   FlowGraphCompiler* compiler_;
+  std::unique_ptr<ArchImpl> arch_impl_;
   const uint8_t* code_start_ = nullptr;
   Instruction* last_instr_ = nullptr;
   size_t offset_ = 0;

@@ -95,15 +95,15 @@ static DART_UNUSED void disassemble(CompilerState& state,
 static uint8_t* mmAllocateCodeSection(void* opaqueState,
                                       uintptr_t size,
                                       unsigned alignment,
-                                      unsigned,
+                                      unsigned sid,
                                       const char* sectionName) {
   State& state = *static_cast<State*>(opaqueState);
 
   state.code_section_list_.push_back(dart_llvm::ByteBuffer());
-  state.code_section_names_.push_back(sectionName);
 
   dart_llvm::ByteBuffer& bb(state.code_section_list_.back());
   bb.resize(size);
+  state.AddSection(sid, sectionName, &bb, alignment, true);
 
   return const_cast<uint8_t*>(bb.data());
 }
@@ -111,17 +111,15 @@ static uint8_t* mmAllocateCodeSection(void* opaqueState,
 static uint8_t* mmAllocateDataSection(void* opaqueState,
                                       uintptr_t size,
                                       unsigned alignment,
-                                      unsigned,
+                                      unsigned sid,
                                       const char* sectionName,
                                       LLVMBool) {
   State& state = *static_cast<State*>(opaqueState);
 
   state.data_section_list_.push_back(dart_llvm::ByteBuffer());
-  state.data_section_names_.push_back(sectionName);
 
   dart_llvm::ByteBuffer& bb(state.data_section_list_.back());
   bb.resize(size);
-  EMASSERT((reinterpret_cast<uintptr_t>(bb.data()) & (alignment - 1)) == 0);
 #if defined(TARGET_ARCH_ARM)
   static const char kExceptionTablePrefix[] = SECTION_NAME("ARM.extab");
 #elif defined(TARGET_ARCH_ARM64)
@@ -139,6 +137,7 @@ static uint8_t* mmAllocateDataSection(void* opaqueState,
     state.dwarf_line_ = &bb;
   }
 
+  state.AddSection(sid, sectionName, &bb, alignment, false);
   return const_cast<uint8_t*>(bb.data());
 }
 

@@ -20,13 +20,19 @@ namespace dart_llvm {
 class StackMapInfo;
 typedef std::vector<uint8_t> ByteBuffer;
 typedef std::list<ByteBuffer> BufferList;
-typedef std::list<std::string> StringList;
+
+struct Section {
+  unsigned id;
+  unsigned alignment;
+  std::string name;
+  ByteBuffer* bb;
+  bool is_code;
+};
 
 struct CompilerState {
   BufferList code_section_list_;
   BufferList data_section_list_;
-  StringList code_section_names_;
-  StringList data_section_names_;
+  std::vector<Section> sections_;
   StackMapInfoMap stack_map_info_map_;
   std::vector<Instruction*> debug_instrs_;
   ByteBuffer* stackMapsSection_;
@@ -45,6 +51,11 @@ struct CompilerState {
   const CompilerState& operator=(const CompilerState&) = delete;
   const ByteBuffer* FindByteBuffer(const char* name) const;
   void DumpData() const;
+  void AddSection(unsigned id,
+                  std::string name,
+                  ByteBuffer* bb,
+                  unsigned alignment,
+                  bool is_code);
 };
 }  // namespace dart_llvm
 }  // namespace dart

@@ -32,3 +32,5 @@ void CodeAssembler::GeneratePatchableCall(const CallSiteInfo* call_site_info) {
 
 void CodeAssembler::PrepareLoadCPAction() {}
 void CodeAssembler::EmitCP() {}
+
+struct CodeAssembler::ArchImpl {};

@@ -35,25 +35,35 @@ CompilerState::~CompilerState() {
 }
 
 const ByteBuffer* CompilerState::FindByteBuffer(const char* name) const {
-  auto it = data_section_list_.begin();
-  for (auto& s : data_section_names_) {
-    if (s == name) break;
-    ++it;
+  for (auto& s : sections_) {
+    if (s.is_code) continue;
+    if (s.name == name) return s.bb;
   }
-  // Check no relocate.
-  if (it == data_section_list_.end()) return nullptr;
-  return &*it;
+  return nullptr;
 }
 
 void CompilerState::DumpData() const {
-  auto it = data_section_list_.begin();
-  for (auto& s : data_section_names_) {
+  for (auto& s : sections_) {
+    if (s.is_code) continue;
     using namespace std;
-    cerr << "Data Section " << s << " starts at "
-         << static_cast<const void*>(it->data()) << "; size: " << it->size()
+    cerr << "Data Section " << s.name << " starts at "
+         << static_cast<const void*>(s.bb->data()) << "; size: " << s.bb->size()
          << endl;
-    ++it;
   }
+}
+
+void CompilerState::AddSection(unsigned id,
+                               std::string name,
+                               ByteBuffer* bb,
+                               unsigned alignment,
+                               bool is_code) {
+  sections_.emplace_back();
+  auto& new_section = sections_.back();
+  new_section.id = id;
+  new_section.alignment = alignment;
+  new_section.name = std::move(name);
+  new_section.bb = bb;
+  new_section.is_code = is_code;
 }
 }  // namespace dart_llvm
 }  // namespace dart
