@@ -50,8 +50,15 @@ void CodeAssembler::PrepareLoadCPAction() {
   if (rodata_buffer) {
     ro_data_size = rodata_buffer->size();
   }
+  // FIXME: handle the elf relocatable file instead of these non-sense.
   const ByteBuffer* rodata_buffer_cst8 =
       compiler_state().FindByteBuffer(".rodata.cst8");
+  if (rodata_buffer_cst8) {
+    EMASSERT(compiler_state().FindByteBuffer(".rodata.cst16") == nullptr);
+  }
+  if (!rodata_buffer_cst8) {
+    rodata_buffer_cst8 = compiler_state().FindByteBuffer(".rodata.cst16");
+  }
   if (rodata_buffer_cst8) {
     ro_data_cst8_size = rodata_buffer_cst8->size();
   }
@@ -110,13 +117,18 @@ void CodeAssembler::PrepareLoadCPAction() {
 }
 
 void CodeAssembler::EmitCP() {
+  // FIXME: handle the elf relocatable file instead of these non-sense.
   const ByteBuffer* rodata_buffer = compiler_state().FindByteBuffer(".rodata");
-  const ByteBuffer* rodata_cst8_buffer =
+  const ByteBuffer* rodata_buffer_cst8 =
       compiler_state().FindByteBuffer(".rodata.cst8");
-  if (!rodata_buffer && !rodata_cst8_buffer) return;
+  if (!rodata_buffer_cst8) {
+    rodata_buffer_cst8 = compiler_state().FindByteBuffer(".rodata.cst16");
+  }
+  if (!rodata_buffer && !rodata_buffer_cst8) return;
   if ((assembler().CodeSize() % 8) != 0) assembler().Breakpoint();
-  if (rodata_cst8_buffer)
-    assembler().EmitRange(rodata_cst8_buffer->data(), rodata_cst8_buffer->size());
+  if (rodata_buffer_cst8)
+    assembler().EmitRange(rodata_buffer_cst8->data(),
+                          rodata_buffer_cst8->size());
   if (rodata_buffer)
     assembler().EmitRange(rodata_buffer->data(), rodata_buffer->size());
 }
