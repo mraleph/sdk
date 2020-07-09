@@ -190,7 +190,9 @@ void Compile(State& state) {
   LLVMMCJITCompilerOptions options;
   LLVMInitializeMCJITCompilerOptions(&options, sizeof(options));
   options.OptLevel = 3;
+#if defined(TARGET_ARCH_ARM64)
   options.CodeModel = LLVMCodeModelTiny;
+#endif
   options.NoFramePointerElim = true;
   LLVMExecutionEngineRef engine;
   char* error = 0;

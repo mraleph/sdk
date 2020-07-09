@@ -4,6 +4,7 @@ bool AnonImpl::support_integer_div() const {
 
 static void AdjustAddress(size_t& instr_size, intptr_t offset) {
   static const constexpr size_t increment = Instr::kInstrSize;
+  int32_t offset_mask = 0;
   if (LIKELY(
           compiler::Address::CanHoldLoadOffset(kWord, offset, &offset_mask))) {
     return;
@@ -21,7 +22,6 @@ static void AdjustAddress(size_t& instr_size, intptr_t offset) {
 void AnonImpl::AdjustInstrSizeForLoadFromConsecutiveAddress(
     size_t& instr_size,
     intptr_t offset) const {
-  int32_t offset_mask = 0;
   AdjustAddress(instr_size, offset);
   AdjustAddress(instr_size, offset + compiler::target::kWordSize);
 }

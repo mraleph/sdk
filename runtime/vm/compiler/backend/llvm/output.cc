@@ -249,6 +249,16 @@ LValue Output::buildInvariantLoad(LValue toLoad) {
   return setInstrDebugLoc(load);
 }
 
+LValue Output::buildLoadUnaligned(LValue toLoad) {
+  LValue memcpy_function = repo().memcpyIntrinsic();
+  LType pointer_type = typeOf(toLoad);
+  LType element_type = LLVMGetElementType(pointer_type);
+  LValue size_of_element_type = LLVMSizeOf(element_type);
+  buildCall(memcpy_function, bitcast_space_, buildBitCast(toLoad, repo().ref8),
+            size_of_element_type, repo().booleanFalse);
+  return buildLoad(buildBitCast(bitcast_space_, pointer_type));
+}
+
 LValue Output::buildStore(LValue val, LValue pointer) {
   return setInstrDebugLoc(dart_llvm::buildStore(builder_, val, pointer));
 }

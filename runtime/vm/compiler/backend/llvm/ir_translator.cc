@@ -3284,9 +3284,8 @@ void IRTranslator::VisitLoadIndexed(LoadIndexedInstr* instr) {
           val = output().buildLoad(gep);
         } else {
           LValue gep =
-              impl().BuildAccessPointer(array, offset_value, kUnboxedInt32);
-          val = output().buildLoad(gep);
-          val = impl().BitcastInt32ToFloat(val);
+              impl().BuildAccessPointer(array, offset_value, kUnboxedFloat);
+          val = output().buildLoadUnaligned(gep);
         }
         break;
       case kTypedDataFloat64ArrayCid:
@@ -3297,9 +3296,8 @@ void IRTranslator::VisitLoadIndexed(LoadIndexedInstr* instr) {
           val = output().buildLoad(gep);
         } else {
           LValue gep =
-              impl().BuildAccessPointer(array, offset_value, kUnboxedInt64);
-          val = output().buildLoad(gep);
-          val = impl().BitcastInt64ToDouble(val);
+              impl().BuildAccessPointer(array, offset_value, kUnboxedDouble);
+          val = output().buildLoadUnaligned(gep);
         }
         break;
       case kTypedDataFloat64x2ArrayCid: {

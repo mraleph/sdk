@@ -37,7 +37,7 @@
     macro(stackSave, "llvm.stacksave", functionType(ref8)) \
     macro(fakePersonality, "fake_personality", functionType(void_type)) \
     macro(trap, "llvm.trap", functionType(void_type)) \
-    macro(x86SSE2CvtTSD2SI, "llvm.x86.sse2.cvttsd2si", functionType(int32, vectorType(doubleType, 2))) \
+    macro(memcpy, "llvm.memcpy.p0i8.p0i8.i32", functionType(void_type, ref8, ref8, int32, boolean)) \
     macro(expect, "llvm.expect.i1", functionType(boolean, boolean, boolean))
 
 // clang-format on
