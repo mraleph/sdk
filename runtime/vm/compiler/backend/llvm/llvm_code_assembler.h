@@ -47,6 +47,7 @@ class CodeAssembler {
   void CallWithCallReg(const CallSiteInfo*, dart::Register);
   void GenerateNativeCall(const CallSiteInfo* call_site_info);
   void GeneratePatchableCall(const CallSiteInfo* call_site_info);
+  void GenerateCCall(const CallSiteInfo* call_site_info);
   void SetupEntryCodeRange();
   template <typename T>
   std::function<void()> WrapAction(T f);

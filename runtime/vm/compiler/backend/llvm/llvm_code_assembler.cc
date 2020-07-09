@@ -254,6 +254,12 @@ void CodeAssembler::PrepareStackMapAction() {
           return call_site_info->instr_size();
         });
         break;
+      case CallSiteInfo::CallTargetType::kCCall:
+        f = WrapAction([this, call_site_info]() {
+          GenerateCCall(call_site_info);
+          return call_site_info->instr_size();
+        });
+        break;
       default:
         UNREACHABLE();
     }
@@ -492,6 +498,11 @@ void CodeAssembler::SetupEntryCodeRange() {
   GraphEntryInstr* graph_entry = flow_graph.graph_entry();
   FunctionEntryInstr* normal_entry = graph_entry->normal_entry();
   last_instr_ = normal_entry;
+}
+
+void CodeAssembler::GenerateCCall(const CallSiteInfo* call_site_info) {
+  assembler().CallRuntime(*call_site_info->runtime_entry(),
+                          call_site_info->stack_parameter_count());
 }
 }  // namespace dart_llvm
 }  // namespace dart

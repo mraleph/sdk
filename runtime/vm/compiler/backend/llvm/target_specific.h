@@ -33,6 +33,9 @@ static const size_t kThreadOffsetCallInstrSize =
 // Instance Call
 static const size_t kInstanceCallInstrSize = 3 * Instr::kInstrSize;
 
+// InvokeCFunction
+static const size_t kInvokeCFunctionCallInstrSize = 5 * Instr::kInstrSize;
+
 // instance of
 static const Register kInstanceOfInstanceReg = R0;
 static const Register kInstanceOfFunctionTypeReg = R1;
@@ -76,6 +79,9 @@ static const size_t kThreadOffsetCallInstrSize =
 
 // Instance Call
 static const size_t kInstanceCallInstrSize = 2 * Instr::kInstrSize;
+
+// InvokeCFunction
+static const size_t kInvokeCFunctionCallInstrSize = 11 * Instr::kInstrSize;
 
 // instance of
 static const Register kInstanceOfInstanceReg = R0;

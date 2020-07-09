@@ -4978,35 +4978,58 @@ void IRTranslator::VisitStringInterpolate(StringInterpolateInstr* instr) {
 
 void IRTranslator::VisitInvokeMathCFunction(InvokeMathCFunctionInstr* instr) {
   impl().SetDebugLine(instr);
-  LValue runtime_entry_point = impl().LoadFromOffset(
-      output().thread(),
-      compiler::target::Thread::OffsetFromThread(&instr->TargetFunction()),
-      pointerType(output().repo().ref8));
-
-  LValue result;
-  if (instr->InputCount() == 1) {
-    LType function_type =
-        functionType(output().repo().doubleType, output().repo().doubleType);
-    LValue function = output().buildCast(LLVMBitCast, runtime_entry_point,
-                                         pointerType(function_type));
-    LValue input0 = impl().GetLLVMValue(instr->InputAt(0));
-    EMASSERT(typeOf(input0) == output().repo().doubleType);
-    result = output().buildCall(function, input0);
-  } else if (instr->InputCount() == 2) {
-    LType function_type =
-        functionType(output().repo().doubleType, output().repo().doubleType,
-                     output().repo().doubleType);
-    LValue function = output().buildCast(LLVMBitCast, runtime_entry_point,
-                                         pointerType(function_type));
-    LValue input0 = impl().GetLLVMValue(instr->InputAt(0));
-    LValue input1 = impl().GetLLVMValue(instr->InputAt(1));
-    EMASSERT(typeOf(input0) == output().repo().doubleType);
-    EMASSERT(typeOf(input1) == output().repo().doubleType);
-    result = output().buildCall(function, input0, input1);
-  } else {
-    UNREACHABLE();
+  // init the types & parameters.
+  std::vector<LType> operand_value_types;
+  std::vector<LValue> parameters;
+  for (intptr_t i = 0; i < instr->InputCount(); ++i) {
+    operand_value_types.emplace_back(impl().GetMachineRepresentationType(
+        instr->RequiredInputRepresentation(i)));
+    parameters.emplace_back(impl().GetLLVMValue(instr->InputAt(i)));
   }
-  impl().SetLLVMValue(instr, result);
+  LType return_type =
+      impl().GetMachineRepresentationType(instr->representation());
+  LType callee_function_type =
+      functionType(return_type, operand_value_types.data(),
+                   operand_value_types.size(), NotVariadic);
+  LType callee_type = pointerType(callee_function_type);
+  // get the statepoint function.
+  LValue statepoint_function = output().getStatePointFunction(callee_type);
+  // init statepoint operands.
+  int64_t patchid = impl().NextPatchPoint();
+  std::vector<LValue> statepoint_operands;
+  statepoint_operands.push_back(output().constInt64(patchid));
+  statepoint_operands.push_back(
+      output().constInt32(kInvokeCFunctionCallInstrSize));
+  statepoint_operands.push_back(LLVMGetUndef(callee_type));
+
+  statepoint_operands.push_back(
+      output().constInt32(parameters.size()));            // # call params
+  statepoint_operands.push_back(output().constInt32(0));  // flags
+  for (LValue parameter : parameters)
+    statepoint_operands.push_back(parameter);
+  statepoint_operands.push_back(output().constInt32(0));  // # transition args
+  statepoint_operands.push_back(output().constInt32(0));  // # deopt arguments
+  // call the function.
+  LValue statepoint_value =
+      output().buildCall(statepoint_function, statepoint_operands.data(),
+                         statepoint_operands.size());
+  // setup attribute.
+  static const char kDartCCall[] = "dart-c-call";
+  LLVMAttributeRef attr =
+      output().createStringAttr(kDartCCall, sizeof(kDartCCall) - 1, nullptr, 0);
+  LLVMAddCallSiteAttribute(statepoint_value, ~0U, attr);
+
+  LValue intrinsic = output().getGCResultFunction(return_type);
+  LValue call_value = output().buildCall(intrinsic, statepoint_value);
+  std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo());
+  callsite_info->set_patchid(patchid);
+  callsite_info->set_type(CallSiteInfo::CallTargetType::kCCall);
+  callsite_info->set_instr_size(kInvokeCFunctionCallInstrSize);
+  callsite_info->set_runtime_entry(&instr->TargetFunction());
+  callsite_info->set_stack_parameter_count(instr->InputCount());
+  impl().SubmitStackMap(std::move(callsite_info));
+
+  impl().SetLLVMValue(instr, call_value);
 }
 
 void IRTranslator::VisitTruncDivMod(TruncDivModInstr* instr) {
