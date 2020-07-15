@@ -5228,11 +5228,19 @@ void IRTranslator::VisitIntConverter(IntConverterInstr* instr) {
   impl().SetDebugLine(instr);
   LValue value = impl().GetLLVMValue(instr->value());
   LValue result;
+#if defined(TARGET_ARCH_IS_32_BIT)
   const bool is_nop_conversion =
       (instr->from() == kUntagged && instr->to() == kUnboxedInt32) ||
       (instr->from() == kUntagged && instr->to() == kUnboxedUint32) ||
       (instr->from() == kUnboxedInt32 && instr->to() == kUntagged) ||
       (instr->from() == kUnboxedUint32 && instr->to() == kUntagged);
+#elif defined(TARGET_ARCH_IS_64_BIT)
+  const bool is_nop_conversion =
+      (instr->from() == kUntagged && instr->to() == kUnboxedIntPtr) ||
+      (instr->from() == kUnboxedIntPtr && instr->to() == kUntagged);
+#else
+#error unsupported arch
+#endif
 
   if (is_nop_conversion) {
     result = value;
@@ -5241,15 +5249,17 @@ void IRTranslator::VisitIntConverter(IntConverterInstr* instr) {
   } else if (instr->from() == kUnboxedUint32 && instr->to() == kUnboxedInt32) {
     result = value;
   } else if (instr->from() == kUnboxedInt64) {
-    if (instr->to() == kUnboxedInt32) {
+    if (instr->to() == kUnboxedInt32 || instr->to() == kUnboxedUint32) {
       result = output().buildCast(LLVMTrunc, value, output().repo().int32);
     } else {
-      result = output().buildCast(LLVMTrunc, value, output().repo().int32);
+      EMASSERT(instr->to() == kUnboxedInt64);
+      result = value;
     }
   } else if (instr->to() == kUnboxedInt64) {
     if (instr->from() == kUnboxedUint32) {
       result = output().buildCast(LLVMZExt, value, output().repo().int64);
     } else {
+      EMASSERT(instr->from() == kUnboxedInt32);
       result = output().buildCast(LLVMSExt, value, output().repo().int64);
     }
   } else {
