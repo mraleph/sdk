@@ -13,6 +13,10 @@
 #include "vm/object_store.h"
 #include "vm/stack_frame.h"
 
+#if defined(UC_BUILD_LLVM_COMPILER)
+#include "vm/compiler/backend/llvm/llvm_config.h"
+#endif
+
 #if !defined(DART_PRECOMPILED_RUNTIME)
 
 namespace dart {
@@ -612,7 +616,12 @@ Fragment StreamingFlowGraphBuilder::CompleteBodyWithYieldContinuations(
   const intptr_t continuation_count = yield_continuations().length();
 
   IndirectGotoInstr* indirect_goto;
-  if (FLAG_async_igoto_threshold >= 0 &&
+#if defined(DART_ENABLE_LLVM_COMPILER)
+  bool llvm_compiler_enabled = true;
+#else
+  bool llvm_compiler_enabled = false;
+#endif
+  if (!llvm_compiler_enabled && FLAG_async_igoto_threshold >= 0 &&
       continuation_count >= FLAG_async_igoto_threshold) {
     const auto& offsets = TypedData::ZoneHandle(
         Z, TypedData::New(kTypedDataInt32ArrayCid, continuation_count,

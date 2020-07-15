@@ -151,7 +151,7 @@ class AnonImpl {
   IRTranslatorBlockImpl* GetCatchBlockImpl(CatchBlockEntryInstr* instr);
   void CollectExceptionVars();
   // Debug & line info.
-  void SetDebugLine(Instruction*);
+  void SetCurrentInstr(Instruction*);
   Instruction* CurrentDebugInstr();
   // Access to memory.
   LValue BuildAccessPointer(LValue base, LValue offset, Representation rep);
@@ -363,6 +363,7 @@ class AnonImpl {
   // Calls
   std::vector<LValue> pushed_arguments_;
   Thread* thread_;
+  Environment* pending_deoptimization_env_ = nullptr;
   int patch_point_id_ = 0;
   bool visited_function_entry_ = false;
   bool exception_occured_ = false;
@@ -954,10 +955,13 @@ void AnonImpl::CollectExceptionVars() {
   output().positionToBBEnd(prologue);
 }
 
-void AnonImpl::SetDebugLine(Instruction* instr) {
+void AnonImpl::SetCurrentInstr(Instruction* instr) {
+  // Setup Debug line.
   debug_instrs_.emplace_back(instr);
   // line one is too special, ignore it.
   output().setDebugInfo(debug_instrs_.size() + 1, nullptr);
+  // Setup pending_deoptimization_env_
+  pending_deoptimization_env_ = instr->env();
 }
 
 Instruction* AnonImpl::CurrentDebugInstr() {
@@ -2107,7 +2111,7 @@ void CallResolver::EmitCall() {
     auto& exception_params = block_impl->exception_params;
     if (exception_params.empty()) break;
     if (!block_impl->request_exception_env_) break;
-    Environment* env = call_resolver_parameter_.call_instruction->env();
+    Environment* env = impl().pending_deoptimization_env_;
     EMASSERT(env != nullptr);
     env = env->Outermost();
     EMASSERT(env != nullptr);
@@ -2799,7 +2803,7 @@ void IRTranslator::VisitCatchBlockEntry(CatchBlockEntryInstr* instr) {
 }
 
 void IRTranslator::VisitPhi(PhiInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LType phi_type = impl().GetMachineRepresentationType(instr->representation());
 
   LValue phi = output().buildPhi(phi_type);
@@ -2861,7 +2865,7 @@ void IRTranslator::VisitNativeParameter(NativeParameterInstr* instr) {
 
 void IRTranslator::VisitLoadIndexedUnsafe(LoadIndexedUnsafeInstr* instr) {
   EMASSERT(instr->RequiredInputRepresentation(0) == kTagged);  // It is a Smi.
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue index_smi = impl().TaggedToWord(impl().GetLLVMValue(instr->index()));
   EMASSERT(instr->base_reg() == FP);
   LValue offset = output().buildShl(
@@ -2877,7 +2881,7 @@ void IRTranslator::VisitLoadIndexedUnsafe(LoadIndexedUnsafeInstr* instr) {
 void IRTranslator::VisitStoreIndexedUnsafe(StoreIndexedUnsafeInstr* instr) {
   ASSERT(instr->RequiredInputRepresentation(
              StoreIndexedUnsafeInstr::kIndexPos) == kTagged);  // It is a Smi.
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue index_smi = impl().GetLLVMValue(instr->index());
   EMASSERT(instr->base_reg() == FP);
   LValue offset = output().buildShl(
@@ -2892,7 +2896,7 @@ void IRTranslator::VisitStoreIndexedUnsafe(StoreIndexedUnsafeInstr* instr) {
 }
 
 void IRTranslator::VisitTailCall(TailCallInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   std::unique_ptr<CallSiteInfo> callsite_info(new CallSiteInfo);
   LValue code_object = impl().LoadObject(instr->code());
   LValue entry_gep = output().buildGEPWithByteOffset(
@@ -2919,13 +2923,13 @@ void IRTranslator::VisitParallelMove(ParallelMoveInstr* instr) {
 }
 
 void IRTranslator::VisitPushArgument(PushArgumentInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue value = impl().GetLLVMValue(instr->value());
   impl().PushArgument(value);
 }
 
 void IRTranslator::VisitReturn(ReturnInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue value = impl().GetLLVMValue(instr->value());
   output().buildRet(value);
 }
@@ -2936,7 +2940,7 @@ void IRTranslator::VisitNativeReturn(NativeReturnInstr* instr) {
 }
 
 void IRTranslator::VisitThrow(ThrowInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue exception = impl().GetLLVMValue(instr->exception());
   impl().PushArgument(exception);
   impl().GenerateRuntimeCall(instr, instr->token_pos(), instr->deopt_id(),
@@ -2946,7 +2950,7 @@ void IRTranslator::VisitThrow(ThrowInstr* instr) {
 }
 
 void IRTranslator::VisitReThrow(ReThrowInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue exception = impl().GetLLVMValue(instr->exception());
   impl().PushArgument(exception);
   LValue stack_trace = impl().GetLLVMValue(instr->stacktrace());
@@ -2963,7 +2967,7 @@ void IRTranslator::VisitStop(StopInstr* instr) {
 }
 
 void IRTranslator::VisitGoto(GotoInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   JoinEntryInstr* successor = instr->successor();
   LBasicBlock bb = impl().EnsureNativeBB(successor);
   output().buildBr(bb);
@@ -2976,7 +2980,7 @@ void IRTranslator::VisitIndirectGoto(IndirectGotoInstr* instr) {
 }
 
 void IRTranslator::VisitBranch(BranchInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   TargetEntryInstr* true_successor = instr->true_successor();
   TargetEntryInstr* false_successor = instr->false_successor();
   impl().EnsureNativeBB(true_successor);
@@ -3019,7 +3023,7 @@ void IRTranslator::VisitSpecialParameter(SpecialParameterInstr* instr) {
 }
 
 void IRTranslator::VisitClosureCall(ClosureCallInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   const intptr_t argument_count =
       instr->ArgumentCount();  // Includes type args.
   LValue function =
@@ -3057,7 +3061,7 @@ void IRTranslator::VisitFfiCall(FfiCallInstr* instr) {
 }
 
 void IRTranslator::VisitInstanceCallBase(InstanceCallBaseInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   EMASSERT(instr->ic_data() != NULL);
   EMASSERT((FLAG_precompiled_mode && FLAG_use_bare_instructions));
   Zone* zone = impl().zone();
@@ -3111,14 +3115,14 @@ void IRTranslator::VisitInstanceCall(InstanceCallInstr* instr) {
 
 void IRTranslator::VisitPolymorphicInstanceCall(
     PolymorphicInstanceCallInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   EMASSERT(!FLAG_polymorphic_with_deopt);
   EMASSERT(!instr->complete());
   VisitInstanceCallBase(instr);
 }
 
 void IRTranslator::VisitStaticCall(StaticCallInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   Zone* zone = impl().zone();
   const ICData* call_ic_data = nullptr;
   if (instr->ic_data() == nullptr) {
@@ -3173,30 +3177,29 @@ void IRTranslator::VisitStoreLocal(StoreLocalInstr* instr) {
 }
 
 void IRTranslator::VisitStrictCompare(StrictCompareInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   ComparisonResolver resolver(impl());
   instr->Accept(&resolver);
   LValue result = resolver.result();
-  ;
   impl().SetLLVMValue(instr, impl().BooleanToObject(result));
 }
 
 void IRTranslator::VisitEqualityCompare(EqualityCompareInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   ComparisonResolver resolver(impl());
   instr->Accept(&resolver);
   impl().SetLLVMValue(instr, impl().BooleanToObject(resolver.result()));
 }
 
 void IRTranslator::VisitRelationalOp(RelationalOpInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   ComparisonResolver resolver(impl());
   instr->Accept(&resolver);
   impl().SetLLVMValue(instr, impl().BooleanToObject(resolver.result()));
 }
 
 void IRTranslator::VisitNativeCall(NativeCallInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   EMASSERT(instr->link_lazily());
   const intptr_t argument_count =
       instr->ArgumentCount();  // Includes type args.
@@ -3246,7 +3249,7 @@ void IRTranslator::VisitDebugStepCheck(DebugStepCheckInstr* instr) {
 }
 
 void IRTranslator::VisitLoadIndexed(LoadIndexedInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue array = impl().GetLLVMValue(instr->array());
   LValue index = impl().GetLLVMValue(instr->index());
   EMASSERT(typeOf(index) == output().tagged_type());
@@ -3396,7 +3399,7 @@ void IRTranslator::VisitLoadIndexed(LoadIndexedInstr* instr) {
 }
 
 void IRTranslator::VisitLoadCodeUnits(LoadCodeUnitsInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue array = impl().GetLLVMValue(instr->array());
   LValue index = impl().GetLLVMValue(instr->index());
   Representation index_rep = instr->RequiredInputRepresentation(1);
@@ -3490,7 +3493,7 @@ void IRTranslator::VisitLoadCodeUnits(LoadCodeUnitsInstr* instr) {
 }
 
 void IRTranslator::VisitStoreIndexed(StoreIndexedInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue array = impl().GetLLVMValue(instr->array());
   LValue index = impl().TaggedToWord(impl().GetLLVMValue(instr->index()));
   LValue value = impl().GetLLVMValue(instr->value());
@@ -3618,7 +3621,7 @@ void IRTranslator::VisitStoreIndexed(StoreIndexedInstr* instr) {
 }
 
 void IRTranslator::VisitStoreInstanceField(StoreInstanceFieldInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   const intptr_t offset_in_bytes = instr->OffsetInBytes();
 
   LValue val = impl().GetLLVMValue(instr->value());
@@ -3661,7 +3664,7 @@ void IRTranslator::VisitStoreInstanceField(StoreInstanceFieldInstr* instr) {
 }
 
 void IRTranslator::VisitInitInstanceField(InitInstanceFieldInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue instance = impl().GetLLVMValue(instr->InputAt(0));
   LValue field_value =
       impl().LoadFieldFromOffset(instance, instr->field().TargetOffset());
@@ -3681,7 +3684,7 @@ void IRTranslator::VisitInitInstanceField(InitInstanceFieldInstr* instr) {
 }
 
 void IRTranslator::VisitInitStaticField(InitStaticFieldInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   const intptr_t field_table_offset =
       compiler::target::Thread::field_table_values_offset();
   const intptr_t field_offset =
@@ -3714,7 +3717,7 @@ void IRTranslator::VisitInitStaticField(InitStaticFieldInstr* instr) {
 }
 
 void IRTranslator::VisitLoadStaticField(LoadStaticFieldInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
 
   LValue field_table_values = impl().LoadFromOffset(
       output().thread(), compiler::target::Thread::field_table_values_offset(),
@@ -3728,7 +3731,7 @@ void IRTranslator::VisitLoadStaticField(LoadStaticFieldInstr* instr) {
 }
 
 void IRTranslator::VisitStoreStaticField(StoreStaticFieldInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   const intptr_t field_table_offset =
       compiler::target::Thread::field_table_values_offset();
   LValue field_table =
@@ -3741,7 +3744,7 @@ void IRTranslator::VisitStoreStaticField(StoreStaticFieldInstr* instr) {
 }
 
 void IRTranslator::VisitBooleanNegate(BooleanNegateInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
 
   LValue true_or_false = impl().GetLLVMValue(instr->value());
   LValue true_value = impl().LoadObject(Bool::True());
@@ -3752,7 +3755,7 @@ void IRTranslator::VisitBooleanNegate(BooleanNegateInstr* instr) {
 }
 
 void IRTranslator::VisitInstanceOf(InstanceOfInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   // FIXME: implement inline instance of
   LValue instance = impl().GetLLVMValue(instr->value());
   LValue instantiator_type_arguments =
@@ -3771,7 +3774,7 @@ void IRTranslator::VisitInstanceOf(InstanceOfInstr* instr) {
 }
 
 void IRTranslator::VisitCreateArray(CreateArrayInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue length = impl().GetLLVMValue(instr->num_elements());
   LValue elem_type = impl().GetLLVMValue(instr->element_type());
   LValue result = impl().GenerateCall(
@@ -3783,7 +3786,7 @@ void IRTranslator::VisitCreateArray(CreateArrayInstr* instr) {
 }
 
 void IRTranslator::VisitAllocateObject(AllocateObjectInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   std::vector<std::pair<Register, LValue>> args;
   if (instr->type_arguments() != nullptr) {
     TypeUsageInfo* type_usage_info = impl().thread()->type_usage_info();
@@ -3805,7 +3808,7 @@ void IRTranslator::VisitAllocateObject(AllocateObjectInstr* instr) {
 }
 
 void IRTranslator::VisitLoadField(LoadFieldInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue instance = impl().GetLLVMValue(instr->instance());
   intptr_t offset_in_bytes = instr->slot().offset_in_bytes();
   if (instr->IsUnboxedLoad()) {
@@ -3846,7 +3849,7 @@ void IRTranslator::VisitLoadField(LoadFieldInstr* instr) {
 }
 
 void IRTranslator::VisitLoadUntagged(LoadUntaggedInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue object = impl().GetLLVMValue(instr->object());
   LValue value;
   if (instr->object()->definition()->representation() == kUntagged) {
@@ -3859,14 +3862,14 @@ void IRTranslator::VisitLoadUntagged(LoadUntaggedInstr* instr) {
 }
 
 void IRTranslator::VisitStoreUntagged(StoreUntaggedInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue object = impl().GetLLVMValue(instr->object());
   LValue value = impl().GetLLVMValue(instr->value());
   impl().StoreToOffset(object, instr->offset_from_tagged(), value);
 }
 
 void IRTranslator::VisitLoadClassId(LoadClassIdInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   const AbstractType& value_type = *instr->object()->Type()->ToAbstractType();
   LValue object = impl().GetLLVMValue(instr->object());
   LValue value;
@@ -3889,7 +3892,7 @@ void IRTranslator::VisitLoadClassId(LoadClassIdInstr* instr) {
 }
 
 void IRTranslator::VisitInstantiateType(InstantiateTypeInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue instantiator_type_args =
       impl().GetLLVMValue(instr->instantiator_type_arguments());
   LValue function_type_args =
@@ -3905,7 +3908,7 @@ void IRTranslator::VisitInstantiateType(InstantiateTypeInstr* instr) {
 
 void IRTranslator::VisitInstantiateTypeArguments(
     InstantiateTypeArgumentsInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue instantiator_type_args =
       impl().GetLLVMValue(instr->instantiator_type_arguments());
   LValue function_type_args =
@@ -3945,7 +3948,7 @@ void IRTranslator::VisitInstantiateTypeArguments(
 }
 
 void IRTranslator::VisitAllocateContext(AllocateContextInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue result = impl().GenerateCall(
       instr, instr->token_pos(), instr->deopt_id(), StubCode::AllocateContext(),
       RawPcDescriptors::kOther, 0,
@@ -3980,7 +3983,7 @@ void IRTranslator::VisitAllocateUninitializedContext(
 }
 
 void IRTranslator::VisitCloneContext(CloneContextInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue context_value = impl().GetLLVMValue(instr->context_value());
   impl().PushArgument(context_value);
   LValue result =
@@ -3990,7 +3993,7 @@ void IRTranslator::VisitCloneContext(CloneContextInstr* instr) {
 }
 
 void IRTranslator::VisitBinarySmiOp(BinarySmiOpInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue value;
   if (instr->right()->definition()->IsConstant()) {
     ConstantInstr* constant = instr->right()->definition()->AsConstant();
@@ -4121,14 +4124,14 @@ void IRTranslator::VisitBinarySmiOp(BinarySmiOpInstr* instr) {
 }
 
 void IRTranslator::VisitCheckedSmiComparison(CheckedSmiComparisonInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   ComparisonResolver resolver(impl());
   instr->Accept(&resolver);
   impl().SetLLVMValue(instr, impl().BooleanToObject(resolver.result()));
 }
 
 void IRTranslator::VisitCheckedSmiOp(CheckedSmiOpInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue left = impl().GetLLVMValue(instr->InputAt(0));
   LValue right = impl().GetLLVMValue(instr->InputAt(1));
 
@@ -4260,7 +4263,7 @@ void IRTranslator::VisitCheckedSmiOp(CheckedSmiOpInstr* instr) {
 }
 
 void IRTranslator::VisitBinaryInt32Op(BinaryInt32OpInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue left = impl().EnsureInt32(impl().GetLLVMValue(instr->left()));
   LValue right = impl().EnsureInt32(impl().GetLLVMValue(instr->right()));
   LValue value;
@@ -4305,14 +4308,14 @@ void IRTranslator::VisitUnarySmiOp(UnarySmiOpInstr* instr) {
 }
 
 void IRTranslator::VisitUnaryDoubleOp(UnaryDoubleOpInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue v = impl().GetLLVMValue(instr->value());
   EMASSERT(typeOf(v) == output().repo().doubleType);
   impl().SetLLVMValue(instr, output().buildFNeg(v));
 }
 
 void IRTranslator::VisitCheckStackOverflow(CheckStackOverflowInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue stack_pointer =
       output().buildCall(output().repo().stackSaveIntrinsic());
   LValue stack_pointer_int =
@@ -4364,7 +4367,7 @@ void IRTranslator::VisitCheckStackOverflow(CheckStackOverflowInstr* instr) {
 }
 
 void IRTranslator::VisitSmiToDouble(SmiToDoubleInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue v = impl().GetLLVMValue(instr->value());
   LValue num = impl().SmiUntag(v);
   LValue dnum = output().buildCast(LLVMSIToFP, num, output().repo().doubleType);
@@ -4372,14 +4375,14 @@ void IRTranslator::VisitSmiToDouble(SmiToDoubleInstr* instr) {
 }
 
 void IRTranslator::VisitInt32ToDouble(Int32ToDoubleInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue num = impl().EnsureInt32(impl().GetLLVMValue(instr->value()));
   LValue dnum = output().buildCast(LLVMSIToFP, num, output().repo().doubleType);
   impl().SetLLVMValue(instr, dnum);
 }
 
 void IRTranslator::VisitInt64ToDouble(Int64ToDoubleInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue num = impl().GetLLVMValue(instr->value());
   EMASSERT(typeOf(num) == output().repo().int64);
   LValue dnum = output().buildCast(LLVMSIToFP, num, output().repo().doubleType);
@@ -4402,7 +4405,7 @@ void IRTranslator::VisitDoubleToDouble(DoubleToDoubleInstr* instr) {
 }
 
 void IRTranslator::VisitDoubleToFloat(DoubleToFloatInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue fnum = impl().GetLLVMValue(instr->value());
   EMASSERT(typeOf(fnum) == output().repo().doubleType);
   LValue dnum =
@@ -4411,7 +4414,7 @@ void IRTranslator::VisitDoubleToFloat(DoubleToFloatInstr* instr) {
 }
 
 void IRTranslator::VisitFloatToDouble(FloatToDoubleInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue fnum = impl().GetLLVMValue(instr->value());
   EMASSERT(typeOf(fnum) == output().repo().floatType);
   LValue dnum = output().buildCast(LLVMFPExt, fnum, output().repo().doubleType);
@@ -4433,7 +4436,7 @@ void IRTranslator::VisitCheckSmi(CheckSmiInstr* instr) {
 }
 
 void IRTranslator::VisitCheckNull(CheckNullInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue value = impl().GetLLVMValue(instr->value());
   AssemblerResolver resolver(impl());
   Label slow_path("CheckNullSlowPath");
@@ -4474,7 +4477,7 @@ void IRTranslator::VisitCheckEitherNonSmi(CheckEitherNonSmiInstr* instr) {
 }
 
 void IRTranslator::VisitBinaryDoubleOp(BinaryDoubleOpInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue left = impl().GetLLVMValue(instr->left());
   LValue right = impl().GetLLVMValue(instr->right());
   EMASSERT(typeOf(left) == output().repo().doubleType);
@@ -4500,14 +4503,14 @@ void IRTranslator::VisitBinaryDoubleOp(BinaryDoubleOpInstr* instr) {
 }
 
 void IRTranslator::VisitDoubleTestOp(DoubleTestOpInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   ComparisonResolver resolver(impl());
   instr->Accept(&resolver);
   impl().SetLLVMValue(instr, impl().BooleanToObject(resolver.result()));
 }
 
 void IRTranslator::VisitMathUnary(MathUnaryInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue value = impl().GetLLVMValue(instr->value());
   EMASSERT(typeOf(value) == output().repo().doubleType);
   if (instr->kind() == MathUnaryInstr::kSqrt) {
@@ -4521,7 +4524,7 @@ void IRTranslator::VisitMathUnary(MathUnaryInstr* instr) {
 }
 
 void IRTranslator::VisitMathMinMax(MathMinMaxInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue left = impl().GetLLVMValue(instr->left());
   LValue right = impl().GetLLVMValue(instr->right());
   LValue value;
@@ -4542,7 +4545,7 @@ void IRTranslator::VisitMathMinMax(MathMinMaxInstr* instr) {
 }
 
 void IRTranslator::VisitBox(BoxInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue value = impl().GetLLVMValue(instr->value());
   auto BoxClassFor = [&](Representation rep) -> const Class& {
     switch (rep) {
@@ -4590,7 +4593,7 @@ void IRTranslator::VisitBox(BoxInstr* instr) {
 
 void IRTranslator::VisitUnbox(UnboxInstr* instr) {
   // FIXME: need to review 64 bit integer.
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue value = impl().GetLLVMValue(instr->value());
   LValue result;
   auto EmitLoadFromBox = [&]() {
@@ -4748,7 +4751,7 @@ void IRTranslator::VisitUnbox(UnboxInstr* instr) {
 }
 
 void IRTranslator::VisitBoxInt64(BoxInt64Instr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue value = impl().GetLLVMValue(instr->value());
   EMASSERT(typeOf(value) == output().repo().int64);
   LValue result;
@@ -4819,7 +4822,7 @@ void IRTranslator::VisitCaseInsensitiveCompare(
 }
 
 void IRTranslator::VisitBinaryInt64Op(BinaryInt64OpInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue left = impl().GetLLVMValue(instr->left());
   LValue right = impl().GetLLVMValue(instr->right());
   EMASSERT(typeOf(left) == output().repo().int64);
@@ -4867,7 +4870,7 @@ void IRTranslator::VisitBinaryInt64Op(BinaryInt64OpInstr* instr) {
 }
 
 void IRTranslator::VisitShiftInt64Op(ShiftInt64OpInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
 
   LValue left = impl().GetLLVMValue(instr->left());
   LValue right = impl().GetLLVMValue(instr->right());
@@ -4898,7 +4901,7 @@ void IRTranslator::VisitSpeculativeShiftInt64Op(
 }
 
 void IRTranslator::VisitUnaryInt64Op(UnaryInt64OpInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue value = impl().GetLLVMValue(instr->value());
 
   switch (instr->op_kind()) {
@@ -4920,7 +4923,7 @@ void IRTranslator::VisitCheckArrayBound(CheckArrayBoundInstr* instr) {
 }
 
 void IRTranslator::VisitGenericCheckBound(GenericCheckBoundInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue length = impl().GetLLVMValue(instr->length());
   LValue index = impl().GetLLVMValue(instr->index());
   const intptr_t index_cid = instr->index()->Type()->ToCid();
@@ -4960,7 +4963,7 @@ void IRTranslator::VisitOneByteStringFromCharCode(
 }
 
 void IRTranslator::VisitStringInterpolate(StringInterpolateInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   const int kTypeArgsLen = 0;
   const int kNumberOfArguments = 1;
   constexpr const int kSizeOfArguments = 1;
@@ -4975,7 +4978,7 @@ void IRTranslator::VisitStringInterpolate(StringInterpolateInstr* instr) {
 }
 
 void IRTranslator::VisitInvokeMathCFunction(InvokeMathCFunctionInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   // init the types & parameters.
   std::vector<LType> operand_value_types;
   std::vector<LValue> parameters;
@@ -5056,10 +5059,10 @@ static bool IsPowerOfTwoKind(intptr_t v1, intptr_t v2) {
 }
 
 void IRTranslator::VisitIfThenElse(IfThenElseInstr* instr) {
+  impl().SetCurrentInstr(instr);
   ComparisonResolver resolver(impl());
   instr->comparison()->Accept(&resolver);
   LValue cmp_value = resolver.result();
-  impl().SetDebugLine(instr);
 
   intptr_t true_value = instr->if_true();
   intptr_t false_value = instr->if_false();
@@ -5127,7 +5130,7 @@ void IRTranslator::VisitExtractNthOutput(ExtractNthOutputInstr* instr) {
 }
 
 void IRTranslator::VisitBinaryUint32Op(BinaryUint32OpInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
 
   LValue left = impl().GetLLVMValue(instr->left());
   LValue right = impl().GetLLVMValue(instr->right());
@@ -5160,7 +5163,7 @@ void IRTranslator::VisitBinaryUint32Op(BinaryUint32OpInstr* instr) {
 }
 
 void IRTranslator::VisitShiftUint32Op(ShiftUint32OpInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
 
   LValue left = impl().GetLLVMValue(instr->left());
   LValue right = impl().GetLLVMValue(instr->right());
@@ -5192,7 +5195,7 @@ void IRTranslator::VisitSpeculativeShiftUint32Op(
 }
 
 void IRTranslator::VisitUnaryUint32Op(UnaryUint32OpInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   EMASSERT(instr->op_kind() == Token::kBIT_NOT);
   LValue value = impl().GetLLVMValue(instr->value());
 
@@ -5201,7 +5204,7 @@ void IRTranslator::VisitUnaryUint32Op(UnaryUint32OpInstr* instr) {
 }
 
 void IRTranslator::VisitBoxUint32(BoxUint32Instr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue value = impl().GetLLVMValue(instr->value());
   LValue result = impl().BoxInteger32(instr, value, instr->ValueFitsSmi(),
                                       instr->from_representation());
@@ -5213,7 +5216,7 @@ void IRTranslator::VisitUnboxUint32(UnboxUint32Instr* instr) {
 }
 
 void IRTranslator::VisitBoxInt32(BoxInt32Instr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue value = impl().GetLLVMValue(instr->value());
   LValue result = impl().BoxInteger32(instr, value, instr->ValueFitsSmi(),
                                       instr->from_representation());
@@ -5225,7 +5228,7 @@ void IRTranslator::VisitUnboxInt32(UnboxInt32Instr* instr) {
 }
 
 void IRTranslator::VisitIntConverter(IntConverterInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue value = impl().GetLLVMValue(instr->value());
   LValue result;
 #if defined(TARGET_ARCH_IS_32_BIT)
@@ -5288,7 +5291,7 @@ void IRTranslator::VisitSimdOp(SimdOpInstr* instr) {
 void IRTranslator::VisitReachabilityFence(ReachabilityFenceInstr*) {}
 
 void IRTranslator::VisitDispatchTableCall(DispatchTableCallInstr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue dispatch_table = impl().GetDispatchTable();
   intptr_t offset =
       (instr->selector()->offset - DispatchTable::OriginElement()) *
@@ -5331,7 +5334,7 @@ void IRTranslator::VisitDispatchTableCall(DispatchTableCallInstr* instr) {
 }
 
 void IRTranslator::VisitUnboxInteger32(UnboxInteger32Instr* instr) {
-  impl().SetDebugLine(instr);
+  impl().SetCurrentInstr(instr);
   LValue value = impl().GetLLVMValue(instr->value());
   const intptr_t value_cid = instr->value()->Type()->ToCid();
   LValue result;
