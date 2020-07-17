@@ -2453,7 +2453,9 @@ void ComparisonResolver::VisitCheckedSmiComparison(
         instr, selector, arguments_descriptor, instr->call()->deopt_id(),
         instr->token_pos());
     LValue true_object = impl().LoadObject(Bool::True());
-    return output().buildICmp(LLVMIntEQ, boolean_object, true_object);
+    LValue cmp = output().buildICmp(LLVMIntEQ, boolean_object, true_object);
+    if (instr->is_negated()) cmp = output().buildNot(cmp);
+    return cmp;
   });
   result_ = diamond.End();
 }
