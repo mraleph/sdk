@@ -3815,6 +3815,103 @@ void CheckStackOverflowElimination::EliminateStackOverflow(FlowGraph* graph) {
   }
 }
 
+namespace {
+struct BoundGroup : public ZoneAllocated {
+  intptr_t max_index;
+  BlockEntryInstr* last_saw_block;
+  ZoneGrowableArray<GenericCheckBoundInstr*> visited;
+  DirectChainedHashMap<PointerKeyValueTrait<BlockEntryInstr> > block_set;
+  explicit BoundGroup(Zone* zone);
+  void AddInstr(GenericCheckBoundInstr* instr);
+  bool AllInstrInOneDominateChain();
+  void RemoveAllButFirst();
+  ~BoundGroup() = default;
+};
+
+BoundGroup::BoundGroup(Zone* zone) : visited(zone, 4), block_set(zone) {}
+
+void BoundGroup::AddInstr(GenericCheckBoundInstr* instr) {
+  visited.Add(instr);
+  last_saw_block = instr->GetBlock();
+  block_set.Insert(last_saw_block);
+}
+
+bool BoundGroup::AllInstrInOneDominateChain() {
+  auto it = block_set.GetIterator();
+  while (true) {
+    auto block = it.Next();
+    if (!block) break;
+    if (!(*block)->Dominates(last_saw_block)) return false;
+  }
+  return true;
+}
+
+void BoundGroup::RemoveAllButFirst() {
+  for (intptr_t i = 1; i < visited.length(); ++i) {
+    GenericCheckBoundInstr* target = visited[i];
+    THR_Print("Local Bound removing : %s\n", target->ToCString());
+    Definition* index = target->index()->definition();
+    target->ReplaceUsesWith(index);
+    target->RemoveFromGraph();
+  }
+}
+}  // namespace
+
+void GenericCheckBoundElimination::EliminateGenericCheckBounds(
+    FlowGraph* graph) {
+  Zone* zone = graph->zone();
+  DirectChainedHashMap<RawPointerKeyValueTrait<Definition, BoundGroup*> >
+      lookup_set(zone);
+  for (BlockIterator block_it = graph->reverse_postorder_iterator();
+       !block_it.Done(); block_it.Advance()) {
+    BlockEntryInstr* entry = block_it.Current();
+
+    for (ForwardInstructionIterator it(entry); !it.Done(); it.Advance()) {
+      Instruction* current = it.Current();
+      GenericCheckBoundInstr* instr = current->AsGenericCheckBound();
+      if (instr == nullptr) continue;
+      intptr_t index_value;
+      if (!ExtractIndexInfo(instr, &index_value)) continue;
+      BoundGroup* group = lookup_set.LookupValue(instr->length()->definition());
+      if (!group) {
+        group = new (zone) BoundGroup(zone);
+        group->max_index = index_value;
+        group->AddInstr(instr);
+        lookup_set.Insert({instr->length()->definition(), group});
+        continue;
+      }
+      group->AddInstr(instr);
+      if (group->max_index < index_value) group->max_index = index_value;
+    }
+  }
+  auto it = lookup_set.GetIterator();
+
+  while (true) {
+    auto p = it.Next();
+    if (!p) break;
+    BoundGroup* group = p->value;
+    if (!group->AllInstrInOneDominateChain()) break;
+    ConstantInstr* index_constant =
+        graph->GetConstant(Smi::Handle(zone, Smi::New(group->max_index)));
+    GenericCheckBoundInstr* first = group->visited[0];
+    first->SetInputAt(CheckBoundBase::kIndexPos,
+                      new (zone) Value(index_constant));
+    group->RemoveAllButFirst();
+  }
+}
+
+bool GenericCheckBoundElimination::ExtractIndexInfo(
+    GenericCheckBoundInstr* instr,
+    intptr_t* index_value) {
+  Definition* index = instr->index()->definition();
+  ConstantInstr* index_constant = index->AsConstant();
+  if ((index_constant != nullptr) && index_constant->value().IsSmi()) {
+    *index_value = Smi::Cast(index_constant->value()).Value();
+    return true;
+  }
+  return false;
+}
+
 }  // namespace dart
 
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)

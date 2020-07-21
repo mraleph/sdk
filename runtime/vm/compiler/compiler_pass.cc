@@ -355,6 +355,7 @@ FlowGraph* CompilerPass::RunPipeline(PipelineMode mode,
   INVOKE_PASS(Canonicalize);
   INVOKE_PASS(UseTableDispatch);
   INVOKE_PASS(EliminateStackOverflowChecks);
+  INVOKE_PASS(EliminateGenericCheckBounds);
   INVOKE_PASS(Canonicalize);
   INVOKE_PASS(AllocationSinking_DetachMaterializations);
   INVOKE_PASS(EliminateWriteBarriers);
@@ -415,6 +416,12 @@ COMPILER_PASS(ApplyClassIds, { state->call_specializer->ApplyClassIds(); });
 COMPILER_PASS(EliminateStackOverflowChecks, {
   if (!flow_graph->IsCompiledForOsr()) {
     CheckStackOverflowElimination::EliminateStackOverflow(flow_graph);
+  }
+});
+
+COMPILER_PASS(EliminateGenericCheckBounds, {
+  if (!flow_graph->IsCompiledForOsr()) {
+    GenericCheckBoundElimination::EliminateGenericCheckBounds(flow_graph);
   }
 });
 

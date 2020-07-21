@@ -35,6 +35,7 @@ namespace dart {
   V(EliminateDeadPhis)                                                         \
   V(EliminateEnvironments)                                                     \
   V(EliminateStackOverflowChecks)                                              \
+  V(EliminateGenericCheckBounds)                                               \
   V(FinalizeGraph)                                                             \
   V(IfConvert)                                                                 \
   V(Inlining)                                                                  \
