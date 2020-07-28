@@ -3891,11 +3891,23 @@ void GenericCheckBoundElimination::EliminateGenericCheckBounds(
     if (!p) break;
     BoundGroup* group = p->value;
     if (!group->AllInstrInOneDominateChain()) break;
-    ConstantInstr* index_constant =
-        graph->GetConstant(Smi::Handle(zone, Smi::New(group->max_index)));
     GenericCheckBoundInstr* first = group->visited[0];
-    first->SetInputAt(CheckBoundBase::kIndexPos,
-                      new (zone) Value(index_constant));
+    // Only hoist the index, leave the elimination to global pass.
+    Value* old_value = first->InputAt(CheckBoundBase::kIndexPos);
+    old_value->RemoveFromUseList();
+    ConstantInstr* index_constant;
+    const Smi& smi = Smi::Handle(zone, Smi::New(group->max_index));
+    if (old_value->definition()->IsUnboxedConstant()) {
+      index_constant = new (zone)
+          UnboxedConstantInstr(smi, old_value->definition()->representation());
+      index_constant->set_ssa_temp_index(graph->alloc_ssa_temp_index());
+      graph->AddToGraphInitialDefinitions(index_constant);
+    } else {
+      index_constant = graph->GetConstant(smi);
+    }
+    Value* new_index = new (zone) Value(index_constant);
+    index_constant->AddInputUse(new_index);
+    first->SetInputAt(CheckBoundBase::kIndexPos, new_index);
     group->RemoveAllButFirst();
   }
 }
