@@ -147,9 +147,9 @@ class CheckStackOverflowElimination : public AllStatic {
   static void EliminateStackOverflow(FlowGraph* graph);
 };
 
-class GenericCheckBoundElimination : public AllStatic {
+class GenericCheckBoundHoist : public AllStatic {
  public:
-  static void EliminateGenericCheckBounds(FlowGraph* graph);
+  static void HoistGenericCheckBounds(FlowGraph* graph);
 
  private:
   static bool ExtractIndexInfo(GenericCheckBoundInstr* instr,

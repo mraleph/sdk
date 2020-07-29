@@ -3824,7 +3824,6 @@ struct BoundGroup : public ZoneAllocated {
   explicit BoundGroup(Zone* zone);
   void AddInstr(GenericCheckBoundInstr* instr);
   bool AllInstrInOneDominateChain();
-  void RemoveAllButFirst();
   ~BoundGroup() = default;
 };
 
@@ -3845,20 +3844,9 @@ bool BoundGroup::AllInstrInOneDominateChain() {
   }
   return true;
 }
-
-void BoundGroup::RemoveAllButFirst() {
-  for (intptr_t i = 1; i < visited.length(); ++i) {
-    GenericCheckBoundInstr* target = visited[i];
-    THR_Print("Local Bound removing : %s\n", target->ToCString());
-    Definition* index = target->index()->definition();
-    target->ReplaceUsesWith(index);
-    target->RemoveFromGraph();
-  }
-}
 }  // namespace
 
-void GenericCheckBoundElimination::EliminateGenericCheckBounds(
-    FlowGraph* graph) {
+void GenericCheckBoundHoist::HoistGenericCheckBounds(FlowGraph* graph) {
   Zone* zone = graph->zone();
   DirectChainedHashMap<RawPointerKeyValueTrait<Definition, BoundGroup*> >
       lookup_set(zone);
@@ -3893,28 +3881,22 @@ void GenericCheckBoundElimination::EliminateGenericCheckBounds(
     if (!group->AllInstrInOneDominateChain()) break;
     GenericCheckBoundInstr* first = group->visited[0];
     // Only hoist the index, leave the elimination to global pass.
-    Value* old_value = first->InputAt(CheckBoundBase::kIndexPos);
-    old_value->RemoveFromUseList();
+    Value* index_value = first->InputAt(CheckBoundBase::kIndexPos);
     ConstantInstr* index_constant;
     const Smi& smi = Smi::Handle(zone, Smi::New(group->max_index));
-    if (old_value->definition()->IsUnboxedConstant()) {
-      index_constant = new (zone)
-          UnboxedConstantInstr(smi, old_value->definition()->representation());
-      index_constant->set_ssa_temp_index(graph->alloc_ssa_temp_index());
-      graph->AddToGraphInitialDefinitions(index_constant);
+    if (index_value->definition()->IsUnboxedConstant()) {
+      index_constant = new (zone) UnboxedConstantInstr(
+          smi, index_value->definition()->representation());
+      graph->InsertBefore(first, index_constant, nullptr, FlowGraph::kValue);
     } else {
       index_constant = graph->GetConstant(smi);
     }
-    Value* new_index = new (zone) Value(index_constant);
-    index_constant->AddInputUse(new_index);
-    first->SetInputAt(CheckBoundBase::kIndexPos, new_index);
-    group->RemoveAllButFirst();
+    index_value->BindTo(index_constant);
   }
 }
 
-bool GenericCheckBoundElimination::ExtractIndexInfo(
-    GenericCheckBoundInstr* instr,
-    intptr_t* index_value) {
+bool GenericCheckBoundHoist::ExtractIndexInfo(GenericCheckBoundInstr* instr,
+                                              intptr_t* index_value) {
   Definition* index = instr->index()->definition();
   ConstantInstr* index_constant = index->AsConstant();
   if ((index_constant != nullptr) && index_constant->value().IsSmi()) {

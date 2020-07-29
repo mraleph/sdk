@@ -334,6 +334,7 @@ FlowGraph* CompilerPass::RunPipeline(PipelineMode mode,
   INVOKE_PASS(TryOptimizePatterns);
   INVOKE_PASS(DSE);
   INVOKE_PASS(TypePropagation);
+  INVOKE_PASS(HoistGenericCheckBounds);
   INVOKE_PASS(RangeAnalysis);
   INVOKE_PASS(OptimizeBranches);
   INVOKE_PASS(TypePropagation);
@@ -355,7 +356,6 @@ FlowGraph* CompilerPass::RunPipeline(PipelineMode mode,
   INVOKE_PASS(Canonicalize);
   INVOKE_PASS(UseTableDispatch);
   INVOKE_PASS(EliminateStackOverflowChecks);
-  INVOKE_PASS(EliminateGenericCheckBounds);
   INVOKE_PASS(Canonicalize);
   INVOKE_PASS(AllocationSinking_DetachMaterializations);
   INVOKE_PASS(EliminateWriteBarriers);
@@ -419,9 +419,9 @@ COMPILER_PASS(EliminateStackOverflowChecks, {
   }
 });
 
-COMPILER_PASS(EliminateGenericCheckBounds, {
+COMPILER_PASS(HoistGenericCheckBounds, {
   if (!flow_graph->IsCompiledForOsr()) {
-    GenericCheckBoundElimination::EliminateGenericCheckBounds(flow_graph);
+    GenericCheckBoundHoist::HoistGenericCheckBounds(flow_graph);
   }
 });
 
