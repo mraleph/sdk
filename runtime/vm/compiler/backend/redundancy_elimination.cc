@@ -3857,7 +3857,12 @@ void GenericCheckBoundHoist::HoistGenericCheckBounds(FlowGraph* graph) {
     for (ForwardInstructionIterator it(entry); !it.Done(); it.Advance()) {
       Instruction* current = it.Current();
       GenericCheckBoundInstr* instr = current->AsGenericCheckBound();
-      if (instr == nullptr) continue;
+      if (instr == nullptr) {
+        if (current->HasUnknownSideEffects() || current->IsStoreIndexed()) {
+          lookup_set.Clear();
+        }
+        continue;
+      }
       intptr_t index_value;
       if (!ExtractIndexInfo(instr, &index_value)) continue;
       BoundGroup* group = lookup_set.LookupValue(instr->length()->definition());
