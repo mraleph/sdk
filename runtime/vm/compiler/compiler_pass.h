@@ -35,6 +35,7 @@ namespace dart {
   V(EliminateDeadPhis)                                                         \
   V(EliminateEnvironments)                                                     \
   V(EliminateStackOverflowChecks)                                              \
+  V(MayMoveWarnGenericCheckBounds)                                             \
   V(HoistGenericCheckBounds)                                                   \
   V(FinalizeGraph)                                                             \
   V(IfConvert)                                                                 \

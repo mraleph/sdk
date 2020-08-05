@@ -147,13 +147,18 @@ class CheckStackOverflowElimination : public AllStatic {
   static void EliminateStackOverflow(FlowGraph* graph);
 };
 
-class GenericCheckBoundHoist : public AllStatic {
+class HoistGenericCheckBound : public AllStatic {
  public:
-  static void HoistGenericCheckBounds(FlowGraph* graph);
+  static void HoistGenericCheckBounds(
+      FlowGraph* graph,
+      const GrowableArray<const Function*>& inline_id_to_function);
+};
 
- private:
-  static bool ExtractIndexInfo(GenericCheckBoundInstr* instr,
-                               intptr_t* index_value);
+class GenericCheckBoundMayMoveWarn : public AllStatic {
+ public:
+  static void MayWarn(
+      FlowGraph* graph,
+      const GrowableArray<const Function*>& inline_id_to_function);
 };
 
 }  // namespace dart

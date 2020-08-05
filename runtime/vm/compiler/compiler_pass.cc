@@ -356,6 +356,7 @@ FlowGraph* CompilerPass::RunPipeline(PipelineMode mode,
   INVOKE_PASS(Canonicalize);
   INVOKE_PASS(UseTableDispatch);
   INVOKE_PASS(EliminateStackOverflowChecks);
+  INVOKE_PASS(MayMoveWarnGenericCheckBounds);
   INVOKE_PASS(Canonicalize);
   INVOKE_PASS(AllocationSinking_DetachMaterializations);
   INVOKE_PASS(EliminateWriteBarriers);
@@ -421,7 +422,15 @@ COMPILER_PASS(EliminateStackOverflowChecks, {
 
 COMPILER_PASS(HoistGenericCheckBounds, {
   if (!flow_graph->IsCompiledForOsr()) {
-    GenericCheckBoundHoist::HoistGenericCheckBounds(flow_graph);
+    HoistGenericCheckBound::HoistGenericCheckBounds(
+        flow_graph, state->inline_id_to_function);
+  }
+});
+
+COMPILER_PASS(MayMoveWarnGenericCheckBounds, {
+  if (!flow_graph->IsCompiledForOsr()) {
+    GenericCheckBoundMayMoveWarn::MayWarn(flow_graph,
+                                          state->inline_id_to_function);
   }
 });
 
@@ -592,15 +601,12 @@ COMPILER_PASS(RoundTripSerialization, {
 
 #if defined(DART_ENABLE_LLVM_COMPILER)
 COMPILER_PASS(IRTranslate, {
-  const Function& function = flow_graph->parsed_function().function();
   bool should_compile_with_llvm =
       flow_graph->graph_entry()->unchecked_entry() == nullptr;
   if (should_compile_with_llvm) {
     dart_llvm::IRTranslator ir_translator(flow_graph, state->precompiler);
     ir_translator.Translate();
   } else {
-    THR_Print("LLVM compilation disabled for function: %s\n",
-              function.ToCString());
   }
 })
 #endif

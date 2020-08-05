@@ -6,6 +6,8 @@
 
 #include "vm/compiler/backend/redundancy_elimination.h"
 
+#include <string>
+
 #include "vm/bit_vector.h"
 #include "vm/compiler/backend/flow_graph.h"
 #include "vm/compiler/backend/il.h"
@@ -22,6 +24,10 @@ DEFINE_FLAG(bool,
             trace_load_optimization,
             false,
             "Print live sets for load optimization pass.");
+DEFINE_FLAG(bool,
+            warn_maybe_bound_check_hoist,
+            false,
+            "Warning for global bound check.");
 
 // Quick access to the current zone.
 #define Z (zone())
@@ -3817,39 +3823,230 @@ void CheckStackOverflowElimination::EliminateStackOverflow(FlowGraph* graph) {
 
 namespace {
 struct BoundGroup : public ZoneAllocated {
-  intptr_t max_index;
-  BlockEntryInstr* last_saw_block;
   ZoneGrowableArray<GenericCheckBoundInstr*> visited;
-  DirectChainedHashMap<PointerKeyValueTrait<BlockEntryInstr> > block_set;
-  explicit BoundGroup(Zone* zone);
-  void AddInstr(GenericCheckBoundInstr* instr);
-  bool AllInstrInOneDominateChain();
+  explicit BoundGroup(Zone*);
   ~BoundGroup() = default;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(BoundGroup);
 };
 
-BoundGroup::BoundGroup(Zone* zone) : visited(zone, 4), block_set(zone) {}
+BoundGroup::BoundGroup(Zone* zone) : visited(zone, 4) {}
 
-void BoundGroup::AddInstr(GenericCheckBoundInstr* instr) {
-  visited.Add(instr);
-  last_saw_block = instr->GetBlock();
-  block_set.Insert(last_saw_block);
-}
+using LookupSet =
+    DirectChainedHashMap<RawPointerKeyValueTrait<Definition, BoundGroup*> >;
 
-bool BoundGroup::AllInstrInOneDominateChain() {
-  auto it = block_set.GetIterator();
-  while (true) {
-    auto block = it.Next();
-    if (!block) break;
-    if (!(*block)->Dominates(last_saw_block)) return false;
+struct LocalGroup : public ZoneAllocated {
+  intptr_t max_index;
+  intptr_t first_index;
+  GenericCheckBoundInstr* first_instr;
+  LocalGroup() = default;
+  ~LocalGroup() = default;
+};
+using LocalLookupSet =
+    DirectChainedHashMap<RawPointerKeyValueTrait<Definition, LocalGroup*> >;
+
+class GenericCheckBoundInstrLineColumnSearcher {
+ public:
+  GenericCheckBoundInstrLineColumnSearcher(
+      Zone* zone,
+      const Function* function,
+      const GrowableArray<const Function*>& inline_id_to_function);
+  void Search(GenericCheckBoundInstr* instr);
+
+  intptr_t line() const { return line_; }
+  intptr_t column() const { return column_; }
+  const char* GetLineContent();
+  const char* GetURLString();
+  std::string GetFunctionInfo();
+
+ private:
+  void GetUseLineColumn(Value* value);
+  void DoSearch(GenericCheckBoundInstr* instr);
+
+  const Function* function_;
+  const Function* inlined_function_;
+  Instruction* tp_instr_;
+  const GrowableArray<const Function*>& inline_id_to_function_;
+  Script& script_;
+  String& line_content_;
+  String& url_string_;
+
+  intptr_t line_;
+  intptr_t column_;
+};
+
+GenericCheckBoundInstrLineColumnSearcher::
+    GenericCheckBoundInstrLineColumnSearcher(
+        Zone* zone,
+        const Function* function,
+        const GrowableArray<const Function*>& inline_id_to_function)
+    : function_(function),
+      inlined_function_(nullptr),
+      tp_instr_(nullptr),
+      inline_id_to_function_(inline_id_to_function),
+      script_(Script::Handle(zone)),
+      line_content_(String::Handle(zone)),
+      url_string_(String::Handle(zone)),
+      line_(0),
+      column_(0) {}
+
+void GenericCheckBoundInstrLineColumnSearcher::Search(
+    GenericCheckBoundInstr* instr) {
+  DoSearch(instr);
+  if (tp_instr_ == nullptr) return;
+  const Function* function = function_;
+  if (tp_instr_->inlining_id() != -1) {
+    function = inline_id_to_function_[tp_instr_->inlining_id()];
+    if (function != function_) inlined_function_ = function;
   }
-  return true;
+  script_ = function->script();
+  url_string_ = script_.url();
+  script_.GetTokenLocation(tp_instr_->token_pos(), &line_, &column_);
+  line_content_ = script_.GetLine(line_);
 }
+
+const char* GenericCheckBoundInstrLineColumnSearcher::GetLineContent() {
+  if (line_content_.IsNull()) return "";
+  return line_content_.ToCString();
+}
+
+const char* GenericCheckBoundInstrLineColumnSearcher::GetURLString() {
+  if (url_string_.IsNull()) return "";
+  return url_string_.ToCString();
+}
+
+std::string GenericCheckBoundInstrLineColumnSearcher::GetFunctionInfo() {
+  std::string result;
+  if (inlined_function_ != nullptr) {
+    result.assign(inlined_function_->ToCString());
+    result.append(" inlined by ");
+    result.append(function_->ToCString());
+  } else {
+    result.assign(function_->ToCString());
+  }
+  return result;
+}
+
+void GenericCheckBoundInstrLineColumnSearcher::DoSearch(
+    GenericCheckBoundInstr* instr) {
+  GetUseLineColumn(instr->InputAt(CheckBoundBase::kIndexPos));
+  if (tp_instr_ != nullptr) return;
+  if (!instr->input_use_list()) return;
+  GetUseLineColumn(instr->input_use_list());
+}
+
+void GenericCheckBoundInstrLineColumnSearcher::GetUseLineColumn(Value* value) {
+  while (value != nullptr) {
+    Instruction* instr = value->instruction();
+    TokenPosition tp = instr->token_pos();
+    if (!tp.IsNoSource()) {
+      tp_instr_ = instr;
+      break;
+    }
+    value = value->next_use();
+  }
+}
+
+bool ExtractIndexInfo(GenericCheckBoundInstr* instr, intptr_t* index_value) {
+  Definition* index = instr->index()->definition();
+  ConstantInstr* index_constant = index->AsConstant();
+  if ((index_constant != nullptr) && index_constant->value().IsSmi()) {
+    *index_value = Smi::Cast(index_constant->value()).Value();
+    return true;
+  }
+  return false;
+}
+
+void FlushLocalLookupSet(
+    FlowGraph* graph,
+    const LocalLookupSet& lookup_set,
+    const GrowableArray<const Function*>& inline_id_to_function) {
+  auto it = lookup_set.GetIterator();
+  Zone* zone = graph->zone();
+
+  while (true) {
+    auto p = it.Next();
+    if (p == nullptr) break;
+    LocalGroup* group = p->value;
+    if (group->first_index == group->max_index) continue;
+    ASSERT(group->first_index < group->max_index);
+
+    // Only hoist the index, leave the elimination to global pass.
+    Value* index = group->first_instr->InputAt(CheckBoundBase::kIndexPos);
+    const Smi& smi = Smi::Handle(zone, Smi::New(group->max_index));
+    Definition* index_constant;
+
+    if (index->definition()->IsUnboxedConstant()) {
+      index_constant = new (zone)
+          UnboxedConstantInstr(smi, index->definition()->representation());
+      graph->InsertBefore(group->first_instr, index_constant, nullptr,
+                          FlowGraph::kValue);
+    } else {
+      index_constant = graph->GetConstant(smi);
+    }
+    if (FLAG_warn_maybe_bound_check_hoist) {
+      GenericCheckBoundInstrLineColumnSearcher searcher(
+          zone, &graph->function(), inline_id_to_function);
+      searcher.Search(group->first_instr);
+      THR_Print(
+          "HoistGenericCheckBounds: hoisting %s with %s at line %d, column %d: "
+          "%s "
+          "in function %s at source %s\n",
+          index->definition()->ToCString(), index_constant->ToCString(),
+          static_cast<int>(searcher.line()),
+          static_cast<int>(searcher.column()), searcher.GetLineContent(),
+          searcher.GetFunctionInfo().c_str(), searcher.GetURLString());
+    }
+    index->BindTo(index_constant);
+  }
+}
+
 }  // namespace
 
-void GenericCheckBoundHoist::HoistGenericCheckBounds(FlowGraph* graph) {
+void HoistGenericCheckBound::HoistGenericCheckBounds(
+    FlowGraph* graph,
+    const GrowableArray<const Function*>& inline_id_to_function) {
   Zone* zone = graph->zone();
-  DirectChainedHashMap<RawPointerKeyValueTrait<Definition, BoundGroup*> >
-      lookup_set(zone);
+  for (BlockIterator block_it = graph->reverse_postorder_iterator();
+       !block_it.Done(); block_it.Advance()) {
+    BlockEntryInstr* entry = block_it.Current();
+
+    LocalLookupSet lookup_set(zone);
+    for (ForwardInstructionIterator it(entry); !it.Done(); it.Advance()) {
+      Instruction* current = it.Current();
+      GenericCheckBoundInstr* instr = current->AsGenericCheckBound();
+      if (instr == nullptr) {
+        if (current->HasUnknownSideEffects() || current->IsStoreIndexed()) {
+          FlushLocalLookupSet(graph, lookup_set, inline_id_to_function);
+          lookup_set.Clear();
+        }
+        continue;
+      }
+      intptr_t index_value;
+      if (!ExtractIndexInfo(instr, &index_value)) continue;
+      LocalGroup* group = lookup_set.LookupValue(instr->length()->definition());
+      if (group == nullptr) {
+        group = new (zone) LocalGroup();
+        group->first_instr = instr;
+        group->max_index = index_value;
+        group->first_index = index_value;
+        lookup_set.Insert({instr->length()->definition(), group});
+        continue;
+      }
+      if (group->max_index < index_value) group->max_index = index_value;
+    }
+    FlushLocalLookupSet(graph, lookup_set, inline_id_to_function);
+  }
+}
+
+void GenericCheckBoundMayMoveWarn::MayWarn(
+    FlowGraph* graph,
+    const GrowableArray<const Function*>& inline_id_to_function) {
+  if (!FLAG_warn_maybe_bound_check_hoist) return;
+  Zone* zone = graph->zone();
+  LookupSet lookup_set(zone);
+
   for (BlockIterator block_it = graph->reverse_postorder_iterator();
        !block_it.Done(); block_it.Advance()) {
     BlockEntryInstr* entry = block_it.Current();
@@ -3858,57 +4055,52 @@ void GenericCheckBoundHoist::HoistGenericCheckBounds(FlowGraph* graph) {
       Instruction* current = it.Current();
       GenericCheckBoundInstr* instr = current->AsGenericCheckBound();
       if (instr == nullptr) {
-        if (current->HasUnknownSideEffects() || current->IsStoreIndexed()) {
+        if (current->HasUnknownSideEffects() || current->IsStoreIndexed())
           lookup_set.Clear();
-        }
         continue;
       }
       intptr_t index_value;
       if (!ExtractIndexInfo(instr, &index_value)) continue;
       BoundGroup* group = lookup_set.LookupValue(instr->length()->definition());
-      if (!group) {
+      if (group == nullptr) {
         group = new (zone) BoundGroup(zone);
-        group->max_index = index_value;
-        group->AddInstr(instr);
+        group->visited.Add(instr);
         lookup_set.Insert({instr->length()->definition(), group});
         continue;
       }
-      group->AddInstr(instr);
-      if (group->max_index < index_value) group->max_index = index_value;
+      auto should_remove = [graph, zone, &inline_id_to_function](
+                               GenericCheckBoundInstr* instr,
+                               intptr_t index_value,
+                               GenericCheckBoundInstr* visited) {
+        if (!instr->IsDominatedBy(visited)) return false;
+        const intptr_t visited_index_value =
+            Smi::Cast(visited->index()->definition()->AsConstant()->value())
+                .Value();
+        if (visited_index_value >= index_value) return true;
+        if (FLAG_warn_maybe_bound_check_hoist) {
+          GenericCheckBoundInstrLineColumnSearcher searcher(
+              zone, &graph->function(), inline_id_to_function);
+          searcher.Search(instr);
+          THR_Print(
+              "Warning: Constant index access %d at line: %d, column: %d, "
+              "content: %s may be move before the index access %d for better "
+              "code optimization, for function %s in file %s\n",
+              static_cast<int>(index_value), static_cast<int>(searcher.line()),
+              static_cast<int>(searcher.column()), searcher.GetLineContent(),
+              static_cast<int>(visited_index_value),
+              searcher.GetFunctionInfo().c_str(), searcher.GetURLString());
+        }
+        return false;
+      };
+      for (intptr_t i = 0; i < group->visited.length(); ++i) {
+        GenericCheckBoundInstr* visited = group->visited[i];
+        if (should_remove(instr, index_value, visited)) {
+          break;
+        }
+      }
+      group->visited.Add(instr);
     }
   }
-  auto it = lookup_set.GetIterator();
-
-  while (true) {
-    auto p = it.Next();
-    if (!p) break;
-    BoundGroup* group = p->value;
-    if (!group->AllInstrInOneDominateChain()) break;
-    GenericCheckBoundInstr* first = group->visited[0];
-    // Only hoist the index, leave the elimination to global pass.
-    Value* index_value = first->InputAt(CheckBoundBase::kIndexPos);
-    ConstantInstr* index_constant;
-    const Smi& smi = Smi::Handle(zone, Smi::New(group->max_index));
-    if (index_value->definition()->IsUnboxedConstant()) {
-      index_constant = new (zone) UnboxedConstantInstr(
-          smi, index_value->definition()->representation());
-      graph->InsertBefore(first, index_constant, nullptr, FlowGraph::kValue);
-    } else {
-      index_constant = graph->GetConstant(smi);
-    }
-    index_value->BindTo(index_constant);
-  }
-}
-
-bool GenericCheckBoundHoist::ExtractIndexInfo(GenericCheckBoundInstr* instr,
-                                              intptr_t* index_value) {
-  Definition* index = instr->index()->definition();
-  ConstantInstr* index_constant = index->AsConstant();
-  if ((index_constant != nullptr) && index_constant->value().IsSmi()) {
-    *index_value = Smi::Cast(index_constant->value()).Value();
-    return true;
-  }
-  return false;
 }
 
 }  // namespace dart
