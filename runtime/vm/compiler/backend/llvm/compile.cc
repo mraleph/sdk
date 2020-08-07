@@ -189,7 +189,7 @@ void SaveObjectFile(const State& state) {
 void Compile(State& state) {
   LLVMMCJITCompilerOptions options;
   LLVMInitializeMCJITCompilerOptions(&options, sizeof(options));
-  options.OptLevel = 3;
+  options.OptLevel = 1;
 #if defined(TARGET_ARCH_ARM64)
   options.CodeModel = LLVMCodeModelTiny;
 #endif
@@ -213,9 +213,8 @@ void Compile(State& state) {
   free(stringRepOfTargetData);
 
   LLVMPassManagerBuilderRef passBuilder = LLVMPassManagerBuilderCreate();
-  LLVMPassManagerBuilderSetOptLevel(passBuilder, 2);
-  LLVMPassManagerBuilderUseInlinerWithThreshold(passBuilder, 275);
-  LLVMPassManagerBuilderSetSizeLevel(passBuilder, 0);
+  LLVMPassManagerBuilderSetOptLevel(passBuilder, 1);
+  LLVMPassManagerBuilderSetSizeLevel(passBuilder, 2);
 
   functionPasses = LLVMCreateFunctionPassManagerForModule(module);
   modulePasses = LLVMCreatePassManager();
