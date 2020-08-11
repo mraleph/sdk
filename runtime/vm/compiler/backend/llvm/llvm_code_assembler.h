@@ -62,6 +62,7 @@ class CodeAssembler {
   std::vector<std::tuple<int, int, int>> exception_tuples_;
   FlowGraphCompiler* compiler_;
   std::unique_ptr<ArchImpl> arch_impl_;
+  std::unique_ptr<dart_llvm::CompilerState> llvm_compiler_state_;
   const uint8_t* code_start_ = nullptr;
   Instruction* last_instr_ = nullptr;
   size_t offset_ = 0;

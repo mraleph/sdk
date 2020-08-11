@@ -254,8 +254,10 @@ LValue Output::buildLoadUnaligned(LValue toLoad) {
   LType pointer_type = typeOf(toLoad);
   LType element_type = LLVMGetElementType(pointer_type);
   LValue size_of_element_type = LLVMSizeOf(element_type);
-  buildCall(memcpy_function, bitcast_space_, buildBitCast(toLoad, repo().ref8),
-            size_of_element_type, repo().booleanFalse);
+  buildCall(memcpy_function, buildBitCast(bitcast_space_, repo().ref8),
+            buildBitCast(toLoad, repo().ref8),
+            buildCast(LLVMTrunc, size_of_element_type, repo().int32),
+            repo().booleanFalse);
   return buildLoad(buildBitCast(bitcast_space_, pointer_type));
 }
 

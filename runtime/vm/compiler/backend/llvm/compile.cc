@@ -88,7 +88,7 @@ static DART_UNUSED void disassemble(CompilerState& state,
                                     const DwarfLineMapper& mapper) {
   printf("Disassemble for function:%s\n", state.function_name_.c_str());
   for (auto& code : state.code_section_list_) {
-    disassemble(state, code, mapper);
+    disassemble(state, *code, mapper);
   }
 }
 
@@ -98,14 +98,12 @@ static uint8_t* mmAllocateCodeSection(void* opaqueState,
                                       unsigned sid,
                                       const char* sectionName) {
   State& state = *static_cast<State*>(opaqueState);
+  dart_llvm::ByteBuffer* bb = state.AllocateByteBuffer(size);
+  state.code_section_list_.push_back(bb);
 
-  state.code_section_list_.push_back(dart_llvm::ByteBuffer());
+  state.AddSection(sid, sectionName, bb, alignment, true);
 
-  dart_llvm::ByteBuffer& bb(state.code_section_list_.back());
-  bb.resize(size);
-  state.AddSection(sid, sectionName, &bb, alignment, true);
-
-  return const_cast<uint8_t*>(bb.data());
+  return const_cast<uint8_t*>(bb->data());
 }
 
 static uint8_t* mmAllocateDataSection(void* opaqueState,
@@ -116,10 +114,9 @@ static uint8_t* mmAllocateDataSection(void* opaqueState,
                                       LLVMBool) {
   State& state = *static_cast<State*>(opaqueState);
 
-  state.data_section_list_.push_back(dart_llvm::ByteBuffer());
+  dart_llvm::ByteBuffer* bb = state.AllocateByteBuffer(size);
+  state.data_section_list_.push_back(bb);
 
-  dart_llvm::ByteBuffer& bb(state.data_section_list_.back());
-  bb.resize(size);
 #if defined(TARGET_ARCH_ARM)
   static const char kExceptionTablePrefix[] = SECTION_NAME("ARM.extab");
 #elif defined(TARGET_ARCH_ARM64)
@@ -129,16 +126,16 @@ static uint8_t* mmAllocateDataSection(void* opaqueState,
 #endif
   static const char kDwarfLine[] = ".debug_line";
   if (!strcmp(sectionName, SECTION_NAME("llvm_stackmaps"))) {
-    state.stackMapsSection_ = &bb;
+    state.stackMapsSection_ = bb;
   } else if (!memcmp(sectionName, kExceptionTablePrefix,
                      sizeof(kExceptionTablePrefix) - 1)) {
-    state.exception_table_ = &bb;
+    state.exception_table_ = bb;
   } else if (!memcmp(sectionName, kDwarfLine, sizeof(kDwarfLine) - 1)) {
-    state.dwarf_line_ = &bb;
+    state.dwarf_line_ = bb;
   }
 
-  state.AddSection(sid, sectionName, &bb, alignment, false);
-  return const_cast<uint8_t*>(bb.data());
+  state.AddSection(sid, sectionName, bb, alignment, false);
+  return const_cast<uint8_t*>(bb->data());
 }
 
 static LLVMBool mmApplyPermissions(void*, char**) {

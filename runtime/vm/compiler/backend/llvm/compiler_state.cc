@@ -8,6 +8,8 @@
 namespace dart {
 namespace dart_llvm {
 
+static constexpr const size_t kBufferAsWholeSize = 16 * 1024 * 1024;
+
 CompilerState::CompilerState(const char* function_name)
     : stackMapsSection_(nullptr),
       exception_table_(nullptr),
@@ -16,6 +18,7 @@ CompilerState::CompilerState(const char* function_name)
       function_(nullptr),
       context_(nullptr),
       entryPoint_(nullptr),
+      buffer_top_(0),
       function_name_(function_name),
       code_kind_(0),
       needs_frame_(false) {
@@ -28,6 +31,9 @@ CompilerState::CompilerState(const char* function_name)
 #else
 #error unsupported arch
 #endif
+
+  // Allocate buffer_as_whole_
+  buffer_as_whole_.reset(new char[kBufferAsWholeSize]);
 }
 
 CompilerState::~CompilerState() {
@@ -64,6 +70,15 @@ void CompilerState::AddSection(unsigned id,
   new_section.name = std::move(name);
   new_section.bb = bb;
   new_section.is_code = is_code;
+}
+
+ByteBuffer* CompilerState::AllocateByteBuffer(size_t size) {
+  EMASSERT((kBufferAsWholeSize - buffer_top_) >= (size + sizeof(size)));
+  char* top = buffer_as_whole_.get() + buffer_top_;
+  buffer_top_ += size + sizeof(size);
+  ByteBuffer* result = reinterpret_cast<ByteBuffer*>(top);
+  result->size_ = size;
+  return result;
 }
 }  // namespace dart_llvm
 }  // namespace dart

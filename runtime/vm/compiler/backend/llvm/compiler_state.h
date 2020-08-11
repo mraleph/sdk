@@ -18,8 +18,23 @@ namespace dart {
 class Instruction;
 namespace dart_llvm {
 class StackMapInfo;
-typedef std::vector<uint8_t> ByteBuffer;
-typedef std::list<ByteBuffer> BufferList;
+class ByteBuffer {
+ public:
+  const uint8_t* data() const {
+    return reinterpret_cast<const uint8_t*>(this + 1);
+  }
+  uint8_t* data() { return reinterpret_cast<uint8_t*>(this + 1); }
+
+  size_t size() const { return size_; }
+
+ private:
+  ByteBuffer() = delete;
+  ByteBuffer(const ByteBuffer&) = delete;
+  friend struct CompilerState;
+  size_t size_;
+};
+
+typedef std::list<ByteBuffer*> BufferList;
 
 struct Section {
   unsigned id;
@@ -42,6 +57,8 @@ struct CompilerState {
   LLVMValueRef function_;
   LLVMContextRef context_;
   void* entryPoint_;
+  std::unique_ptr<char[]> buffer_as_whole_;
+  size_t buffer_top_;
   std::string function_name_;
   int code_kind_;
   bool needs_frame_;
@@ -56,6 +73,7 @@ struct CompilerState {
                   ByteBuffer* bb,
                   unsigned alignment,
                   bool is_code);
+  ByteBuffer* AllocateByteBuffer(size_t size);
 };
 }  // namespace dart_llvm
 }  // namespace dart
