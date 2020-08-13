@@ -27,7 +27,7 @@
     macro(doubleSqrt, "llvm.sqrt.f64", functionType(doubleType, doubleType)) \
     macro(floatSqrt, "llvm.sqrt.f32", functionType(floatType, floatType)) \
     macro(doubleLog, "llvm.log.f64", functionType(doubleType, doubleType)) \
-    macro(frameAddress, "llvm.frameaddress", functionType(pointerType(int8), int32)) \
+    macro(frameAddress, "llvm.frameaddress.p0i8", functionType(pointerType(int8), int32)) \
     macro(patchpointInt64, "llvm.experimental.patchpoint.i64", functionType(int64, int64, int32, ref8, int32, Variadic)) \
     macro(patchpointVoid, "llvm.experimental.patchpoint.void", functionType(void_type, int64, int32, ref8, int32, Variadic)) \
     macro(stackmap, "llvm.experimental.stackmap", functionType(void_type, int64, int32, Variadic)) \
