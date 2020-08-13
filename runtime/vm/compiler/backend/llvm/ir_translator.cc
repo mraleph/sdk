@@ -263,6 +263,7 @@ class AnonImpl {
   }
   LValue LoadFieldFromOffset(LValue base, int offset, LType type);
   LValue LoadFieldFromOffset(LValue base, int offset);
+  LValue LoadSmiFieldFromOffset(LValue base, int offset);
   LValue LoadFromOffset(LValue base,
                         int offset,
                         LType type,
@@ -1437,6 +1438,13 @@ LValue AnonImpl::LoadFieldFromOffset(LValue base, int offset, LType type) {
 
 LValue AnonImpl::LoadFieldFromOffset(LValue base, int offset) {
   return LoadFieldFromOffset(base, offset, pointerType(output().tagged_type()));
+}
+
+LValue AnonImpl::LoadSmiFieldFromOffset(LValue base, int offset) {
+  LValue gep = output().buildGEPWithByteOffset(
+      base, output().constIntPtr(offset - kHeapObjectTag),
+      pointerType(output().tagged_type()));
+  return output().buildLoadSmi(gep);
 }
 
 LValue AnonImpl::LoadFromOffset(LValue base,
@@ -3846,7 +3854,11 @@ void IRTranslator::VisitLoadField(LoadFieldInstr* instr) {
     // support after call implementation.
     UNREACHABLE();
   }
-  LValue value = impl().LoadFieldFromOffset(instance, offset_in_bytes);
+  LValue value;
+  if (instr->HasType() && instr->Type()->ToCid() == kSmiCid)
+    value = impl().LoadSmiFieldFromOffset(instance, offset_in_bytes);
+  else
+    value = impl().LoadFieldFromOffset(instance, offset_in_bytes);
   impl().SetLLVMValue(instr, value);
 }
 

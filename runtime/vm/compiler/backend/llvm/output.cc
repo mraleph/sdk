@@ -261,6 +261,14 @@ LValue Output::buildLoadUnaligned(LValue toLoad) {
   return buildLoad(buildBitCast(bitcast_space_, pointer_type));
 }
 
+LValue Output::buildLoadSmi(LValue toLoad) {
+  LValue load = dart_llvm::buildLoad(builder_, toLoad);
+  LValue mdnode = LLVMMDNodeInContext(state_.context_, nullptr, 0);
+  constexpr static const unsigned kMD_even_number = 30;
+  LLVMSetMetadata(load, kMD_even_number, mdnode);
+  return setInstrDebugLoc(load);
+}
+
 LValue Output::buildStore(LValue val, LValue pointer) {
   return setInstrDebugLoc(dart_llvm::buildStore(builder_, val, pointer));
 }
