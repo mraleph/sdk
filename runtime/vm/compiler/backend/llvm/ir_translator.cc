@@ -2472,9 +2472,9 @@ void ComparisonResolver::VisitRelationalOp(RelationalOpInstr* instr) {
   if (instr->operation_cid() == kSmiCid) {
     EMASSERT(typeOf(left) == output().tagged_type());
     EMASSERT(typeOf(right) == output().tagged_type());
-    cmp_value =
-        output().buildICmp(TokenKindToSmiCondition(instr->kind()),
-                           impl().SmiUntag(left), impl().SmiUntag(right));
+    cmp_value = output().buildICmp(TokenKindToSmiCondition(instr->kind()),
+                                   impl().TaggedToWord(left),
+                                   impl().TaggedToWord(right));
   } else if (instr->operation_cid() == kMintCid) {
     EMASSERT(typeOf(left) == output().repo().int64);
     EMASSERT(typeOf(right) == output().repo().int64);
@@ -3827,7 +3827,6 @@ void IRTranslator::VisitLoadField(LoadFieldInstr* instr) {
       case kDoubleCid:
         value = impl().LoadFieldFromOffset(instance, offset_in_bytes,
                                            output().repo().refDouble);
-        ;
         break;
       case kFloat32x4Cid:
         EMASSERT("kFloat32x4Cid not supported" && false);
@@ -4074,22 +4073,34 @@ void IRTranslator::VisitBinarySmiOp(BinarySmiOpInstr* instr) {
         break;
     }
   } else {
-    LValue left = impl().SmiUntag(impl().GetLLVMValue(instr->left()));
-    LValue right = impl().SmiUntag(impl().GetLLVMValue(instr->right()));
     switch (instr->op_kind()) {
-      case Token::kSHL:
+      case Token::kSHL: {
+        LValue left = impl().SmiUntag(impl().GetLLVMValue(instr->left()));
+        LValue right = impl().SmiUntag(impl().GetLLVMValue(instr->right()));
         value = output().buildShl(left, right);
-        break;
-      case Token::kADD:
+        value = impl().SmiTag(value);
+      } break;
+      case Token::kADD: {
+        LValue left = impl().TaggedToWord(impl().GetLLVMValue(instr->left()));
+        LValue right = impl().TaggedToWord(impl().GetLLVMValue(instr->right()));
         value = output().buildAdd(left, right);
-        break;
-      case Token::kSUB:
+        value = impl().WordToTagged(value);
+      } break;
+      case Token::kSUB: {
+        LValue left = impl().TaggedToWord(impl().GetLLVMValue(instr->left()));
+        LValue right = impl().TaggedToWord(impl().GetLLVMValue(instr->right()));
         value = output().buildSub(left, right);
-        break;
-      case Token::kMUL:
+        value = impl().WordToTagged(value);
+      } break;
+      case Token::kMUL: {
+        LValue left = impl().SmiUntag(impl().GetLLVMValue(instr->left()));
+        LValue right = impl().TaggedToWord(impl().GetLLVMValue(instr->right()));
         value = output().buildMul(left, right);
-        break;
+        value = impl().WordToTagged(value);
+      } break;
       case Token::kTRUNCDIV: {
+        LValue left = impl().SmiUntag(impl().GetLLVMValue(instr->left()));
+        LValue right = impl().SmiUntag(impl().GetLLVMValue(instr->right()));
         bool support_int_div = true;
         support_int_div = impl().support_integer_div();
         if (support_int_div) {
@@ -4103,24 +4114,36 @@ void IRTranslator::VisitBinarySmiOp(BinarySmiOpInstr* instr) {
           value = output().buildCast(LLVMFPToSI, value_double,
                                      output().repo().intPtr);
         }
+        value = impl().SmiTag(value);
       } break;
-      case Token::kBIT_AND:
+      case Token::kBIT_AND: {
+        LValue left = impl().TaggedToWord(impl().GetLLVMValue(instr->left()));
+        LValue right = impl().TaggedToWord(impl().GetLLVMValue(instr->right()));
         value = output().buildAnd(left, right);
-        break;
-      case Token::kBIT_OR:
+        value = impl().WordToTagged(value);
+      } break;
+      case Token::kBIT_OR: {
+        LValue left = impl().TaggedToWord(impl().GetLLVMValue(instr->left()));
+        LValue right = impl().TaggedToWord(impl().GetLLVMValue(instr->right()));
         value = output().buildOr(left, right);
-        break;
-      case Token::kBIT_XOR:
+        value = impl().WordToTagged(value);
+      } break;
+      case Token::kBIT_XOR: {
+        LValue left = impl().TaggedToWord(impl().GetLLVMValue(instr->left()));
+        LValue right = impl().TaggedToWord(impl().GetLLVMValue(instr->right()));
         value = output().buildXor(left, right);
-        break;
-      case Token::kSHR:
-        value = output().buildShr(left, right);
-        break;
+        value = impl().WordToTagged(value);
+      } break;
+      case Token::kSHR: {
+        LValue left = impl().SmiUntag(impl().GetLLVMValue(instr->left()));
+        LValue right = impl().SmiUntag(impl().GetLLVMValue(instr->right()));
+        value = output().buildSar(left, right);
+        value = impl().SmiTag(value);
+      } break;
       default:
         UNREACHABLE();
         break;
     }
-    value = impl().SmiTag(value);
   }
   impl().SetLLVMValue(instr, value);
 }
