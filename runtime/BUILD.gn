@@ -56,7 +56,7 @@ config("dart_precompiled_runtime_config") {
 # Controls DART_PRECOMPILER #define.
 config("dart_precompiler_config") {
   defines = []
-  defines += [ "DART_PRECOMPILER" ]
+  defines += [ "DART_PRECOMPILER", "FORCE_INCLUDE_DISASSEMBLER" ]
   enable_llvm = false
   if (uc_build_llvm_compiler) {
     if (dart_target_arch == "arm") {
