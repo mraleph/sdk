@@ -69,7 +69,7 @@ config("dart_precompiler_config") {
   if (enable_llvm) {
     include_dirs = [ "vm/compiler/backend/llvm/include" ]
     libs = [ "LLVM-10" ]
-    defines += [ "LLVMLOG_LEVEL=1" ]
+    defines += [ "LLVMLOG_LEVEL=1", "UC_BUILD", "UC_BUILD_LLVM_COMPILER" ]
     ldflags = [ "-Wl,-rpath,\$ORIGIN/../../../third_party/dart/lib" ]
     lib_dirs = [ "../lib/" ]
   }
