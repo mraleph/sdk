@@ -1013,6 +1013,14 @@ void FlowGraphCompiler::EmitEdgeCounter(intptr_t edge_id) {
   __ StoreFieldToOffset(TMP, R0, Array::element_offset(edge_id));
 }
 
+void FlowGraphCompiler::DropArguments(intptr_t count) {
+  if (current_instruction()->ArgumentCount() == 0) {
+    __ Drop(count);  // OK
+  } else {
+    RELEASE_ASSERT(current_instruction()->ArgumentCount() == count);
+  }
+}
+
 void FlowGraphCompiler::EmitOptimizedInstanceCall(const Code& stub,
                                                   const ICData& ic_data,
                                                   intptr_t deopt_id,
@@ -1033,7 +1041,7 @@ void FlowGraphCompiler::EmitOptimizedInstanceCall(const Code& stub,
   __ LoadUniqueObject(R5, ic_data);
   GenerateDartCall(deopt_id, token_pos, stub, RawPcDescriptors::kIcCall, locs,
                    entry_kind);
-  __ Drop(ic_data.SizeWithTypeArgs());
+  DropArguments(ic_data.SizeWithTypeArgs());
 }
 
 void FlowGraphCompiler::EmitInstanceCallJIT(const Code& stub,
@@ -1063,7 +1071,7 @@ void FlowGraphCompiler::EmitInstanceCallJIT(const Code& stub,
   __ ldr(LR, compiler::FieldAddress(CODE_REG, entry_point_offset));
   __ blr(LR);
   EmitCallsiteMetadata(token_pos, deopt_id, RawPcDescriptors::kIcCall, locs);
-  __ Drop(ic_data.SizeWithTypeArgs());
+  DropArguments(ic_data.SizeWithTypeArgs());
 }
 
 void FlowGraphCompiler::EmitMegamorphicInstanceCall(
@@ -1110,7 +1118,7 @@ void FlowGraphCompiler::EmitMegamorphicInstanceCall(
     AddCurrentDescriptor(RawPcDescriptors::kDeopt, deopt_id_after, token_pos);
   }
   RecordCatchEntryMoves(pending_deoptimization_env_, try_index);
-  __ Drop(args_desc.SizeWithTypeArgs());
+  DropArguments(args_desc.SizeWithTypeArgs());
 }
 
 void FlowGraphCompiler::EmitInstanceCallAOT(const ICData& ic_data,
@@ -1161,7 +1169,7 @@ void FlowGraphCompiler::EmitInstanceCallAOT(const ICData& ic_data,
 
   EmitCallsiteMetadata(token_pos, DeoptId::kNone, RawPcDescriptors::kOther,
                        locs);
-  __ Drop(ic_data.SizeWithTypeArgs());
+  DropArguments(ic_data.SizeWithTypeArgs());
 }
 
 void FlowGraphCompiler::EmitUnoptimizedStaticCall(intptr_t size_with_type_args,
@@ -1176,7 +1184,7 @@ void FlowGraphCompiler::EmitUnoptimizedStaticCall(intptr_t size_with_type_args,
   __ LoadObject(R5, ic_data);
   GenerateDartCall(deopt_id, token_pos, stub,
                    RawPcDescriptors::kUnoptStaticCall, locs, entry_kind);
-  __ Drop(size_with_type_args);
+  DropArguments(size_with_type_args);
 }
 
 void FlowGraphCompiler::EmitOptimizedStaticCall(
@@ -1200,7 +1208,7 @@ void FlowGraphCompiler::EmitOptimizedStaticCall(
   // we can record the outgoing edges to other code.
   GenerateStaticDartCall(deopt_id, token_pos, RawPcDescriptors::kOther, locs,
                          function, entry_kind);
-  __ Drop(size_with_type_args);
+  DropArguments(size_with_type_args);
 }
 
 void FlowGraphCompiler::EmitDispatchTableCall(

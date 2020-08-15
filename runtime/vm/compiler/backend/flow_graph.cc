@@ -2665,6 +2665,7 @@ PhiInstr* FlowGraph::AddPhi(JoinEntryInstr* join,
 }
 
 void FlowGraph::InsertPushArguments() {
+  intptr_t max = 0;
   for (BlockIterator block_it = reverse_postorder_iterator(); !block_it.Done();
        block_it.Advance()) {
     thread()->CheckForSafepoint();
@@ -2675,12 +2676,13 @@ void FlowGraph::InsertPushArguments() {
       if (arg_count == 0) {
         continue;
       }
+      max = Utils::Maximum(max, arg_count);
       PushArgumentsArray* arguments =
           new (Z) PushArgumentsArray(zone(), arg_count);
       for (intptr_t i = 0; i < arg_count; ++i) {
         Value* arg = instruction->ArgumentValueAt(i);
         PushArgumentInstr* push_arg = new (Z) PushArgumentInstr(
-            arg->CopyWithType(Z), instruction->RequiredInputRepresentation(i));
+            arg->CopyWithType(Z), instruction->RequiredInputRepresentation(i), arg_count - 1 - i);
         arguments->Add(push_arg);
         // Insert all PushArgument instructions immediately before call.
         // PushArgumentInstr::EmitNativeCode may generate more efficient
@@ -2693,6 +2695,7 @@ void FlowGraph::InsertPushArguments() {
       }
     }
   }
+  max_argument_count_ = max;
 }
 
 #if defined(DART_ENABLE_LLVM_COMPILER)
