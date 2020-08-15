@@ -583,6 +583,7 @@ RawSubtypeTestCache* FlowGraphCompiler::GenerateInlineInstanceof(
     // function type) of a non-parameterized class or with a raw dst type of
     // a parameterized class.
     if (type_class.NumTypeArguments() > 0) {
+      if (FLAG_precompiled_mode) return SubtypeTestCache::New();
       return GenerateInstantiatedTypeWithArgumentsTest(
           token_pos, type, is_instance_lbl, is_not_instance_lbl);
       // Fall through to runtime call.
@@ -590,6 +591,7 @@ RawSubtypeTestCache* FlowGraphCompiler::GenerateInlineInstanceof(
     const bool has_fall_through = GenerateInstantiatedTypeNoArgumentsTest(
         token_pos, type, is_instance_lbl, is_not_instance_lbl);
     if (has_fall_through) {
+      if (FLAG_precompiled_mode) return SubtypeTestCache::New();
       // If test non-conclusive so far, try the inlined type-test cache.
       // 'type' is known at compile time.
       return GenerateSubtype1TestCacheLookup(
@@ -598,6 +600,7 @@ RawSubtypeTestCache* FlowGraphCompiler::GenerateInlineInstanceof(
       return SubtypeTestCache::null();
     }
   }
+  if (FLAG_precompiled_mode) return SubtypeTestCache::New();
   return GenerateUninstantiatedTypeTest(token_pos, type, is_instance_lbl,
                                         is_not_instance_lbl);
 }
@@ -617,6 +620,24 @@ void FlowGraphCompiler::GenerateInstanceOf(TokenPosition token_pos,
                                            intptr_t deopt_id,
                                            const AbstractType& type,
                                            LocationSummary* locs) {
+  if (FLAG_precompiled_mode) {
+    __ Comment("Call kInstanceofRuntimeEntry");
+    __ PushObject(Object::null_object());  // Make room for the result.
+    __ Push(TypeTestABI::kInstanceReg);    // Push the instance.
+    __ PushObject(type);                   // Push the type.
+    __ PushList((1 << TypeTestABI::kInstantiatorTypeArgumentsReg) |
+                (1 << TypeTestABI::kFunctionTypeArgumentsReg));
+    __ LoadUniqueObject(R0, SubtypeTestCache::Handle(SubtypeTestCache::New()));
+    __ Push(R0);
+    GenerateRuntimeCall(token_pos, deopt_id, kInstanceofRuntimeEntry, 5, locs);
+    // Pop the parameters supplied to the runtime entry. The result of the
+    // instanceof runtime call will be left as the result of the operation.
+    __ Drop(5);
+    __ Pop(R0);
+    return;
+  }
+
+
   ASSERT(type.IsFinalized());
   ASSERT(!type.IsTopType());  // Already checked.
   static_assert(TypeTestABI::kFunctionTypeArgumentsReg <
