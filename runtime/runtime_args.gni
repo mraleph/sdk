@@ -92,6 +92,8 @@ declare_args() {
 
   # Whether dart:wasm should be enabled.
   dart_enable_wasm = false
+
+  uc_build_llvm_compiler = false
 }
 
 declare_args() {
