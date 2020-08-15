@@ -54,7 +54,7 @@ the colunm widths.
 
   // Now produce the report table.
   const numLargerSymbolsToReport = 30;
-  const numSmallerSymbolsToReport = 10;
+  const numSmallerSymbolsToReport = -1;
   final table = AsciiTable(header: [
     Text.left('Library'),
     Text.left('Method'),
@@ -73,7 +73,6 @@ the colunm widths.
   // Report [numSmallerSymbolsToReport] symbols that decreased in size most.
   for (var key in changedSymbolsBySize.reversed
       .where((k) => diffBySymbol[k] < 0)
-      .take(numSmallerSymbolsToReport)
       .toList()
       .reversed) {
     final name = key.split(librarySeparator);
@@ -82,6 +81,11 @@ the colunm widths.
   table.addSeparator();
 
   table.render();
+
+  final numBigger = changedSymbolsBySize.where((k) => diffBySymbol[k] > 0).length;
+  final numSmaller = changedSymbolsBySize.where((k) => diffBySymbol[k] < 0).length;
+
+  print('Number of smaller symbols ${numSmaller}, number of larger symbols ${numBigger}');
   print('Comparing ${args[0]} (old) to ${args[1]} (new)');
   print('Old   : ${totalOld} bytes.');
   print('New   : ${totalNew} bytes.');
