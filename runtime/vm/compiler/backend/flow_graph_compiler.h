@@ -982,6 +982,8 @@ class FlowGraphCompiler : public ValueObject {
       LocationSummary* locs,
       Code::EntryKind entry_kind = Code::EntryKind::kNormal);
 
+  void DropArguments(intptr_t count);
+
   void EmitUnoptimizedStaticCall(
       intptr_t size_with_type_args,
       intptr_t deopt_id,

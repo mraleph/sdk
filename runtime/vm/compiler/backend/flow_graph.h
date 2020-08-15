@@ -458,6 +458,8 @@ class FlowGraph : public ZoneAllocated {
   bool llvm_compile_ready() const { return !!llvm_compiler_state_; }
 #endif
 
+  intptr_t max_argument_count_ = 0;
+
  private:
   friend class FlowGraphCompiler;  // TODO(ajcbik): restructure
   friend class FlowGraphChecker;

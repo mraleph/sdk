@@ -2966,7 +2966,29 @@ void FlowGraphAllocator::AllocateRegisters() {
   GraphEntryInstr* entry = block_order_[0]->AsGraphEntry();
   ASSERT(entry != NULL);
   intptr_t double_spill_slot_count = spill_slots_.length() * kDoubleSpillFactor;
-  entry->set_spill_slot_count(cpu_spill_slot_count_ + double_spill_slot_count);
+  const intptr_t total_spill_slots =  cpu_spill_slot_count_ + double_spill_slot_count + flow_graph_.max_argument_count_;
+  entry->set_spill_slot_count(total_spill_slots);
+
+  // Allocate push argument locations
+  for (BlockIterator block_it = flow_graph_.reverse_postorder_iterator(); !block_it.Done();
+       block_it.Advance()) {
+    for (ForwardInstructionIterator instr_it(block_it.Current());
+         !instr_it.Done(); instr_it.Advance()) {
+      if (auto push = instr_it.Current()->AsPushArgument()) {
+        Location loc;
+
+        const intptr_t spill_index = (total_spill_slots - 1)  - push->index();
+        const intptr_t slot_index =
+            compiler::target::frame_layout.FrameSlotForVariableIndex(-spill_index);
+        if (push->representation() == kUnboxedDouble) {
+          loc = Location::DoubleStackSlot(slot_index, FPREG);
+        } else {
+          loc = Location::StackSlot(slot_index, FPREG);
+        }
+        push->locs()->set_out(0, loc);
+      }
+    }
+  }
 
   if (FLAG_print_ssa_liveranges) {
     const Function& function = flow_graph_.function();

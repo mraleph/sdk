@@ -2729,8 +2729,8 @@ class TailCallInstr : public Instruction {
 
 class PushArgumentInstr : public TemplateDefinition<1, NoThrow> {
  public:
-  explicit PushArgumentInstr(Value* value, Representation representation)
-      : representation_(representation) {
+  explicit PushArgumentInstr(Value* value, Representation representation, intptr_t index)
+      : representation_(representation), index_(index) {
     SetInputAt(0, value);
   }
 
@@ -2755,10 +2755,13 @@ class PushArgumentInstr : public TemplateDefinition<1, NoThrow> {
     return representation();
   }
 
+  intptr_t index() const { return index_; }
+
   PRINT_OPERANDS_TO_SUPPORT
 
  private:
   const Representation representation_;
+  const intptr_t index_;
 
   DISALLOW_COPY_AND_ASSIGN(PushArgumentInstr);
 };
