@@ -1513,7 +1513,7 @@ void FlowGraphCompiler::EmitComment(Instruction* instr) {
   if (!FLAG_support_il_printer || !FLAG_support_disassembler) {
     return;
   }
-#ifndef PRODUCT
+#if !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)
   char buffer[256];
   BufferFormatter f(buffer, sizeof(buffer));
   instr->PrintTo(&f);

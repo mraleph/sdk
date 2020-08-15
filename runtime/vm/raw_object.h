@@ -1558,9 +1558,11 @@ class RawCode : public RawObject {
   // Else, return_address_metadata_ is null.
   NOT_IN_PRODUCT(RawObject* return_address_metadata_);
   NOT_IN_PRODUCT(RawLocalVarDescriptors* var_descriptors_);
-  NOT_IN_PRODUCT(RawArray* comments_);
+#if (!defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)) && !defined(DART_PRECOMPILED_RUNTIME)
+  RawArray* comments_;
+#endif
 
-#if !defined(PRODUCT)
+#if (!defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)) && !defined(DART_PRECOMPILED_RUNTIME)
   VISIT_TO(RawObject*, comments_);
 #elif defined(DART_PRECOMPILED_RUNTIME)
   VISIT_TO(RawObject*, code_source_map_);
