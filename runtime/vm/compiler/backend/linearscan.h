@@ -245,6 +245,10 @@ class FlowGraphAllocator : public ValueObject {
 
   void PrintLiveRanges();
 
+  Location ComputeParameterLocation(BlockEntryInstr* block,
+                                    ParameterInstr* param,
+                                    Register base_reg);
+
   const FlowGraph& flow_graph_;
 
   ReachingDefs reaching_defs_;

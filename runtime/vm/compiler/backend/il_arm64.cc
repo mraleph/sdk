@@ -269,7 +269,7 @@ void ReturnInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     ASSERT(result == CallingConventions::kReturnFpuReg);
   }
 
-  if (compiler->intrinsic_mode()) {
+  if (compiler->is_frameless()) {
     // Intrinsics don't have a frame.
     __ ret();
     return;
@@ -1795,7 +1795,7 @@ void StoreIndexedInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     }
     const Register value = locs()->in(2).reg();
     __ StoreIntoArray(array, temp, value, CanValueBeSmi(),
-                      /*lr_reserved=*/!compiler->intrinsic_mode());
+                      /*lr_reserved=*/!compiler->is_frameless());
     return;
   }
 
@@ -2197,7 +2197,7 @@ class BoxAllocationSlowPath : public TemplateSlowPathCode<Instruction> {
                        const Class& cls,
                        Register result,
                        Register temp) {
-    if (compiler->intrinsic_mode()) {
+    if (compiler->is_frameless()) {
       __ TryAllocate(cls, compiler->intrinsic_slow_path_label(), result, temp);
     } else {
       BoxAllocationSlowPath* slow_path =
@@ -2229,7 +2229,7 @@ static void EnsureMutableBox(FlowGraphCompiler* compiler,
   __ MoveRegister(temp, box_reg);
   __ StoreIntoObjectOffset(instance_reg, offset, temp,
                            compiler::Assembler::kValueIsNotSmi,
-                           /*lr_reserved=*/!compiler->intrinsic_mode());
+                           /*lr_reserved=*/!compiler->is_frameless());
   __ Bind(&done);
 }
 
@@ -2333,7 +2333,7 @@ void StoreInstanceFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       __ MoveRegister(temp2, temp);
       __ StoreIntoObjectOffset(instance_reg, offset_in_bytes, temp2,
                                compiler::Assembler::kValueIsNotSmi,
-                               /*lr_reserved=*/!compiler->intrinsic_mode());
+                               /*lr_reserved=*/!compiler->is_frameless());
     } else {
       __ LoadFieldFromOffset(temp, instance_reg, offset_in_bytes);
     }
@@ -2446,7 +2446,7 @@ void StoreInstanceFieldInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     ASSERT((kDartAvailableCpuRegs & (1 << LR)) == 0);
     __ StoreIntoObjectOffset(instance_reg, offset_in_bytes, value_reg,
                              CanValueBeSmi(),
-                             /*lr_reserved=*/!compiler->intrinsic_mode());
+                             /*lr_reserved=*/!compiler->is_frameless());
   } else {
     if (locs()->in(1).IsConstant()) {
       __ StoreIntoObjectOffsetNoBarrier(instance_reg, offset_in_bytes,
@@ -4109,7 +4109,7 @@ void BoxInt64Instr::EmitNativeCode(FlowGraphCompiler* compiler) {
 
   Register temp = locs()->temp(0).reg();
 
-  if (compiler->intrinsic_mode()) {
+  if (compiler->is_frameless()) {
     __ TryAllocate(compiler->mint_class(),
                    compiler->intrinsic_slow_path_label(), out, temp);
   } else {
