@@ -10,6 +10,7 @@ set -xe
 
 VARIANT=$1
 PATTERN=$2
+VARIANT_LLVM=$3
 
 function ir4diff() {
     sed -r -e 's/\] [a-f0-9]+ k/\] XXXXXXXX k/g'    \
@@ -25,13 +26,18 @@ function ir4diff() {
 
 function extract() {
   local suffix=$1
-  dart extract.dart /tmp/output-${VARIANT}-${suffix}.asm ${PATTERN} > /tmp/extracted-${VARIANT}-${suffix}.asm
-  cat /tmp/extracted-${VARIANT}-${suffix}.asm | ir4diff > /tmp/extracted-${VARIANT}-${suffix}.asm.4diff
+  local variant=$2
+  dart extract.dart /tmp/output-${variant}-${suffix}.asm ${PATTERN} > /tmp/extracted-${variant}-${suffix}.asm
+  cat /tmp/extracted-${variant}-${suffix}.asm | ir4diff > /tmp/extracted-${variant}-${suffix}.asm.4diff
 }
 
-extract llvm &
-extract dart &
+if [[ -z "${VARIANT_LLVM}" ]]; then
+  VARIANT_LLVM=${VARIANT}
+fi
+
+extract llvm ${VARIANT_LLVM} &
+extract dart ${VARIANT} &
 wait
 echo "done"
-code --diff /tmp/extracted-${VARIANT}-dart.asm /tmp/extracted-${VARIANT}-llvm.asm
+code --diff /tmp/extracted-${VARIANT}-dart.asm.4diff /tmp/extracted-${VARIANT_LLVM}-llvm.asm.4diff
 
