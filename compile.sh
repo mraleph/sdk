@@ -16,6 +16,8 @@ ARCH=SIMARM64
 DILL_FILE=./app.dill
 VARIANT=$1
 
+PREVIOUS_VARIANT=$2
+
 # Note: LLVM does not use multiple entry points so Dart baseline should not
 # either for apples-to-apples comparison.
 GLOBAL_OPTS=--no_enable_multiple_entrypoints
@@ -51,6 +53,16 @@ function compile() {
 }
 
 time compile dart &
-time compile llvm &
+if [[ "${PREVIOUS_VARIANT}" == "" ]]; then
+  time compile llvm &
+else
+  echo "SKIPPING COMPILING WITH LLVM - COMPARING AGAINST ${PREVIOUS_VARIANT}"
+fi
 wait
-dart pkg/vm/bin/compare_sizes.dart /tmp/sizes-${VARIANT}-dart.json /tmp/sizes-${VARIANT}-llvm.json > /tmp/comparison-${VARIANT}.txt
+
+if [[ "${PREVIOUS_VARIANT}" == "" ]]; then
+  dart pkg/vm/bin/compare_sizes.dart /tmp/sizes-${VARIANT}-dart.json /tmp/sizes-${VARIANT}-llvm.json > /tmp/comparison-${VARIANT}.txt
+else
+  dart pkg/vm/bin/compare_sizes.dart /tmp/sizes-${VARIANT}-dart.json /tmp/sizes-${PREVIOUS_VARIANT}-llvm.json > /tmp/comparison-${VARIANT}.txt
+  dart pkg/vm/bin/compare_sizes.dart /tmp/sizes-${PREVIOUS_VARIANT}-dart.json /tmp/sizes-${VARIANT}-dart.json > /tmp/comparison-${VARIANT}-vs-${PREVIOUS_VARIANT}.txt
+fi
