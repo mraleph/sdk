@@ -190,7 +190,6 @@ void Compile(State& state) {
 #if defined(TARGET_ARCH_ARM64)
   options.CodeModel = LLVMCodeModelTiny;
 #endif
-  options.NoFramePointerElim = true;
   LLVMExecutionEngineRef engine;
   char* error = 0;
   options.MCJMM = LLVMCreateSimpleMCJITMemoryManager(

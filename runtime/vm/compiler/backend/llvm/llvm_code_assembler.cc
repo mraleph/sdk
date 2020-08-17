@@ -419,7 +419,6 @@ void CodeAssembler::RecordSafePoint(const CallSiteInfo* call_site_info,
     // only understand stack slot
     int index;
     if (location.dwarfReg == kDwarfSPForSafePoint) {
-      // Remove the effect from safepoint-table.cc
       EMASSERT(location.offset >= 0);
       EMASSERT(location.offset / compiler::target::kWordSize <
                static_cast<int>(slot_count_));
