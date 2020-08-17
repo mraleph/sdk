@@ -857,14 +857,19 @@ void FlowGraphCompiler::EmitFrameEntry() {
     __ br(TMP);
     __ Bind(&dont_optimize);
   }
-  __ Comment("Enter frame");
-  if (flow_graph().IsCompiledForOsr()) {
-    const intptr_t extra_slots = ExtraStackSlotsOnOsrEntry();
-    ASSERT(extra_slots >= 0);
-    __ EnterOsrFrame(extra_slots * kWordSize);
-  } else {
-    ASSERT(StackSize() >= 0);
-    __ EnterDartFrame(StackSize() * kWordSize);
+
+  if (!is_frameless()) {
+    __ Comment("Enter frame");
+    if (flow_graph().IsCompiledForOsr()) {
+      const intptr_t extra_slots = ExtraStackSlotsOnOsrEntry();
+      ASSERT(extra_slots >= 0);
+      __ EnterOsrFrame(extra_slots * kWordSize);
+    } else {
+      ASSERT(StackSize() >= 0);
+      __ EnterDartFrame(StackSize() * kWordSize);
+    }
+  } else if (FLAG_use_bare_instructions) {
+    assembler()->set_constant_pool_allowed(true);
   }
 }
 

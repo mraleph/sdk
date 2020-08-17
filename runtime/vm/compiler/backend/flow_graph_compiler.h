@@ -779,6 +779,9 @@ class FlowGraphCompiler : public ValueObject {
 
   void EmitComment(Instruction* instr);
 
+  bool is_frameless() const;
+
+
   // Returns stack size (number of variables on stack for unoptimized
   // code, or number of spill slots for optimized code).
   intptr_t StackSize() const;

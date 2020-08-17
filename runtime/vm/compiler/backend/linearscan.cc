@@ -2917,6 +2917,51 @@ void FlowGraphAllocator::CollectRepresentations() {
   }
 }
 
+#if 1
+
+Location FlowGraphAllocator::ComputeParameterLocation(BlockEntryInstr* block,
+                                                      ParameterInstr* param,
+                                                      Register base_reg) {
+  const bool second_location_for_definition = false;  // TODO(vegorov) ARM32
+
+  // Only function entries may have unboxed parameters, possibly making the
+  // parameters size different from the number of parameters on 32-bit
+  // architectures.
+  const intptr_t parameters_size = block->IsFunctionEntry()
+                                       ? flow_graph_.direct_parameters_size()
+                                       : flow_graph_.num_direct_parameters();
+  intptr_t slot_index =
+      param->param_offset() + (second_location_for_definition ? -1 : 0);
+  ASSERT(slot_index >= 0);
+  if (base_reg == FPREG) {
+    // Slot index for the rightmost fixed parameter is -1.
+    slot_index -= parameters_size;
+  } else {
+    // Slot index for a "frameless" parameter is reversed.
+    ASSERT(base_reg == SPREG);
+    ASSERT(slot_index < parameters_size);
+    slot_index = parameters_size - 1 - slot_index;
+  }
+
+  if (base_reg == FPREG) {
+    slot_index =
+        compiler::target::frame_layout.FrameSlotForVariableIndex(-slot_index);
+  } else {
+    ASSERT(base_reg == SPREG);
+    slot_index += compiler::target::frame_layout.last_param_from_entry_sp;
+  }
+
+  if (param->representation() == kUnboxedInt64 ||
+      param->representation() == kTagged) {
+    return Location::StackSlot(slot_index, base_reg);
+  } else {
+    ASSERT(param->representation() == kUnboxedDouble);
+    return Location::DoubleStackSlot(slot_index, base_reg);
+  }
+}
+
+#endif
+
 void FlowGraphAllocator::AllocateRegisters() {
   CollectRepresentations();
 
@@ -2961,13 +3006,91 @@ void FlowGraphAllocator::AllocateRegisters() {
   PrepareForAllocation(Location::kFpuRegister, kNumberOfFpuRegisters,
                        unallocated_xmm_, fpu_regs_, blocked_fpu_registers_);
   AllocateUnallocatedRanges();
-  ResolveControlFlow();
 
   GraphEntryInstr* entry = block_order_[0]->AsGraphEntry();
   ASSERT(entry != NULL);
   intptr_t double_spill_slot_count = spill_slots_.length() * kDoubleSpillFactor;
   const intptr_t total_spill_slots =  cpu_spill_slot_count_ + double_spill_slot_count + flow_graph_.max_argument_count_;
   entry->set_spill_slot_count(total_spill_slots);
+
+  // Decide whether this function can be frameless. Outside of bare instructions
+  // mode we need to preserve caller PP - so all functions need a frame if they
+  // have their own pool - so we don't want to deal with that here.
+  if (FLAG_precompiled_mode && FLAG_use_bare_instructions && !intrinsic_mode_ &&
+      !flow_graph_.parsed_function().function().HasOptionalParameters() &&
+      (entry->spill_slot_count() == 0)) {
+    bool has_call = false;
+    bool has_store = false;
+    for (BlockIterator block_it = flow_graph_.reverse_postorder_iterator();
+         !block_it.Done(); block_it.Advance()) {
+      for (ForwardInstructionIterator instr_it(block_it.Current());
+           !instr_it.Done(); instr_it.Advance()) {
+        Instruction* instruction = instr_it.Current();
+        if (instruction->locs() != nullptr && instruction->locs()->can_call()) {
+          has_call = true;
+          break;
+        }
+#if defined(TARGET_ARCH_ARM64) || defined(TARGET_ARCH_ARM)
+        if (StoreInstanceFieldInstr* store_field =
+                instruction->AsStoreInstanceField()) {
+          if (store_field->ShouldEmitStoreBarrier()) {  // Clobbers LR
+            if (has_store) {
+              has_call = true;
+              break;
+            }
+            has_store = true;
+          }
+        }
+
+        if (StoreIndexedInstr* store_indexed = instruction->AsStoreIndexed()) {
+          if (store_indexed->ShouldEmitStoreBarrier()) {  // Clobbers LR
+            if (has_store) {
+              has_call = true;
+              break;
+            }
+            has_store = true;
+          }
+        }
+#endif
+      }
+    }
+
+    if (!has_call) {
+      // OS::PrintErr("Making %s frameless\n",
+      //             flow_graph_.parsed_function().function().ToCString());
+      entry->frameless_ = true;
+
+      // FlowGraphPrinter printer(flow_graph_, true);
+      // printer.PrintBlocks();
+
+      // Fix location of parameters to use SP as their base register instead of FP.
+      for (intptr_t i = 0; i < entry->SuccessorCount(); i++) {
+        BlockEntryInstr* block = entry->SuccessorAt(i);
+        if (FunctionEntryInstr* entry = block->AsFunctionEntry()) {
+          for (auto defn : *entry->initial_definitions()) {
+            if (auto param = defn->AsParameter()) {
+              auto original_location =
+                  ComputeParameterLocation(block, param, FPREG);
+              auto new_location = ComputeParameterLocation(block, param, SPREG);
+              for (LiveRange* range = GetLiveRange(param->ssa_temp_index());
+                   range != nullptr; range = range->next_sibling()) {
+                if (range->assigned_location().Equals(original_location)) {
+                  range->set_assigned_location(new_location);
+                  range->set_spill_slot(new_location);
+                  ConvertAllUses(range);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // printer.PrintBlocks();
+    }
+  }
+
+
+  ResolveControlFlow();
 
   // Allocate push argument locations
   for (BlockIterator block_it = flow_graph_.reverse_postorder_iterator(); !block_it.Done();

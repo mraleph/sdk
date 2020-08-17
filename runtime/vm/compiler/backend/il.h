@@ -1648,6 +1648,8 @@ class GraphEntryInstr : public BlockEntryWithInitialDefs {
   OsrEntryInstr* osr_entry() const { return osr_entry_; }
   void set_osr_entry(OsrEntryInstr* entry) { osr_entry_ = entry; }
 
+  bool frameless_ = false;
+
   const ParsedFunction& parsed_function() const { return parsed_function_; }
 
   const GrowableArray<CatchBlockEntryInstr*>& catch_entries() const {

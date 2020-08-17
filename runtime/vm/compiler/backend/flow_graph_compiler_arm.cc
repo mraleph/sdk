@@ -916,14 +916,17 @@ void FlowGraphCompiler::EmitFrameEntry() {
                   THR, compiler::target::Thread::optimize_entry_offset()),
               GE);
   }
-  __ Comment("Enter frame");
-  if (flow_graph().IsCompiledForOsr()) {
-    const intptr_t extra_slots = ExtraStackSlotsOnOsrEntry();
-    ASSERT(extra_slots >= 0);
-    __ EnterOsrFrame(extra_slots * compiler::target::kWordSize);
-  } else {
-    ASSERT(StackSize() >= 0);
-    __ EnterDartFrame(StackSize() * compiler::target::kWordSize);
+
+  if (!flow_graph().graph_entry()->frameless_) {
+    __ Comment("Enter frame");
+    if (flow_graph().IsCompiledForOsr()) {
+      const intptr_t extra_slots = ExtraStackSlotsOnOsrEntry();
+      ASSERT(extra_slots >= 0);
+      __ EnterOsrFrame(extra_slots * compiler::target::kWordSize);
+    } else {
+      ASSERT(StackSize() >= 0);
+      __ EnterDartFrame(StackSize() * compiler::target::kWordSize);
+    }
   }
 }
 

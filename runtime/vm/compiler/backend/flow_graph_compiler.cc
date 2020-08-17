@@ -644,6 +644,10 @@ void FlowGraphCompiler::Bailout(const char* reason) {
   parsed_function_.Bailout("FlowGraphCompiler", reason);
 }
 
+bool FlowGraphCompiler::is_frameless() const {
+  return intrinsic_mode() || flow_graph_.graph_entry()->frameless_;
+}
+
 intptr_t FlowGraphCompiler::StackSize() const {
   if (is_optimizing_) {
     return flow_graph_.graph_entry()->spill_slot_count();
