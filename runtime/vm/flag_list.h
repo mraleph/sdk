@@ -90,6 +90,7 @@ constexpr bool kDartUseBackgroundCompilation = true;
 #define FLAG_LIST(P, R, C, D)                                                  \
   VM_GLOBAL_FLAG_LIST(P, R, C, D)                                              \
   DISASSEMBLE_FLAGS(P, R, C, D)                                                \
+  P(use_monomorphic_checked_entries, bool, false, "Emit monomorphic checked entries")                               \
   P(experimental_unsafe_mode_use_at_your_own_risk, bool, false,                \
     "Omit runtime strong mode type checks and disable optimizations based on " \
     "types.")                                                                  \
