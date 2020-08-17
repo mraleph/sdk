@@ -9009,6 +9009,10 @@ RawCode* Function::EnsureHasCode() const {
 
 bool Function::NeedsMonomorphicCheckedEntry(Zone* zone) const {
 #if !defined(DART_PRECOMPILED_RUNTIME)
+  if (!FLAG_use_monomorphic_checked_entries) {
+    return false;
+  }
+
   if (!IsDynamicFunction()) {
     return false;
   }

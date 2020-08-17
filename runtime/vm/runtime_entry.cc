@@ -1671,7 +1671,8 @@ DEFINE_RUNTIME_ENTRY(UnlinkedCall, 3) {
   //
   // Because of this we also don't generate monomorphic checks for those
   // functions.
-  if (!target_function.IsNull() && !target_function.HasOptionalParameters() &&
+  if (FLAG_use_monomorphic_checked_entries &&
+      !target_function.IsNull() && !target_function.HasOptionalParameters() &&
       !target_function.IsGeneric()) {
     // Patch to monomorphic call.
     ASSERT(target_function.HasCode());
