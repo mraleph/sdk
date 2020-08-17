@@ -1628,6 +1628,12 @@ void FlowGraph::RemoveRedefinitions(bool keep_checks) {
         assert->ReplaceUsesWith(assert->value()->definition());
         assert->ClearSSATempIndex();
         instr_it.RemoveCurrentFromGraph();
+      } else if (auto assert = instruction->AsAssertBoolean()) {
+        assert->ReplaceUsesWith(assert->value()->definition());
+        assert->ClearSSATempIndex();
+        instr_it.RemoveCurrentFromGraph();
+      } else if (auto assert = instruction->AsAssertSubtype()) {
+        instr_it.RemoveCurrentFromGraph();
       }
     }
   }
