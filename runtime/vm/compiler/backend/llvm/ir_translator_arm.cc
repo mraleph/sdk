@@ -5,6 +5,7 @@ bool AnonImpl::support_integer_div() const {
 static void AdjustAddress(size_t& instr_size, intptr_t offset) {
   static const constexpr size_t increment = Instr::kInstrSize;
   int32_t offset_mask = 0;
+  offset -= kHeapObjectTag;
   if (LIKELY(
           compiler::Address::CanHoldLoadOffset(kWord, offset, &offset_mask))) {
     return;

@@ -629,7 +629,7 @@ void Output::AddFunctionCommonAttr(LValue function) {
 #if defined(TARGET_ARCH_ARM)
   static const char kFS[] = "target-features";
   static const char kFSValue[] =
-      "+armv7-a,+dsp,+neon,+vfp3,-crypto,-fp-armv8,-thumb-mode,-vfp4,-fp-only-sp";
+      "+armv7-a,+dsp,+neon,+vfp3,-crypto,-fp-armv8,-thumb-mode,-vfp4";
   LLVMAddTargetDependentFunctionAttr(function, kFS, kFSValue);
 #elif defined(TARGET_ARCH_ARM64)
   static const char kFS[] = "target-features";
