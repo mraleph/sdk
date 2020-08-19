@@ -50,6 +50,7 @@ namespace dart {
   V(SelectRepresentations)                                                     \
   V(SerializeGraph)                                                            \
   V(SetOuterInliningId)                                                        \
+  V(TailMerge)                                                                 \
   V(TryCatchOptimization)                                                      \
   V(TryOptimizePatterns)                                                       \
   V(TypePropagation)                                                           \
