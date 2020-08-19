@@ -12,6 +12,16 @@ import 'dart:math' as math;
 
 bool limitWidth = false;
 
+extension<T> on Iterable<T> {
+  Iterable<T> takeAtLeast(int n) {
+    if (n <= 0) {
+      return this;
+    } else {
+      return this.take(n);
+    }
+  }
+}
+
 void main(List<String> args) {
   if (args.length == 3 && args[2] == 'narrow') {
     limitWidth = true;
@@ -53,7 +63,7 @@ the colunm widths.
   changedSymbolsBySize.sort((a, b) => diffBySymbol[b] - diffBySymbol[a]);
 
   // Now produce the report table.
-  const numLargerSymbolsToReport = 30;
+  const numLargerSymbolsToReport = -1;
   const numSmallerSymbolsToReport = -1;
   final table = AsciiTable(header: [
     Text.left('Library'),
@@ -64,7 +74,7 @@ the colunm widths.
   // Report [numLargerSymbolsToReport] symbols that increased in size most.
   for (var key in changedSymbolsBySize
       .where((k) => diffBySymbol[k] > 0)
-      .take(numLargerSymbolsToReport)) {
+      .takeAtLeast(numLargerSymbolsToReport)) {
     final name = key.split(librarySeparator);
     table.addRow([name[0], name[1], '+${diffBySymbol[key]}']);
   }
@@ -74,7 +84,8 @@ the colunm widths.
   for (var key in changedSymbolsBySize.reversed
       .where((k) => diffBySymbol[k] < 0)
       .toList()
-      .reversed) {
+      .reversed
+      .takeAtLeast(numSmallerSymbolsToReport)) {
     final name = key.split(librarySeparator);
     table.addRow([name[0], name[1], '${diffBySymbol[key]}']);
   }
@@ -82,10 +93,13 @@ the colunm widths.
 
   table.render();
 
-  final numBigger = changedSymbolsBySize.where((k) => diffBySymbol[k] > 0).length;
-  final numSmaller = changedSymbolsBySize.where((k) => diffBySymbol[k] < 0).length;
+  final numBigger =
+      changedSymbolsBySize.where((k) => diffBySymbol[k] > 0).length;
+  final numSmaller =
+      changedSymbolsBySize.where((k) => diffBySymbol[k] < 0).length;
 
-  print('Number of smaller symbols ${numSmaller}, number of larger symbols ${numBigger}');
+  print(
+      'Number of smaller symbols ${numSmaller}, number of larger symbols ${numBigger}');
   print('Comparing ${args[0]} (old) to ${args[1]} (new)');
   print('Old   : ${totalOld} bytes.');
   print('New   : ${totalNew} bytes.');
