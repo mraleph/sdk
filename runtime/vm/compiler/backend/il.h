@@ -1225,6 +1225,14 @@ class MoveOperands : public ZoneAllocated {
  public:
   MoveOperands(Location dest, Location src) : dest_(dest), src_(src) {}
 
+  MoveOperands(const MoveOperands& other) : dest_(other.dest_), src_(other.src_) {};
+
+  MoveOperands& operator= (const MoveOperands& other) {
+    dest_ = other.dest_;
+    src_ = other.src_;
+    return *this;
+  }
+
   Location src() const { return src_; }
   Location dest() const { return dest_; }
 
@@ -1274,8 +1282,6 @@ class MoveOperands : public ZoneAllocated {
  private:
   Location dest_;
   Location src_;
-
-  DISALLOW_COPY_AND_ASSIGN(MoveOperands);
 };
 
 class ParallelMoveInstr : public TemplateInstruction<0, NoThrow> {
@@ -1290,6 +1296,8 @@ class ParallelMoveInstr : public TemplateInstruction<0, NoThrow> {
     UNREACHABLE();  // This instruction never visited by optimization passes.
     return false;
   }
+
+  const GrowableArray<MoveOperands*>& moves() const { return moves_; }
 
   MoveOperands* AddMove(Location dest, Location src) {
     MoveOperands* move = new MoveOperands(dest, src);

@@ -2732,11 +2732,6 @@ void FlowGraphAllocator::ConnectSplitSiblings(LiveRange* parent,
   TRACE_ALLOC(THR_Print("Connect v%" Pd " on the edge B%" Pd " -> B%" Pd "\n",
                         parent->vreg(), source_block->block_id(),
                         target_block->block_id()));
-  if (parent->next_sibling() == NULL) {
-    // Nothing to connect. The whole range was allocated to the same location.
-    TRACE_ALLOC(THR_Print("range v%" Pd " has no siblings\n", parent->vreg()));
-    return;
-  }
 
   const intptr_t source_pos = source_block->end_pos() - 1;
   ASSERT(IsInstructionEndPosition(source_pos));
@@ -2795,6 +2790,16 @@ void FlowGraphAllocator::ConnectSplitSiblings(LiveRange* parent,
   }
 }
 
+LiveRange* FindCover(LiveRange* parent, intptr_t pos) {
+  for (LiveRange* range = parent; range != nullptr; range = range->next_sibling()) {
+    if (range->CanCover(pos)) {
+      return range;
+    }
+  }
+  UNREACHABLE();
+  return nullptr;
+}
+
 void FlowGraphAllocator::ResolveControlFlow() {
   // Resolve linear control flow between touching split siblings
   // inside basic blocks.
@@ -2823,14 +2828,114 @@ void FlowGraphAllocator::ResolveControlFlow() {
   }
 
   // Resolve non-linear control flow across branches.
+  GrowableArray<Location> src_locs(2);
+  GrowableArray<MoveOperands> pending(10);
+  GrowableArray<bool> can_emit(10);
   for (intptr_t i = 1; i < block_order_.length(); i++) {
     BlockEntryInstr* block = block_order_[i];
     BitVector* live = liveness_.GetLiveInSet(block);
     for (BitVector::Iterator it(live); !it.Done(); it.Advance()) {
       LiveRange* range = GetLiveRange(it.Current());
-      for (intptr_t j = 0; j < block->PredecessorCount(); j++) {
-        ConnectSplitSiblings(range, block->PredecessorAt(j), block);
+      if (range->next_sibling() == NULL) {
+        // Nothing to connect. The whole range was allocated to the same location.
+        TRACE_ALLOC(THR_Print("range v%" Pd " has no siblings\n", parent->vreg()));
+        continue;
       }
+
+      Location dst = FindCover(range, block->start_pos())->assigned_location();
+
+      // Values are eagerly spilled. Spill slot already contains appropriate value.
+      if (TargetLocationIsSpillSlot(range, dst)) {
+        continue;
+      }
+
+      src_locs.Clear();
+      for (intptr_t j = 0; j < block->PredecessorCount(); j++) {
+        src_locs.Add(FindCover(range, block->PredecessorAt(j)->end_pos() - 1)->assigned_location());
+      }
+
+      // Check if all source locations are the same for the range. Then
+      // emit a single move at the destination
+      if (src_locs.length() > 1) {
+        bool same = true;
+        for (intptr_t j = 1; j < src_locs.length(); j++) {
+          if (!src_locs[j].Equals(src_locs[0])) {
+            same = false;
+            break;
+          }
+        }
+
+        if (same) {
+          // Note: this would only work if src_locs is not clobbered by
+          // any move in the predecessors.
+          if (!dst.Equals(src_locs[0])) {
+            pending.Add(MoveOperands(dst, src_locs[0]));
+          }
+          continue;
+        }
+      }
+
+      for (intptr_t j = 0; j < block->PredecessorCount(); j++) {
+        BlockEntryInstr* pred = block->PredecessorAt(j);
+        Instruction* last = pred->last_instruction();
+        if (dst.Equals(src_locs[j])) {
+          continue;
+        }
+        if ((last->SuccessorCount() == 1) && !pred->IsGraphEntry()) {
+          ASSERT(last->IsGoto());
+          last->AsGoto()->GetParallelMove()->AddMove(dst, src_locs[j]);
+        } else {
+          block->GetParallelMove()->AddMove(dst, src_locs[j]);
+        }
+      }
+    }
+    // For each pending move we need to check if it can be emitted into the
+    // destination block (prerequisite for that is that predecessors should
+    // not destroy the value in the Goto move).
+    if (pending.length() > 0) {
+    can_emit.EnsureLength(pending.length(), true);
+
+    bool changed = false;
+    for (intptr_t j = 0; j < pending.length(); j++) {
+      Location src = pending[j].src();
+      for (intptr_t p = 0; p < block->PredecessorCount(); p++) {
+        BlockEntryInstr* pred = block->PredecessorAt(p);
+        for (auto move : pred->last_instruction()->AsGoto()->GetParallelMove()->moves()) {
+          if (!move->IsRedundant() && move->dest().Equals(src)) {
+            can_emit[j] = false;
+            changed = true;
+            break;
+          }
+        }
+      }
+    }
+    while (changed) {
+      changed = false;
+      for (intptr_t j = 0; j < pending.length(); j++) {
+        if (can_emit[j]) {
+          for (intptr_t k = 0; k < pending.length(); k++) {
+            if (!can_emit[k] && pending[k].dest().Equals(pending[j].src())) {
+              can_emit[j] = false;
+              changed = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    for (intptr_t j = 0; j < pending.length(); j++) {
+      const auto& move = pending[j];
+      if (can_emit[j]) {
+        block->GetParallelMove()->AddMove(move.dest(), move.src());
+      } else {
+        for (intptr_t p = 0; p < block->PredecessorCount(); p++) {
+          block->PredecessorAt(p)->last_instruction()->AsGoto()->GetParallelMove()->AddMove(move.dest(), move.src());
+        }
+      }
+    }
+
+    pending.Clear();
     }
   }
 
