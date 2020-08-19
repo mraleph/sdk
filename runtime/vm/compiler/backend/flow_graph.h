@@ -415,6 +415,9 @@ class FlowGraph : public ZoneAllocated {
 
   bool should_print() const { return should_print_; }
 
+  void TailMerge();
+  JoinEntryInstr* TailMergeImpl(GrowableArray<BlockEntryInstr*>& blocks);
+
   //
   // High-level utilities.
   //

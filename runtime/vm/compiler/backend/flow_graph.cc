@@ -1600,6 +1600,374 @@ RedefinitionInstr* FlowGraph::EnsureRedefinition(Instruction* prev,
   return redef;
 }
 
+// Tail merge optimization: combine shared sequences of instructions into
+// a single block.
+//
+// Currently does a simple algorithm: start at all ReturnInstr and see
+// if there is a sequence of instructions that can be extracted into a shared
+// block. Then repeat that with newly introduced blocks.
+namespace {
+static bool CanMerge(Instruction* ia, Instruction* ib) {
+  if (ia->tag() != ib->tag()) {
+    return false;
+  }
+
+#define HANDLE(Type, block) case Instruction::k##Type: { auto a = ia->Cast<Type##Instr>(); auto b = ib->Cast<Type##Instr>(); block; }
+  switch (ia->tag()) {
+    HANDLE(Goto, {
+      return a->successor() == b->successor();
+    })
+    HANDLE(Return, {
+      return a->yield_index() == b->yield_index();
+    })
+    HANDLE(StoreInstanceField,  {
+      if (a->OffsetInBytes() == b->OffsetInBytes() &&
+          a->RequiredInputRepresentation(
+              StoreInstanceFieldInstr::kValuePos) ==
+              b->RequiredInputRepresentation(
+                  StoreInstanceFieldInstr::kValuePos) &&
+          a->ShouldEmitStoreBarrier() !=
+              b->ShouldEmitStoreBarrier()) {
+        THR_Print("Stopping potential tail merge due to %s vs %s\n",
+                  a->ToCString(), b->ToCString());
+      }
+      return a->OffsetInBytes() == b->OffsetInBytes() &&
+              a->RequiredInputRepresentation(
+                  StoreInstanceFieldInstr::kValuePos) ==
+                  b->RequiredInputRepresentation(
+                      StoreInstanceFieldInstr::kValuePos) &&
+              a->ShouldEmitStoreBarrier() ==
+                  b->ShouldEmitStoreBarrier();
+    })
+    default:
+      THR_Print("Stopping potential tail merge due to %s vs %s\n",
+                ia->ToCString(), ib->ToCString());
+      return false;
+  }
+#undef HANDLE
+}
+
+static bool AdvanceCursors(GrowableArray<Instruction*>& cursors) {
+  auto first = cursors[0];
+  if (first->previous() == nullptr) {
+    return false;
+  }
+
+  for (intptr_t i = 1; i < cursors.length(); i++) {
+    auto curr = cursors[i];
+    if (curr->previous() == nullptr || !CanMerge(first, curr)) {
+      return false;
+    }
+  }
+
+  // Step backwards.
+  for (auto& c : cursors) c = c->previous();
+
+  return true;
+}
+
+static Definition* MergeInputs(const GrowableArray<Instruction*>& cursors, intptr_t idx, JoinEntryInstr* join, GrowableArray<PhiInstr*>& phis) {
+  // Currently we don't have any merged definitions so we don't have to handle
+  // that here.
+
+  // First check if all inputs match - then we don't need a phi.
+  Definition* result = cursors[0]->InputAt(idx)->definition();
+  for (intptr_t i = 1; i < cursors.length(); i++) {
+    if (result != cursors[i]->InputAt(idx)->definition()) {
+      result = nullptr;
+      break;
+    }
+  }
+
+  if (result != nullptr) {
+    return result;  // All inputs match. No phi needed.
+  }
+
+  // We need to construct a phi. Which means we need to construct merge input
+  // for each predecessor.
+  for (auto phi : phis) {
+    result = phi;
+    for (intptr_t i = 0; i < cursors.length(); i++) {
+      if (phi->InputAt(i)->definition() !=
+          cursors[i]->InputAt(idx)->definition()) {
+        result = nullptr;
+        break;
+      }
+    }
+    if (result != nullptr) {
+      return result;
+    }
+  }
+
+  // Create a phi merging the inputs.
+  auto phi = new PhiInstr(join, cursors.length());
+  for (intptr_t i = 0; i < cursors.length(); i++) {
+    phi->SetInputAt(i, new Value(cursors[i]->InputAt(idx)->definition()));
+  }
+  phis.Add(phi);
+  phi->set_representation(
+      cursors[0]->InputAt(idx)->definition()->representation());
+  return phi;
+}
+}
+
+JoinEntryInstr* FlowGraph::TailMergeImpl(GrowableArray<BlockEntryInstr*>& blocks) {
+  if (blocks.length() < 2) {
+    // Nothing to merge.
+    return nullptr;
+  }
+
+  blocks.Sort([](BlockEntryInstr* const *a, BlockEntryInstr* const *b) -> int {
+    return (*a)->block_id() - (*b)->block_id();
+  });
+
+  GrowableArray<Instruction*> cursors(blocks.length());
+  for (auto block : blocks) {
+    cursors.Add(block->last_instruction());
+  }
+
+  bool ok = AdvanceCursors(cursors);
+  RELEASE_ASSERT(ok);
+
+  // Now we need to advance cursors backwards until we reach non-mergeable
+  // instructions.
+  while (AdvanceCursors(cursors));
+
+  // Create block which will host the merged instructions.
+  GrowableArray<PhiInstr*> phis;
+  GrowableArray<Instruction*> merged;
+
+  JoinEntryInstr* join =
+      new JoinEntryInstr(allocate_block_id(), kInvalidTryIndex, DeoptId::kNone);
+
+  auto merge_current = [&]() -> Instruction* {
+    auto first = cursors[0];
+    switch (first->tag()) {
+      case Instruction::kReturn: {
+        auto a = first->Cast<ReturnInstr>();
+        auto retval = MergeInputs(cursors, 0, join, phis);
+        return new ReturnInstr(a->token_pos(), new Value(retval),
+                               DeoptId::kNone, a->yield_index(),
+                               a->representation());
+      }
+
+      case Instruction::kStoreInstanceField: {
+        auto a = first->Cast<StoreInstanceFieldInstr>();
+        auto instance = MergeInputs(cursors, 0, join, phis);
+        auto value = MergeInputs(cursors, 1, join, phis);
+        return new StoreInstanceFieldInstr(
+            a->slot(), new Value(instance), new Value(value),
+            a->ShouldEmitStoreBarrier() ? kEmitStoreBarrier : kNoStoreBarrier,
+            a->token_pos());
+      }
+
+      case Instruction::kGoto: {
+        auto a = first->Cast<GotoInstr>();
+        return new GotoInstr(a->successor(), DeoptId::kNone);
+      }
+
+      default:
+        UNREACHABLE();
+        return nullptr;
+    }
+  };
+
+  // Start generating merged sequence.
+  GrowableArray<Instruction*> starts(cursors.length());
+  for (auto& c : cursors) {
+    starts.Add(c);
+    c = c->next();
+  }
+
+  while (cursors[0] != nullptr) {
+    merged.Add(merge_current());
+    for (auto& c : cursors) {
+      c = c->next();
+    }
+  }
+
+  // We now have a sequence of instructions and phis. First check if
+  // we have potentially generated too many phis.
+  if (phis.length() > 2) {
+    // Too many phis generated.
+    return nullptr;
+  }
+
+  // We are ready to fix the graph.
+  for (auto phi : phis) {
+    phi->mark_alive();
+    phi->set_ssa_temp_index(alloc_ssa_temp_index());
+    join->InsertPhi(phi);
+  }
+
+  // Insert sequence of the instructions after join.
+  Instruction* current = join;
+  for (auto instr : merged) {
+    current->LinkTo(instr);
+    current = instr;
+  }
+
+  // Connect join to the graph.
+  for (auto start : starts) {
+    auto jump = new GotoInstr(join, DeoptId::kNone);
+
+    auto next = start->next();  // This are dangling instructions.
+    start->LinkTo(jump);
+
+    auto block = start->GetBlock();
+    start->GetBlock()->set_last_instruction(jump);
+    join->AddPredecessor(block);
+
+    while (next != nullptr) {
+      next->UnuseAllInputs();
+      next = next->next();
+    }
+  }
+
+  return join;
+}
+
+void FlowGraph::TailMerge() {
+  // First we want to find all blocks which end at ReturnInstr* and
+  // which can be merged.
+  GrowableArray<BlockEntryInstr*> blocks;
+  for (auto block : reverse_postorder()) {
+    auto last = block->last_instruction();
+    if (last->IsReturn() && (blocks.length() == 0 || CanMerge(blocks[0]->last_instruction(), last))) {
+      blocks.Add(block);
+    }
+  }
+
+  GrowableArray<bool> taken(blocks.length());
+  GrowableArray<BlockEntryInstr*> group(blocks.length());
+
+  GrowableArray<intptr_t> indices;
+  GrowableArray<Definition*> values;
+
+  const bool changed_at_least_once = TailMergeImpl(blocks) != nullptr;
+  bool changed = changed_at_least_once;
+  while (changed) {  // We performed a merge.
+    changed = false;
+    taken.FillWith(0, taken.length(), false);
+
+    for (intptr_t i = 0; i < blocks.length(); i++) {
+      if (!taken[i]) {
+        taken[i] = true;
+        RELEASE_ASSERT(blocks[i]->last_instruction()->IsGoto());
+        JoinEntryInstr* succ = blocks[i]->last_instruction()->AsGoto()->successor();
+        group.Add(blocks[i]);
+
+        auto last = blocks[i]->last_instruction()->previous();
+        for (intptr_t j = i + 1; j < blocks.length(); j++) {
+          if (!taken[j] && CanMerge(blocks[i]->last_instruction(), blocks[j]->last_instruction()) && CanMerge(last, blocks[j]->last_instruction()->previous())) {
+            taken[j] = true;
+            group.Add(blocks[j]);
+          }
+        }
+
+        JoinEntryInstr* merged = TailMergeImpl(group);
+        if (merged != nullptr) {
+          // If there are any phis in the successor block we need to fix them
+          // by splitting them into parts.
+          for (auto block : group) {
+            indices.Add(succ->IndexOfPredecessor(block));
+          }
+
+          for (auto idx : indices) {
+            succ->predecessors_[idx] = nullptr;
+          }
+          {
+            intptr_t j = 0;
+            for (intptr_t i = 0; i < succ->predecessors_.length(); i++) {
+              if (succ->predecessors_[i] != nullptr) {
+                succ->predecessors_[j++] = succ->predecessors_[i];
+              }
+            }
+            succ->predecessors_.TruncateTo(j);
+          }
+          succ->AddPredecessor(merged);
+          RELEASE_ASSERT(succ->IndexOfPredecessor(merged) == (succ->PredecessorCount() - 1));
+
+          if (succ->phis() != nullptr && succ->phis()->length() > 0) {
+            for (auto phi : *succ->phis()) {
+              for (auto idx : indices) {
+                values.Add(phi->InputAt(idx)->definition());
+              }
+
+              Definition* defn = values[0];
+              for (intptr_t i = 1; i < values.length(); i++) {
+                if (defn != values[i]) {
+                  defn = nullptr;
+                  break;
+                }
+              }
+              if (defn == nullptr && merged->phis() != nullptr) {
+                for (auto merged_phi : *merged->phis()) {
+                  defn = merged_phi;
+                  RELEASE_ASSERT(defn->InputCount() == group.length());
+                  for (intptr_t i = 0; i < defn->InputCount(); i++) {
+                    if (defn->InputAt(i)->definition() != values[i]) {
+                      defn = nullptr;
+                      break;
+                    }
+                  }
+                  if (defn != nullptr) {
+                    break;
+                  }
+                }
+              }
+
+              if (defn == nullptr) { // Phi is needed in merged.
+                auto new_phi = new PhiInstr(merged, values.length());
+                for (intptr_t i = 0; i < values.length(); i++) {
+                  new_phi->SetInputAt(i, new Value(values[i]));
+                }
+                new_phi->set_representation(
+                    values[0]->representation());
+                new_phi->mark_alive();
+                new_phi->set_ssa_temp_index(alloc_ssa_temp_index());
+                merged->InsertPhi(new_phi);
+
+                defn = new_phi;
+              }
+
+              values.Clear();
+
+              // Now resize the phi and bind it to defn.
+              for (auto idx : indices) {
+                phi->inputs_[idx] = nullptr;
+              }
+              {
+                intptr_t j = 0;
+                for (intptr_t i = 0; i < phi->inputs_.length(); i++) {
+                  if (phi->inputs_[i] != nullptr) {
+                    phi->inputs_[j++] = phi->inputs_[i];
+                  }
+                }
+                phi->inputs_.TruncateTo(j);
+              }
+
+              RELEASE_ASSERT(phi->inputs_.length() == (succ->PredecessorCount() - 1));
+              phi->inputs_.EnsureLength(succ->PredecessorCount(), nullptr);
+              phi->SetInputAt(succ->PredecessorCount() - 1, new Value(defn));
+            }
+
+            indices.Clear();
+          }
+          changed = true;
+        }
+        group.Clear();
+      }
+    }
+  }
+
+  if (changed_at_least_once) {
+    DiscoverBlocks();  // Rebuild orders and dominator tree.
+    GrowableArray<BitVector*> dominance_frontier;
+    ComputeDominators(&dominance_frontier);
+  }
+}
+
 void FlowGraph::RemoveRedefinitions(bool keep_checks) {
   // Remove redefinition and check instructions that were inserted
   // to make a control dependence explicit with a data dependence,

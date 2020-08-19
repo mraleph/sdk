@@ -1735,6 +1735,8 @@ class JoinEntryInstr : public BlockEntryInstr {
   friend class ConstantPropagator;
   friend class DeadCodeElimination;
 
+  friend class FlowGraph;  // Access to predecessors_ in TailMerge
+
   virtual void ClearPredecessors() { predecessors_.Clear(); }
   virtual void AddPredecessor(BlockEntryInstr* predecessor);
 
@@ -2440,6 +2442,7 @@ class PhiInstr : public Definition {
   // Direct access to inputs_ in order to resize it due to unreachable
   // predecessors.
   friend class ConstantPropagator;
+  friend class FlowGraph;
 
   void RawSetInputAt(intptr_t i, Value* value) { inputs_[i] = value; }
 
@@ -5134,13 +5137,13 @@ class StoreInstanceFieldInstr : public TemplateInstruction<2, NoThrow> {
   ADD_OPERANDS_TO_S_EXPRESSION_SUPPORT
   ADD_EXTRA_INFO_TO_S_EXPRESSION_SUPPORT
 
+  intptr_t OffsetInBytes() const { return slot().offset_in_bytes(); }
+
  private:
   friend class JitCallSpecializer;  // For ASSERT(initialization_).
 #if defined(DART_ENABLE_LLVM_COMPILER)
   friend class dart::dart_llvm::IRTranslator;
 #endif
-
-  intptr_t OffsetInBytes() const { return slot().offset_in_bytes(); }
 
   compiler::Assembler::CanBeSmi CanValueBeSmi() const {
     const intptr_t cid = value()->Type()->ToNullableCid();

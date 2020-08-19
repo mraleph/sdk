@@ -275,6 +275,7 @@ FlowGraph* CompilerPass::RunForceOptimizedPipeline(
   INVOKE_PASS(FinalizeGraph);
 #if defined(DART_PRECOMPILER)
   if (mode == kAOT) {
+    INVOKE_PASS(TailMerge);
     INVOKE_PASS(SerializeGraph);
   }
 #endif
@@ -361,6 +362,7 @@ FlowGraph* CompilerPass::RunPipeline(PipelineMode mode,
   INVOKE_PASS(AllocationSinking_DetachMaterializations);
   INVOKE_PASS(EliminateWriteBarriers);
   INVOKE_PASS(FinalizeGraph);
+  INVOKE_PASS(TailMerge);
 #if defined(DART_PRECOMPILER)
   if (mode == kAOT) {
     // If we are serializing the flow graph, do it now before we start
@@ -598,6 +600,8 @@ COMPILER_PASS(RoundTripSerialization, {
   FlowGraphDeserializer::RoundTripSerialization(state);
   ASSERT(state->flow_graph() != nullptr);
 })
+
+COMPILER_PASS(TailMerge, { flow_graph->TailMerge(); });
 
 #if defined(DART_ENABLE_LLVM_COMPILER)
 COMPILER_PASS(IRTranslate, {
