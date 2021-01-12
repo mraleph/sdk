@@ -16240,12 +16240,48 @@ const Code::Comments& Code::comments() const {
   return *comments;
 }
 
+char* Code::GetCommentsAsJSON() const {
+#if !defined(PRODUCT)
+  return comments().ToJSON();
+#elif defined(DART_PRECOMPILER)
+  if (FLAG_code_comments) {
+    return reinterpret_cast<char*>(Thread::Current()->heap()->GetPeer(raw()));
+  }
+#endif
+  return nullptr;
+}
+
+
+char* Code::Comments::ToJSON() const {
+  if (Length() == 0) {
+    return nullptr;
+  }
+
+  JSONWriter js;
+  js.OpenArray();
+  String& comment = String::Handle();
+  for (intptr_t i = 0, len = Length(); i < len; i++) {
+    const intptr_t offset = PCOffsetAt(i);
+    comment = CommentAt(i);
+    js.PrintValueStr(comment, 0, comment.Length());
+    js.PrintValue64(offset);
+  }
+  js.CloseArray();
+
+  char* buffer;
+  intptr_t buffer_length;
+  js.Steal(&buffer, &buffer_length);
+  return buffer;
+}
+
 void Code::set_comments(const Code::Comments& comments) const {
-#if defined(PRODUCT)
-  UNREACHABLE();
-#else
+#if !defined(PRODUCT)
   ASSERT(comments.comments_.IsOld());
   raw_ptr()->set_comments(comments.comments_.raw());
+#elif defined(DART_PRECOMPILER)
+  if (FLAG_code_comments) {
+    Thread::Current()->heap()->SetPeer(raw(), comments.ToJSON());
+  }
 #endif
 }
 
@@ -16464,9 +16500,12 @@ CodePtr Code::FinalizeCode(FlowGraphCompiler* compiler,
     CPU::FlushICache(instrs.PayloadStart(), instrs.Size());
   }
 
+#if !defined(PRODUCT) || defined(DART_PRECOMPILER)
+  code.set_comments(CreateCommentsFrom(assembler));
+#endif
+
 #ifndef PRODUCT
   code.set_compile_timestamp(OS::GetCurrentMonotonicMicros());
-  code.set_comments(CreateCommentsFrom(assembler));
   if (assembler->prologue_offset() >= 0) {
     code.SetPrologueOffset(assembler->prologue_offset());
   } else {

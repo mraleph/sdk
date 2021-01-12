@@ -6297,6 +6297,8 @@ class Code : public Object {
     intptr_t PCOffsetAt(intptr_t idx) const;
     StringPtr CommentAt(intptr_t idx) const;
 
+    char* ToJSON() const;
+
    private:
     explicit Comments(const Array& comments);
 
@@ -6314,6 +6316,7 @@ class Code : public Object {
     DISALLOW_COPY_AND_ASSIGN(Comments);
   };
 
+  char* GetCommentsAsJSON() const;
   const Comments& comments() const;
   void set_comments(const Comments& comments) const;
 

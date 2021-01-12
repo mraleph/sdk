@@ -40,6 +40,11 @@ DEFINE_FLAG(charp,
             print_instructions_sizes_to,
             nullptr,
             "Print sizes of all instruction objects to the given file");
+
+DEFINE_FLAG(charp,
+            print_code_comments_to,
+            nullptr,
+            "Print comments associated with instructions into the given file");
 #endif
 
 const InstructionsSectionLayout* Image::ExtraInfo(const uword raw_memory,
@@ -421,6 +426,88 @@ void ImageWriter::DumpInstructionsSizes() {
   file_close(file);
 }
 
+void ImageWriter::DumpCodeComments() {
+  auto thread = Thread::Current();
+  auto zone = thread->zone();
+
+  auto& cls = Class::Handle(zone);
+  auto& lib = Library::Handle(zone);
+  auto& owner = Object::Handle(zone);
+  auto& url = String::Handle(zone);
+  auto& name = String::Handle(zone);
+  intptr_t trampolines_total_size = 0;
+
+  JSONWriter js;
+  js.OpenArray();
+  for (intptr_t i = 0; i < instructions_.length(); i++) {
+    auto& data = instructions_[i];
+    const bool is_trampoline = data.code_ == nullptr;
+    if (is_trampoline) {
+      trampolines_total_size += data.trampoline_length;
+      continue;
+    }
+    owner = WeakSerializationReference::Unwrap(data.code_->owner());
+    js.OpenObject();
+    if (owner.IsFunction()) {
+      cls = Function::Cast(owner).Owner();
+      name = cls.ScrubbedName();
+      lib = cls.library();
+      url = lib.url();
+      js.PrintPropertyStr("l", url);
+      js.PrintPropertyStr("c", name);
+    } else if (owner.IsClass()) {
+      cls ^= owner.raw();
+      name = cls.ScrubbedName();
+      lib = cls.library();
+      url = lib.url();
+      js.PrintPropertyStr("l", url);
+      js.PrintPropertyStr("c", name);
+    }
+    js.PrintProperty("n",
+                     data.code_->QualifiedName(
+                         NameFormattingParams::DisambiguatedWithoutClassName(
+                             Object::kInternalName)));
+    js.PrintProperty("s", SizeInSnapshot(data.insns_->raw()));
+    char* comments = data.code_->GetCommentsAsJSON();
+    if (comments != nullptr) {
+      js.PrintPropertyNoEscape("t", comments);
+      free(comments);
+    }
+    if (data.object_name != nullptr) {
+      js.PrintProperty("y", data.object_name);
+    }
+    js.CloseObject();
+  }
+  if (trampolines_total_size != 0) {
+    js.OpenObject();
+    js.PrintProperty("n", "[Stub] Trampoline");
+    js.PrintProperty("s", trampolines_total_size);
+    js.CloseObject();
+  }
+  js.CloseArray();
+
+  auto file_open = Dart::file_open_callback();
+  auto file_write = Dart::file_write_callback();
+  auto file_close = Dart::file_close_callback();
+  if ((file_open == nullptr) || (file_write == nullptr) ||
+      (file_close == nullptr)) {
+    return;
+  }
+
+  auto file = file_open(FLAG_print_code_comments_to, /*write=*/true);
+  if (file == nullptr) {
+    OS::PrintErr("Failed to open file %s\n", FLAG_print_code_comments_to);
+    return;
+  }
+
+  char* output = nullptr;
+  intptr_t output_length = 0;
+  js.Steal(&output, &output_length);
+  file_write(output, output_length, file);
+  free(output);
+  file_close(file);
+}
+
 void ImageWriter::DumpStatistics() {
   if (FLAG_print_instruction_stats) {
     DumpInstructionStats();
@@ -428,6 +515,10 @@ void ImageWriter::DumpStatistics() {
 
   if (FLAG_print_instructions_sizes_to != nullptr) {
     DumpInstructionsSizes();
+  }
+
+  if (FLAG_print_code_comments_to != nullptr) {
+     DumpCodeComments();
   }
 }
 #endif
@@ -733,7 +824,7 @@ void ImageWriter::WriteText(bool vm) {
 #if defined(DART_PRECOMPILER)
     // We won't add trampolines as symbols, so their name need not be unique
     // across different WriteText() calls.
-    const char* object_name = namer.SnapshotNameFor(
+    data.object_name = namer.SnapshotNameFor(
         is_trampoline ? i : unique_symbol_counter_++, data);
 
     if (profile_writer_ != nullptr) {
@@ -741,7 +832,7 @@ void ImageWriter::WriteText(bool vm) {
       auto const type = is_trampoline ? trampoline_type_ : instructions_type_;
       const intptr_t size = is_trampoline ? data.trampoline_length
                                           : SizeInSnapshot(data.insns_->raw());
-      profile_writer_->SetObjectTypeAndName(id, type, object_name);
+      profile_writer_->SetObjectTypeAndName(id, type, data.object_name);
       profile_writer_->AttributeBytesTo(id, size);
       const intptr_t element_offset = id.second - parent_id.second;
       profile_writer_->AttributeReferenceTo(
@@ -781,7 +872,7 @@ void ImageWriter::WriteText(bool vm) {
 #if defined(DART_PRECOMPILER)
     // 2. Add a symbol for the code at the entry point in precompiled snapshots.
     // Linux's perf uses these labels.
-    AddCodeSymbol(code, object_name, text_offset);
+    AddCodeSymbol(code, data.object_name, text_offset);
 #endif
 
     {

@@ -14,8 +14,7 @@
 
 namespace dart {
 
-#if !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)
-
+#if !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)  || defined(DART_PRECOMPILER)
 DEFINE_FLAG(bool,
             display_sorted_ic_data,
             false,
@@ -1238,7 +1237,7 @@ const char* Environment::ToCString() const {
   return Thread::Current()->zone()->MakeCopyOfString(buffer);
 }
 
-#else  // !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)
+#else  // !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)  || defined(DART_PRECOMPILER)
 
 const char* Instruction::ToCString() const {
   return DebugName();
@@ -1276,6 +1275,6 @@ bool FlowGraphPrinter::ShouldPrint(const Function& function) {
   return false;
 }
 
-#endif  // !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)
+#endif  // !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)  || defined(DART_PRECOMPILER)
 
 }  // namespace dart

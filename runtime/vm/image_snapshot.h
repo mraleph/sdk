@@ -326,6 +326,7 @@ class ImageWriter : public ValueObject {
 
   void DumpInstructionStats();
   void DumpInstructionsSizes();
+  void DumpCodeComments();
 
   struct InstructionsData {
     InstructionsData(InstructionsPtr insns, CodePtr code, intptr_t text_offset)
@@ -333,7 +334,8 @@ class ImageWriter : public ValueObject {
           raw_code_(code),
           text_offset_(text_offset),
           trampoline_bytes(nullptr),
-          trampoline_length(0) {}
+          trampoline_length(0),
+          object_name(nullptr) {}
 
     InstructionsData(uint8_t* trampoline_bytes,
                      intptr_t trampoline_length,
@@ -342,7 +344,8 @@ class ImageWriter : public ValueObject {
           raw_code_(nullptr),
           text_offset_(text_offset),
           trampoline_bytes(trampoline_bytes),
-          trampoline_length(trampoline_length) {}
+          trampoline_length(trampoline_length),
+          object_name(nullptr) {}
 
     union {
       InstructionsPtr raw_insns_;
@@ -356,6 +359,7 @@ class ImageWriter : public ValueObject {
 
     uint8_t* trampoline_bytes;
     intptr_t trampoline_length;
+    const char* object_name;
   };
 
   struct ObjectData {

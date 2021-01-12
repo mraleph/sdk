@@ -45,6 +45,12 @@ constexpr bool kDartUseBackgroundCompilation = true;
   R(support_disassembler, false, bool, true, "Support the disassembler.")
 #endif
 
+#if !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER) || defined(DART_PRECOMPILER)
+constexpr bool FLAG_support_il_printer = true;
+#else
+constexpr bool FLAG_support_il_printer = false;
+#endif
+
 // List of VM-global (i.e. non-isolate specific) flags.
 //
 // The value used for those flags at snapshot generation time needs to be the
@@ -92,7 +98,7 @@ constexpr bool kDartUseBackgroundCompilation = true;
     "Run optimizing compilation in background")                                \
   P(check_token_positions, bool, false,                                        \
     "Check validity of token positions while compiling flow graphs")           \
-  R(code_comments, false, bool, false,                                         \
+  P(code_comments, bool, false,                                                \
     "Include comments into code and disassembly.")                             \
   P(collect_code, bool, false, "Attempt to GC infrequently used code.")        \
   P(collect_dynamic_function_names, bool, true,                                \
@@ -192,7 +198,6 @@ constexpr bool kDartUseBackgroundCompilation = true;
   P(enable_isolate_groups, bool, false, "Enable isolate group support.")       \
   P(show_invisible_frames, bool, false,                                        \
     "Show invisible frames in stack traces.")                                  \
-  R(support_il_printer, false, bool, true, "Support the IL printer.")          \
   D(trace_cha, bool, false, "Trace CHA operations")                            \
   R(trace_field_guards, false, bool, false, "Trace changes in field's cids.")  \
   D(trace_ic, bool, false, "Trace IC handling")                                \

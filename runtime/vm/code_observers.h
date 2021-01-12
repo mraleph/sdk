@@ -12,7 +12,7 @@
 
 namespace dart {
 
-#if !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)
+#if !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER) || defined(DART_PRECOMPILER)
 
 // An abstract representation of comments associated with the given code
 // object. We assume that comments are sorted by PCOffset.
