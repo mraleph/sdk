@@ -307,6 +307,8 @@ class Dwarf : public ZoneAllocated {
                          const char* root_code_name,
                          const Script& parent_script);
 
+  void WriteSyntheticLineNumberProgram(DwarfWriteStream* stream);
+
   const char* Deobfuscate(const char* cstr);
   static Trie<const char>* CreateReverseObfuscationTrie(Zone* zone);
 

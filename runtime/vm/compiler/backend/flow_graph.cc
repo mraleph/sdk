@@ -1904,6 +1904,15 @@ void FlowGraph::InsertConversionsFor(Definition* def) {
 static void UnboxPhi(PhiInstr* phi) {
   Representation unboxed = phi->representation();
 
+#if defined(TARGET_ARCH_IS_64_BIT)
+  if (phi->Type()->IsInt()) {
+    unboxed =
+          RangeUtils::Fits(phi->range(), RangeBoundary::kRangeBoundaryInt32)
+              ? kUnboxedInt32
+              : kUnboxedInt64;
+  }
+#endif
+
   switch (phi->Type()->ToCid()) {
     case kDoubleCid:
       if (CanUnboxDouble()) {
@@ -1968,9 +1977,6 @@ static void UnboxPhi(PhiInstr* phi) {
       Definition* input = phi->InputAt(i)->definition();
       if (input->IsBox()) {
         should_unbox = true;
-      } else if (!input->IsConstant()) {
-        should_unbox = false;
-        break;
       }
     }
 

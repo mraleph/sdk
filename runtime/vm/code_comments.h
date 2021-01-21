@@ -14,7 +14,7 @@
 
 namespace dart {
 
-class CodeCommentsWrapper final : public CodeComments {
+class CodeCommentsWrapper final : public ZoneAllocated, public CodeComments {
  public:
   explicit CodeCommentsWrapper(const Code::Comments& comments)
       : comments_(comments), string_(String::Handle()) {}
@@ -30,12 +30,14 @@ class CodeCommentsWrapper final : public CodeComments {
     return string_.ToCString();
   }
 
+  const Code::Comments& Unwrap() const { return comments_; }
+
  private:
   const Code::Comments& comments_;
   String& string_;
 };
 
-const Code::Comments& CreateCommentsFrom(compiler::Assembler* assembler);
+const CodeComments* CreateCommentsFrom(compiler::Assembler* assembler);
 
 
 }  // namespace dart

@@ -6,6 +6,7 @@
 
 #include "platform/text_buffer.h"
 #include "platform/unaligned.h"
+#include "vm/code_comments.h"
 #include "vm/code_patcher.h"
 #include "vm/dart_entry.h"
 #include "vm/deopt_instructions.h"
@@ -161,9 +162,9 @@ void Disassembler::Disassemble(uword start,
                                uword end,
                                DisassemblyFormatter* formatter,
                                const Code& code,
-                               const Code::Comments* comments) {
+                               const CodeComments* comments) {
   if (comments == nullptr) {
-    comments = code.IsNull() ? &Code::Comments::New(0) : &code.comments();
+    comments = code.IsNull() ? new CodeCommentsWrapper(Code::Comments::New(0)) : code.comments();
   }
   ASSERT(formatter != NULL);
   char hex_buffer[kHexadecimalBufferSize];  // Instruction in hexadecimal form.
@@ -179,7 +180,7 @@ void Disassembler::Disassemble(uword start,
            comments->PCOffsetAt(comment_finger) <= offset) {
       formatter->Print(
           "        ;; %s\n",
-          String::Handle(comments->CommentAt(comment_finger)).ToCString());
+          comments->CommentAt(comment_finger));
       comment_finger++;
     }
     if (old_comment_finger != comment_finger && !code.IsNull()) {

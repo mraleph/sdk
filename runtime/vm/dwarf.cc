@@ -4,6 +4,7 @@
 
 #include "vm/dwarf.h"
 
+#include "vm/code_comments.h"
 #include "vm/code_descriptors.h"
 #include "vm/elf.h"
 #include "vm/image_snapshot.h"
@@ -12,6 +13,11 @@
 namespace dart {
 
 #if defined(DART_PRECOMPILER)
+
+DEFINE_FLAG(charp,
+            write_code_comments_as_synthetic_source_to,
+            nullptr,
+            "Print comments associated with instructions into the given file");
 
 class DwarfPosition {
  public:
@@ -506,7 +512,158 @@ void Dwarf::WriteInliningNode(DwarfWriteStream* stream,
   stream->uleb128(0);  // End of children.
 }
 
+void Dwarf::WriteSyntheticLineNumberProgram(DwarfWriteStream* stream) {
+  auto file_open = Dart::file_open_callback();
+  auto file_write = Dart::file_write_callback();
+  auto file_close = Dart::file_close_callback();
+  if ((file_open == nullptr) || (file_write == nullptr) ||
+      (file_close == nullptr)) {
+    return;
+  }
+
+  TextBuffer comments_buffer(128 * KB);
+
+  auto comments_file = file_open(FLAG_write_code_comments_as_synthetic_source_to, /*write=*/true);
+  if (comments_file == nullptr) {
+    OS::PrintErr("Failed to open file %s\n", FLAG_write_code_comments_as_synthetic_source_to);
+    return;
+  }
+
+  // 6.2.4 The Line Number Program Header
+
+  // 1. unit_length. This encoding implies 32-bit DWARF.
+  auto const line_prefix = "line";
+  intptr_t line_start;
+  intptr_t line_size_fixup = stream->ReserveSize(line_prefix, &line_start);
+
+  stream->u2(2);  // 2. DWARF version 2
+
+  // 3. header_length
+  auto const lineheader_prefix = "lineheader";
+  intptr_t lineheader_start;
+  intptr_t lineheader_size_fixup =
+      stream->ReserveSize(lineheader_prefix, &lineheader_start);
+
+  stream->u1(1);   // 4. minimum_instruction_length
+  stream->u1(1);   // 5. default_is_stmt (true for compatibility with dsymutil).
+  stream->u1(0);   // 6. line_base
+  stream->u1(1);   // 7. line_range
+  stream->u1(13);  // 8. opcode_base (12 standard opcodes in Dwarf 2)
+
+  // 9. standard_opcode_lengths
+  stream->u1(0);  // DW_LNS_copy, 0 operands
+  stream->u1(1);  // DW_LNS_advance_pc, 1 operands
+  stream->u1(1);  // DW_LNS_advance_list, 1 operands
+  stream->u1(1);  // DW_LNS_set_file, 1 operands
+  stream->u1(1);  // DW_LNS_set_column, 1 operands
+  stream->u1(0);  // DW_LNS_negate_stmt, 0 operands
+  stream->u1(0);  // DW_LNS_set_basic_block, 0 operands
+  stream->u1(0);  // DW_LNS_const_add_pc, 0 operands
+  stream->u1(1);  // DW_LNS_fixed_advance_pc, 1 operands
+  stream->u1(0);  // DW_LNS_set_prolog_end, 0 operands
+  stream->u1(0);  // DW_LNS_set_epligoue_begin, 0 operands
+  stream->u1(1);  // DW_LNS_set_isa, 1 operands
+
+  // 10. include_directories (sequence of path names)
+  // We don't emit any because we use full paths below.
+  stream->u1(0);
+
+  // 11. file_names (sequence of file entries)
+  stream->string(FLAG_write_code_comments_as_synthetic_source_to);  // NOLINT
+  stream->uleb128(0);        // Include directory index.
+  stream->uleb128(0);        // File modification time.
+  stream->uleb128(0);        // File length.
+  stream->u1(0);  // End of file names.
+  stream->SetSize(lineheader_size_fixup, lineheader_prefix, lineheader_start);
+
+  // 6.2.5 The Line Number Program
+
+  // The initial values for the line number program state machine registers
+  // according to the DWARF standard.
+  intptr_t previous_pc_offset = 0;
+  intptr_t previous_line = 1;
+  // Other info not stored in the state machine registers.
+  const char* previous_asm_name = nullptr;
+
+  intptr_t current_line = 0;
+
+  for (intptr_t i = 0; i < codes_.length(); i++) {
+    const Code& code = *(codes_[i]);
+    auto const asm_name = code_to_name_.LookupValue(&code);
+    ASSERT(asm_name != nullptr);
+
+    auto comments = code.comments();
+    if (comments == nullptr) {
+      continue;
+    }
+
+    for (intptr_t i = 0, len = comments->Length(); i < len;) {
+      intptr_t current_pc_offset = comments->PCOffsetAt(i);
+      while (i < len && current_pc_offset == comments->PCOffsetAt(i)) {
+        comments_buffer.AddString(comments->CommentAt(i));
+        comments_buffer.AddChar('\n');
+        current_line++;
+        i++;
+      }
+
+      if (current_line != previous_line) {
+        stream->u1(DW_LNS_advance_line);
+        stream->sleb128(current_line - previous_line);
+        previous_line = current_line;
+      }
+
+      if (previous_asm_name == nullptr) {
+        auto const instr_size = 1 + compiler::target::kWordSize;
+        stream->u1(0);           // This is an extended opcode
+        stream->u1(instr_size);  // that is 5 or 9 bytes long
+        stream->u1(DW_LNE_set_address);
+        stream->OffsetFromSymbol(asm_name, current_pc_offset);
+      } else {
+        stream->u1(DW_LNS_advance_pc);
+        stream->DistanceBetweenSymbolOffsets(asm_name, current_pc_offset,
+                                              previous_asm_name,
+                                              previous_pc_offset);
+      }
+      stream->u1(DW_LNS_copy);
+      previous_asm_name = asm_name;
+      previous_pc_offset = current_pc_offset;
+    }
+  }
+
+  // Advance pc to end of the compilation unit if not already there.
+  if (codes_.length() != 0) {
+    const intptr_t last_code_index = codes_.length() - 1;
+    const Code& last_code = *(codes_[last_code_index]);
+    const intptr_t last_pc_offset = last_code.Size();
+    const char* last_asm_name = code_to_name_.LookupValue(&last_code);
+    ASSERT(last_asm_name != nullptr);
+
+    stream->u1(DW_LNS_advance_pc);
+    if (previous_asm_name != nullptr) {
+      stream->DistanceBetweenSymbolOffsets(
+          last_asm_name, last_pc_offset, previous_asm_name, previous_pc_offset);
+    } else {
+      // No LNP entries (e.g., only stub code).
+      ASSERT(previous_pc_offset == 0);
+      stream->uleb128(last_pc_offset);
+    }
+  }
+
+  // End of contiguous machine code.
+  stream->u1(0);  // This is an extended opcode
+  stream->u1(1);  // that is 1 byte long
+  stream->u1(DW_LNE_end_sequence);
+  stream->SetSize(line_size_fixup, line_prefix, line_start);
+
+  file_write(comments_buffer.buffer(), comments_buffer.length(), comments_file);
+  file_close(comments_file);
+}
+
 void Dwarf::WriteLineNumberProgram(DwarfWriteStream* stream) {
+  if (FLAG_write_code_comments_as_synthetic_source_to != nullptr) {
+    WriteSyntheticLineNumberProgram(stream);
+    return;
+  }
   // 6.2.4 The Line Number Program Header
 
   // 1. unit_length. This encoding implies 32-bit DWARF.

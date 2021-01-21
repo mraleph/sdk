@@ -9,6 +9,7 @@
 #include "platform/elf.h"
 #include "vm/bss_relocs.h"
 #include "vm/class_id.h"
+#include "vm/code_comments.h"
 #include "vm/compiler/runtime_api.h"
 #include "vm/dwarf.h"
 #include "vm/elf.h"
@@ -468,10 +469,15 @@ void ImageWriter::DumpCodeComments() {
                          NameFormattingParams::DisambiguatedWithoutClassName(
                              Object::kInternalName)));
     js.PrintProperty("s", SizeInSnapshot(data.insns_->raw()));
-    char* comments = data.code_->GetCommentsAsJSON();
+    auto comments = data.code_->comments();
     if (comments != nullptr) {
-      js.PrintPropertyNoEscape("t", comments);
-      free(comments);
+      js.OpenArray();
+      for (intptr_t i = 0, len = comments->Length(); i < len; i++) {
+        js.PrintValue(comments->CommentAt(i));
+        js.PrintValue64(comments->PCOffsetAt(i));
+      }
+      js.CloseArray();
+      delete comments;
     }
     if (data.object_name != nullptr) {
       js.PrintProperty("y", data.object_name);

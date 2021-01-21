@@ -3520,6 +3520,10 @@ class ReachabilityFenceInstr : public TemplateInstruction<1, NoThrow> {
   virtual bool ComputeCanDeoptimize() const { return false; }
   virtual bool HasUnknownSideEffects() const { return false; }
 
+  virtual Representation RequiredInputRepresentation(intptr_t idx) const {
+    return kNoRepresentation;
+  }
+
   PRINT_OPERANDS_TO_SUPPORT
 
  private:

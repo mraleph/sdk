@@ -16,7 +16,7 @@ namespace dart {
 
 // An abstract representation of comments associated with the given code
 // object. We assume that comments are sorted by PCOffset.
-class CodeComments : public ValueObject {
+class CodeComments {
  public:
   CodeComments() = default;
   virtual ~CodeComments() = default;

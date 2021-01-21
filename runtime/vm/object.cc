@@ -16231,56 +16231,69 @@ void Code::Disassemble(DisassemblyFormatter* formatter) const {
 #endif  // !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)
 }
 
-const Code::Comments& Code::comments() const {
-#if defined(PRODUCT)
-  Comments* comments = new Code::Comments(Array::Handle());
-#else
-  Comments* comments = new Code::Comments(Array::Handle(raw_ptr()->comments()));
-#endif
-  return *comments;
-}
+#if !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER) || defined(DART_PRECOMPILER)
+class MallocCodeComments final : public CodeComments {
+ public:
+  explicit MallocCodeComments(const CodeComments* comments)
+      : length_(comments->Length()), comments_(new Comment[comments->Length()]) {
+    for (intptr_t i = 0; i < length_; i++) {
+      comments_[i].pc_offset = comments->PCOffsetAt(i);
+      comments_[i].comment = strdup(comments->CommentAt(i));
+    }
+  }
 
-char* Code::GetCommentsAsJSON() const {
-#if !defined(PRODUCT)
-  return comments().ToJSON();
-#elif defined(DART_PRECOMPILER)
+  ~MallocCodeComments() {
+    delete[] comments_;
+  }
+
+  intptr_t Length() const override { return length_; }
+
+  intptr_t PCOffsetAt(intptr_t i) const override {
+    return comments_[i].pc_offset;
+  }
+
+  const char* CommentAt(intptr_t i) const override {
+    return comments_[i].comment;
+  }
+
+ private:
+  struct Comment {
+    intptr_t pc_offset;
+    char* comment;
+
+    ~Comment() {
+      free(comment);
+    }
+  };
+
+  intptr_t length_;
+  Comment* comments_;
+};
+#endif
+
+const CodeComments* Code::comments() const {
+#if defined(PRODUCT)
+#if defined(DART_PRECOMPILER)
   if (FLAG_code_comments) {
-    return reinterpret_cast<char*>(Thread::Current()->heap()->GetPeer(raw()));
+    return static_cast<CodeComments*>(Thread::Current()->heap()->GetPeer(raw()));
   }
 #endif
   return nullptr;
+#else
+  return new CodeCommentsWrapper(*new Code::Comments(Array::Handle(raw_ptr()->comments())));
+#endif
 }
 
-
-char* Code::Comments::ToJSON() const {
-  if (Length() == 0) {
-    return nullptr;
-  }
-
-  JSONWriter js;
-  js.OpenArray();
-  String& comment = String::Handle();
-  for (intptr_t i = 0, len = Length(); i < len; i++) {
-    const intptr_t offset = PCOffsetAt(i);
-    comment = CommentAt(i);
-    js.PrintValueStr(comment, 0, comment.Length());
-    js.PrintValue64(offset);
-  }
-  js.CloseArray();
-
-  char* buffer;
-  intptr_t buffer_length;
-  js.Steal(&buffer, &buffer_length);
-  return buffer;
-}
-
-void Code::set_comments(const Code::Comments& comments) const {
+void Code::set_comments(const CodeComments* comments) const {
 #if !defined(PRODUCT)
-  ASSERT(comments.comments_.IsOld());
-  raw_ptr()->set_comments(comments.comments_.raw());
+  auto wrapper = static_cast<const CodeCommentsWrapper*>(comments);
+  ASSERT(wrapper->Unwrap().comments_.IsOld());
+  raw_ptr()->set_comments(wrapper->Unwrap().comments_.raw());
 #elif defined(DART_PRECOMPILER)
-  if (FLAG_code_comments) {
-    Thread::Current()->heap()->SetPeer(raw(), comments.ToJSON());
+  if (FLAG_code_comments && comments->Length() > 0) {
+    Thread::Current()->heap()->SetPeer(raw(), new MallocCodeComments(comments));
+  } else {
+    Thread::Current()->heap()->SetPeer(raw(), nullptr);
   }
 #endif
 }
@@ -16335,7 +16348,7 @@ CodePtr Code::New(intptr_t pointer_offsets_length) {
     result.set_is_optimized(false);
     result.set_is_force_optimized(false);
     result.set_is_alive(false);
-    NOT_IN_PRODUCT(result.set_comments(Comments::New(0)));
+    NOT_IN_PRODUCT(result.set_comments(new CodeCommentsWrapper(Comments::New(0))));
     NOT_IN_PRODUCT(result.set_compile_timestamp(0));
     result.set_pc_descriptors(Object::empty_descriptors());
     result.set_compressed_stackmaps(Object::empty_compressed_stackmaps());
@@ -16556,10 +16569,9 @@ void Code::NotifyCodeObservers(const char* name,
   ASSERT(!Thread::Current()->IsAtSafepoint());
   if (CodeObservers::AreActive()) {
     const auto& instrs = Instructions::Handle(code.instructions());
-    CodeCommentsWrapper comments_wrapper(code.comments());
     CodeObservers::NotifyAll(name, instrs.PayloadStart(),
                              code.GetPrologueOffset(), instrs.Size(), optimized,
-                             &comments_wrapper);
+                             code.comments());
   }
 #endif
 }

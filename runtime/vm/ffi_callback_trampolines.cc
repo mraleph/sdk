@@ -72,14 +72,13 @@ void NativeCallbackTrampolines::AllocateTrampoline() {
     const char* name = "FfiJitCallbackTrampolines";
     ASSERT(!Thread::Current()->IsAtSafepoint());
     if (CodeObservers::AreActive()) {
-      const auto& comments = CreateCommentsFrom(&assembler);
-      CodeCommentsWrapper wrapper(comments);
+      const auto comments = CreateCommentsFrom(&assembler);
       CodeObservers::NotifyAll(name,
                                /*base=*/memory->start(),
                                /*prologue_offset=*/0,
                                /*size=*/assembler.CodeSize(),
                                /*optimized=*/false,  // not really relevant
-                               &wrapper);
+                               comments);
     }
 #endif
 #if !defined(PRODUCT) || defined(FORCE_INCLUDE_DISASSEMBLER)
@@ -90,10 +89,10 @@ void NativeCallbackTrampolines::AllocateTrampoline() {
           "[%" Pd " -> %" Pd "]: {\n",
           next_callback_id_,
           next_callback_id_ + NumCallbackTrampolinesPerPage() - 1);
-      const auto& comments = CreateCommentsFrom(&assembler);
+      const auto comments = CreateCommentsFrom(&assembler);
       Disassembler::Disassemble(memory->start(),
                                 memory->start() + assembler.CodeSize(),
-                                &formatter, &comments);
+                                &formatter, comments);
     }
 #endif
 

@@ -8,7 +8,7 @@
 
 namespace dart {
 
-const Code::Comments& CreateCommentsFrom(compiler::Assembler* assembler) {
+const CodeComments* CreateCommentsFrom(compiler::Assembler* assembler) {
   const auto& comments = assembler->comments();
   Code::Comments& result = Code::Comments::New(comments.length());
 
@@ -17,7 +17,7 @@ const Code::Comments& CreateCommentsFrom(compiler::Assembler* assembler) {
     result.SetCommentAt(i, comments[i]->comment());
   }
 
-  return result;
+  return new CodeCommentsWrapper(result);
 }
 
 }  // namespace dart
