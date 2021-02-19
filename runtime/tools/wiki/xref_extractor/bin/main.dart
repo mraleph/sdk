@@ -96,7 +96,8 @@ Future<void> generateCompileCommands() async {
     'cxx'
   ]);
   final List<dynamic> commands = jsonDecode(result.stdout);
-  final re = RegExp(r'/libdart(_vm)?_precompiler_host_targeting_host\.');
+  final re =
+      RegExp(r'/libdart(_vm|_compiler)?_precompiler_host_targeting_host\.');
   final filteredCommands = commands
       .cast<Map<String, dynamic>>()
       .where((item) => item['command'].contains(re))

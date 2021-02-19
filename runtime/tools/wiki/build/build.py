@@ -97,7 +97,7 @@ class Artifact:
     def __init__(self, output: str, inputs: Sequence[str]):
         Artifact.all[output] = self
         self.output = output
-        self.inputs = inputs
+        self.inputs = [os.path.abspath(p) for p in inputs]
 
     def depends_on(self, path: str) -> bool:
         """Check if this"""
@@ -151,7 +151,7 @@ class Page(Artifact):
             return content
 
     def build(self):
-        logging.info('Build %s from %s', self.output, self.inputs[0])
+        logging.info('Build %s from %s', self.output, os.path.relpath(self.inputs[0]))
 
         template = jinja2_env.get_template(PAGE_TEMPLATE)
         result = template.render({
@@ -238,8 +238,9 @@ class ArtifactEventHandler(FileSystemEventHandler):
         super().__init__()
 
     def on_modified(self, event):
+        modified_path = os.path.abspath(event.src_path)
         Artifact.build_matching(
-            lambda artifact: artifact.depends_on(event.src_path))
+            lambda artifact: artifact.depends_on(modified_path))
 
 
 def serve_for_development():

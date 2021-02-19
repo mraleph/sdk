@@ -73,7 +73,9 @@ def _resolve_ref_via_xref(ref: str) -> Optional[str]:
         (class_name, function_name) = ref.rsplit('::', 1)
         if class_name in _xrefs['classes'] and len(
                 _xrefs['classes'][class_name]) == 2:
-            return _xrefs['classes'][class_name][1][function_name]
+            members = _xrefs['classes'][class_name][1]
+            if function_name in members:
+                return members[function_name]
     logging.error('Failed to resolve xref %s' % ref)
     return None
 
@@ -106,7 +108,7 @@ class _XrefPattern(InlineProcessor):
         text = m.group(2)
         uri = _resolve_ref(ref)
         el = etree.Element('a')
-        el.attrib['href'] = uri
+        el.attrib['href'] = uri or '#missing-ref'
         el.attrib['target'] = 'blank'
         el.text = text[1:] if text is not None else ref
         return el, m.start(0), m.end(0)

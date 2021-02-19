@@ -87,13 +87,13 @@ Note that `flutter` tool does not handle parsing of Dart itself - instead it spa
 
 Once Kernel binary is loaded into the VM it is parsed to create objects representing various program entities. However this is done lazily: at first only basic information about libraries and classes is loaded. Each entity originating from a Kernel binary keeps a pointer back to the binary, so that later more information can be loaded as needed.
 
-<aside>We use `Raw...` prefix whenever we talk about specific objects allocated internally by the VM. This follows VM own naming convention: layout of internal VM objects is defined using C++ classes with names starting with `Raw` in the header file @{runtime/vm/raw_object.h}. For example, @{dart::RawClass} is a VM object describing Dart class, @{dart::RawField} is a VM object describing a Dart field within a Dart class and so on. We will return to this in a section covering runtime system and object model.</aside>
+<aside>We use `Untagged...` prefix whenever we refer to objects allocated internally by the VM. This follows VM own naming convention: layout of internal VM objects is defined by C++ classes with names starting with `Untagged` in the header file @{runtime/vm/raw_object.h}. For example, @{dart::UntaggedClass} is a VM object describing a Dart class, @{dart::UntaggedField} is a VM object describing a Dart field within a Dart class and so on. On images we will usually omit `Untagged...` prefix for brevity.</aside>
 
-![Kernel Loading. Stage 1](images/kernel-loaded-1.png)
+![Kernel Loading. Stage 1](images/kernel-loading-1.png)
 
 Information about the class is fully deserialized only when runtime later needs it (e.g. to lookup a class member, to allocate an instance, etc). At this stage class members are read from the Kernel binary. However full function bodies are not deserialized at this stage, only their signatures.
 
-![Kernel Loading. Stage 2](images/kernel-loaded-2.png)
+![Kernel Loading. Stage 2](images/kernel-loading-2.png)
 
 At this point enough information is loaded from Kernel binary for runtime to successfully resolve and invoke methods. For example, it could resolve and invoke `main` function from a library.
 
@@ -150,7 +150,7 @@ The core idea behind inline caching is to cache results of method resolution in 
 
 <aside>Original implementations of inline caching were actually patching the native code of the function - hence the name  _**inline** caching_. The idea of inline caching dates far back to Smalltalk-80, see [Efficient implementation of the Smalltalk-80 system](https://dl.acm.org/citation.cfm?id=800542).</aside>
 
-* a call site specific cache (@{dart::RawICData} object) that maps receiver's class to a method, that should be invoked if receiver is of a matching class. The cache also stores some auxiliary information, e.g. invocation frequency counters, which track how often the given class was seen at this call site;
+* a call site specific cache (@{dart::UntaggedICData} object) that maps receiver's class to a method, that should be invoked if receiver is of a matching class. The cache also stores some auxiliary information, e.g. invocation frequency counters, which track how often the given class was seen at this call site;
 * a shared lookup stub, which implements method invocation fast path. This stub searches through the given cache to see if it contains an entry that matches receiver's class. If the entry is found then stub would increment the frequency counter and tail call cached method. Otherwise stub would invoke a runtime system helper which implements method resolution logic. If method resolution succeeds then cache would be updated and subsequent invocations would not need to enter runtime system.
 
 The picture below illustrates the structure and the state of an inline cache associated with `animal.toFace()` call site, which was executed twice with an instance of `Dog` and once with an instance of a `Cat`.
@@ -194,7 +194,7 @@ The next time this function is called - it will use optimized code. Some functio
 
     For example
 
-    ```myshell
+    ```custom-shell-session
     # Run test.dart and dump optimized IL and machine code for
     # function(s) that contain(s) "myFunction" in its name.
     # Disable background compilation for determinism.
@@ -348,31 +348,31 @@ Resulting snapshot can then be run using *precompiled runtime*, a special varian
 
 Even with global and local analyses AOT compiled code might still contain call sites which could not be *devirtualized* (meaning they could not be statically resolved). To compensate for this AOT compiled code and runtime use an extension of inline caching technique utilized in JIT. This extended version is called *switchable calls*.
 
-JIT section already described that each inline cache associated with a call site consists of two pieces: a cache object (represented by an instance of @{dart::RawICData}) and a chunk of native code to invoke (e.g. a @{dart::compiler::StubCodeCompiler::GenerateNArgsCheckInlineCacheStub|InlineCacheStub}). In JIT mode runtime would only update the cache itself. However in AOT runtime can choose to replace both the cache and the native code to invoke depending on the state of the inline cache.
+JIT section already described that each inline cache associated with a call site consists of two pieces: a cache object (represented by an instance of @{dart::UntaggedICData}) and a chunk of native code to invoke (e.g. a @{dart::compiler::StubCodeCompiler::GenerateNArgsCheckInlineCacheStub|InlineCacheStub}). In JIT mode runtime would only update the cache itself. However in AOT runtime can choose to replace both the cache and the native code to invoke depending on the state of the inline cache.
 
 ![AOT IC. Unlinked](images/aot-ic-unlinked.png)
 
-Initially all dynamic calls start in the *unlinked* state. When such call-site is reached for the first time @{dart::compiler::StubCodeCompiler::GenerateUnlinkedCallStub|UnlinkedCallStub} is invoked, which simply calls into runtime helper @{DRT_UnlinkedCall} to link this call site.
+Initially all dynamic calls start in the *unlinked* state. When such call-site is reached for the first time @{dart::compiler::StubCodeCompiler::GenerateSwitchableCallMissStub|SwitchableCallMissStub} is invoked, which simply calls into runtime helper @{DRT_SwitchableCallMiss} to link this call site.
 
-If possible @{DRT_UnlinkedCall} tries to transition the call site into a _monomorphic_ state. In this state call site turns into a direct call, which enters method through a special entry point which verifies that receiver has expected class.
+If possible @{DRT_SwitchableCallMiss} tries to transition the call site into a _monomorphic_ state. In this state call site turns into a direct call, which enters method through a special entry point which verifies that receiver has expected class.
 
 ![AOT IC: Monomorphic](images/aot-ic-monomorphic.png)
 
 In the example above we assume that when `obj.method()` was executed for the first time `obj` was an instance of `C` and `obj.method` resolved to `C.method`.
 
-Next time we execute the same call-site it would invoke `C.method` directly, bypassing any sort of method lookup process. However it would enter `C.method` through a special entry point, which would verify that `obj` is still an instance of `C`. If that is not the case @{DRT_MonomorphicMiss} would be invoked and will try to select the next call site state.
+Next time we execute the same call-site it will invoke `C.method` directly, bypassing any sort of method lookup process. However it will enter `C.method` through a special entry point, which will verify that `obj` is still an instance of `C`. If that is not the case @{DRT_SwitchableCallMiss} will be invoked and will try to select the next call site state.
 
-`C.method` might still be a valid target for an invocation, e.g `obj` is an instance of the class `D` which extends `C` but does not override `C.method`. In this case we check if call site could transition into a *single target* state, implemented by @{dart::compiler::StubCodeCompiler::GenerateSingleTargetCallStub|SingleTargetCallStub} (see also @{dart::RawSingleTargetCache}).
+`C.method` might still be a valid target for an invocation, e.g `obj` is an instance of the class `D` which extends `C` but does not override `C.method`. In this case we check if call site could transition into a *single target* state, implemented by @{dart::compiler::StubCodeCompiler::GenerateSingleTargetCallStub|SingleTargetCallStub} (see also @{dart::UntaggedSingleTargetCache}).
 
 ![AOT IC: Single Target](images/aot-ic-singletarget.png)
 
 This stub is based on the fact that for AOT compilation most classes are assigned integer ids using depth-first traversal of the inheritance hierarchy. If `C` is a base class with subclasses `D0, ..., Dn` and none of those override `C.method` then `C.:cid <= classId(obj) <= max(D0.:cid, ..., Dn.:cid)` implies that `obj.method` resolves to `C.method`. In this circumstances instead of comparing to a single class (*monomorphic* state), we can use class id range check (*single target* state) which would work for all subclasses of `C`.
 
-Otherwise call site would be switched to use linear search inline cache, similar to the one used in JIT mode (see @{dart::compiler::StubCodeCompiler::GenerateICCallThroughCodeStub|ICCallThroughCodeStub}, @{dart::RawICData} and @{DRT_MegamorphicCacheMissHandler}).
+Otherwise call site would be switched to use linear search inline cache, similar to the one used in JIT mode (see @{dart::compiler::StubCodeCompiler::GenerateICCallThroughCodeStub|ICCallThroughCodeStub}, @{dart::UntaggedICData} and @{dart::PatchableCallHandler::DoMegamorphicMiss}).
 
 ![AOT IC: linear IC call](images/aot-ic-linear.png)
 
-Finally if the number of checks in the linear array grows past threshold the call site is switched to use a dictionary like structure (see @{dart::compiler::StubCodeCompiler::GenerateMegamorphicCallStub|MegamorphicCallStub}, @{dart::RawMegamorphicCache} and @{DRT_MegamorphicCacheMissHandler}).
+Finally if the number of checks in the linear array grows past threshold the call site is switched to use a dictionary like structure (see @{dart::compiler::StubCodeCompiler::GenerateMegamorphicCallStub|MegamorphicCallStub}, @{dart::UntaggedMegamorphicCache} and @{dart::PatchableCallHandler::DoMegamorphicMiss}).
 
 ![AOT IC: dictionary](images/aot-ic-dictionary.png)
 
