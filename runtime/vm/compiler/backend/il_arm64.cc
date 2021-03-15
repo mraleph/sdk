@@ -6425,9 +6425,6 @@ void GotoInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     compiler->AddCurrentDescriptor(UntaggedPcDescriptors::kDeopt, GetDeoptId(),
                                    InstructionSource());
   }
-  if (HasParallelMove()) {
-    compiler->parallel_move_resolver()->EmitNativeCode(parallel_move());
-  }
 
   // We can fall through if the successor is the next block in the list.
   // Otherwise, we need a jump.

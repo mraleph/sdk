@@ -1382,10 +1382,6 @@ void PushArgumentInstr::PrintOperandsTo(BaseTextBuffer* f) const {
 }
 
 void GotoInstr::PrintTo(BaseTextBuffer* f) const {
-  if (HasParallelMove()) {
-    parallel_move()->PrintTo(f);
-    f->AddString(" ");
-  }
   if (GetDeoptId() != DeoptId::kNone) {
     f->Printf("goto:%" Pd " B%" Pd "", GetDeoptId(), successor()->block_id());
   } else {

@@ -3255,21 +3255,6 @@ class GotoInstr : public TemplateInstruction<0, NoThrow> {
 
   virtual bool HasUnknownSideEffects() const { return false; }
 
-  ParallelMoveInstr* parallel_move() const { return parallel_move_; }
-
-  bool HasParallelMove() const { return parallel_move_ != NULL; }
-
-  bool HasNonRedundantParallelMove() const {
-    return HasParallelMove() && !parallel_move()->IsRedundant();
-  }
-
-  ParallelMoveInstr* GetParallelMove() {
-    if (parallel_move_ == NULL) {
-      parallel_move_ = new ParallelMoveInstr();
-    }
-    return parallel_move_;
-  }
-
   virtual TokenPosition token_pos() const {
     return TokenPosition::kControlFlow;
   }

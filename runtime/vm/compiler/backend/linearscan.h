@@ -494,19 +494,7 @@ class SafepointPosition : public ZoneAllocated {
 class LiveRange : public ZoneAllocated {
  public:
   explicit LiveRange(intptr_t vreg, Representation rep)
-      : vreg_(vreg),
-        representation_(rep),
-        assigned_location_(),
-        spill_slot_(),
-        uses_(NULL),
-        first_use_interval_(NULL),
-        last_use_interval_(NULL),
-        first_safepoint_(NULL),
-        last_safepoint_(NULL),
-        next_sibling_(NULL),
-        has_only_any_uses_in_loops_(0),
-        is_loop_phi_(false),
-        finger_() {}
+      : vreg_(vreg), representation_(rep) {}
 
   intptr_t vreg() const { return vreg_; }
   Representation representation() const { return representation_; }
@@ -572,6 +560,9 @@ class LiveRange : public ZoneAllocated {
   bool is_loop_phi() const { return is_loop_phi_; }
   void mark_loop_phi() { is_loop_phi_ = true; }
 
+  bool is_fixed_output() const { return is_fixed_output_; }
+  void mark_fixed_output() { is_fixed_output_ = true; }
+
  private:
   LiveRange(intptr_t vreg,
             Representation rep,
@@ -582,34 +573,30 @@ class LiveRange : public ZoneAllocated {
             LiveRange* next_sibling)
       : vreg_(vreg),
         representation_(rep),
-        assigned_location_(),
         uses_(uses),
         first_use_interval_(first_use_interval),
         last_use_interval_(last_use_interval),
         first_safepoint_(first_safepoint),
-        last_safepoint_(NULL),
-        next_sibling_(next_sibling),
-        has_only_any_uses_in_loops_(0),
-        is_loop_phi_(false),
-        finger_() {}
+        next_sibling_(next_sibling) {}
 
   const intptr_t vreg_;
   Representation representation_;
   Location assigned_location_;
   Location spill_slot_;
 
-  UsePosition* uses_;
-  UseInterval* first_use_interval_;
-  UseInterval* last_use_interval_;
+  UsePosition* uses_ = nullptr;
+  UseInterval* first_use_interval_ = nullptr;
+  UseInterval* last_use_interval_ = nullptr;
 
-  SafepointPosition* first_safepoint_;
-  SafepointPosition* last_safepoint_;
+  SafepointPosition* first_safepoint_ = nullptr;
+  SafepointPosition* last_safepoint_ = nullptr;
 
-  LiveRange* next_sibling_;
+  LiveRange* next_sibling_ = nullptr;
 
   static constexpr intptr_t kMaxLoops = sizeof(uint64_t) * kBitsPerByte;
-  uint64_t has_only_any_uses_in_loops_;
-  bool is_loop_phi_;
+  uint64_t has_only_any_uses_in_loops_ = 0;
+  bool is_loop_phi_ = false;
+  bool is_fixed_output_ = false;
 
   AllocationFinger finger_;
 
