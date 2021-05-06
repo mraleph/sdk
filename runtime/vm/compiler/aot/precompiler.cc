@@ -141,10 +141,26 @@ ErrorPtr Precompiler::CompileAll() {
   if (setjmp(*jump.Set()) == 0) {
     Precompiler precompiler(Thread::Current());
     precompiler.DoCompileAll();
+    precompiler.ReportStats();
     return Error::null();
   } else {
     return Thread::Current()->StealStickyError();
   }
+}
+
+void Precompiler::ReportStats() {
+  OS::PrintErr("Precompilation took: %s\n", stats_.timers[PrecompilerStats::kCompileAll].FormatElapsedHumanReadable(zone()));
+
+#define REPORT(Name) if (PrecompilerStats::k##Name != PrecompilerStats::kCompileAll) { OS::PrintErr("  %s: %s\n", #Name, stats_.timers[PrecompilerStats::k##Name].FormatElapsedHumanReadable(zone())); }
+  PRECOMPILER_STATS_TIMERS(REPORT)
+#undef REPORT
+
+  for (intptr_t i = 0; i < CompilerPass::kNumPasses; i++) {
+     auto pass = CompilerPass::Get(static_cast<CompilerPass::Id>(i));
+     OS::PrintErr("  %s: %s\n", pass->name(), compiler_stats_.timers_[i].FormatElapsedHumanReadable(zone()));
+  }
+  OS::PrintErr("  TryInlining(Success): %s\n", compiler_stats_.try_inlining_.FormatElapsedHumanReadable(zone()));
+  OS::PrintErr("  TryInlining(Failure): %s\n", compiler_stats_.try_inlining_failure_.FormatElapsedHumanReadable(zone()));
 }
 
 Precompiler::Precompiler(Thread* thread)
@@ -196,6 +212,7 @@ Precompiler::~Precompiler() {
 }
 
 void Precompiler::DoCompileAll() {
+  PRECOMPILER_TIMER_SCOPE(this, CompileAll);
   {
     StackZone stack_zone(T);
     zone_ = stack_zone.GetZone();
@@ -389,45 +406,59 @@ void Precompiler::DoCompileAll() {
         tracer_ = nullptr;
       }
 
-      TraceForRetainedFunctions();
+      {
+        PRECOMPILER_TIMER_SCOPE(this, Trace);
+        TraceForRetainedFunctions();
+      }
+
       FinalizeDispatchTable();
       ReplaceFunctionStaticCallEntries();
 
-      DropFunctions();
-      DropFields();
-      TraceTypesFromRetainedClasses();
-      DropTypes();
-      DropTypeParameters();
-      DropTypeArguments();
+      {
+        PRECOMPILER_TIMER_SCOPE(this, Drop);
+        DropFunctions();
+        DropFields();
+        TraceTypesFromRetainedClasses();
+        DropTypes();
+        DropTypeParameters();
+        DropTypeArguments();
 
-      // Clear these before dropping classes as they may hold onto otherwise
-      // dead instances of classes we will remove or otherwise unused symbols.
-      I->object_store()->set_unique_dynamic_targets(Array::null_array());
-      Class& null_class = Class::Handle(Z);
-      Function& null_function = Function::Handle(Z);
-      Field& null_field = Field::Handle(Z);
-      I->object_store()->set_pragma_class(null_class);
-      I->object_store()->set_pragma_name(null_field);
-      I->object_store()->set_pragma_options(null_field);
-      I->object_store()->set_completer_class(null_class);
-      I->object_store()->set_symbol_class(null_class);
-      I->object_store()->set_compiletime_error_class(null_class);
-      I->object_store()->set_growable_list_factory(null_function);
-      I->object_store()->set_simple_instance_of_function(null_function);
-      I->object_store()->set_simple_instance_of_true_function(null_function);
-      I->object_store()->set_simple_instance_of_false_function(null_function);
-      I->object_store()->set_async_set_thread_stack_trace(null_function);
-      I->object_store()->set_async_star_move_next_helper(null_function);
-      I->object_store()->set_complete_on_async_return(null_function);
-      I->object_store()->set_async_star_stream_controller(null_class);
-      I->object_store()->set_bytecode_attributes(Array::null_array());
-      DropMetadata();
-      DropLibraryEntries();
+        // Clear these before dropping classes as they may hold onto otherwise
+        // dead instances of classes we will remove or otherwise unused symbols.
+        I->object_store()->set_unique_dynamic_targets(Array::null_array());
+        Class& null_class = Class::Handle(Z);
+        Function& null_function = Function::Handle(Z);
+        Field& null_field = Field::Handle(Z);
+        I->object_store()->set_pragma_class(null_class);
+        I->object_store()->set_pragma_name(null_field);
+        I->object_store()->set_pragma_options(null_field);
+        I->object_store()->set_completer_class(null_class);
+        I->object_store()->set_symbol_class(null_class);
+        I->object_store()->set_compiletime_error_class(null_class);
+        I->object_store()->set_growable_list_factory(null_function);
+        I->object_store()->set_simple_instance_of_function(null_function);
+        I->object_store()->set_simple_instance_of_true_function(null_function);
+        I->object_store()->set_simple_instance_of_false_function(null_function);
+        I->object_store()->set_async_set_thread_stack_trace(null_function);
+        I->object_store()->set_async_star_move_next_helper(null_function);
+        I->object_store()->set_complete_on_async_return(null_function);
+        I->object_store()->set_async_star_stream_controller(null_class);
+        I->object_store()->set_bytecode_attributes(Array::null_array());
+        DropMetadata();
+        DropLibraryEntries();
+      }
     }
-    DropClasses();
-    DropLibraries();
 
-    Obfuscate();
+    {
+      PRECOMPILER_TIMER_SCOPE(this, Drop);
+      DropClasses();
+      DropLibraries();
+    }
+
+    {
+      PRECOMPILER_TIMER_SCOPE(this, Obfuscate);
+      Obfuscate();
+    }
 
 #if defined(DEBUG)
     const auto& non_visited =
@@ -437,7 +468,11 @@ void Precompiler::DoCompileAll() {
              non_visited.ToFullyQualifiedCString());
     }
 #endif
-    ProgramVisitor::Dedup(T);
+
+    {
+      PRECOMPILER_TIMER_SCOPE(this, Dedup);
+      ProgramVisitor::Dedup(T);
+    }
 
     zone_ = NULL;
   }
@@ -449,7 +484,10 @@ void Precompiler::DoCompileAll() {
     Symbols::GetStats(I, &symbols_before, &capacity);
   }
 
-  Symbols::Compact();
+  {
+    PRECOMPILER_TIMER_SCOPE(this, SymbolsCompact);
+    Symbols::Compact();
+  }
 
   if (FLAG_trace_precompiler) {
     Symbols::GetStats(I, &symbols_after, &capacity);
@@ -465,6 +503,8 @@ void Precompiler::DoCompileAll() {
     THR_Print(" %" Pd " classes,", dropped_class_count_);
     THR_Print(" %" Pd " libraries.\n", dropped_library_count_);
   }
+
+
 }
 
 void Precompiler::PrecompileConstructors() {
@@ -536,6 +576,7 @@ void Precompiler::AddRoots() {
 }
 
 void Precompiler::Iterate() {
+  PRECOMPILER_TIMER_SCOPE(this, Compile);
   Function& function = Function::Handle(Z);
 
   phase_ = Phase::kFixpointCodeGeneration;
@@ -1613,6 +1654,7 @@ void Precompiler::TraceForRetainedFunctions() {
 }
 
 void Precompiler::FinalizeDispatchTable() {
+  PRECOMPILER_TIMER_SCOPE(this, FinalizeDispatchTable);
   if (!FLAG_use_bare_instructions || !FLAG_use_table_dispatch) return;
   // Build the entries used to serialize the dispatch table before
   // dropping functions, as we may clear references to Code objects.
@@ -1645,6 +1687,7 @@ void Precompiler::FinalizeDispatchTable() {
 }
 
 void Precompiler::ReplaceFunctionStaticCallEntries() {
+  PRECOMPILER_TIMER_SCOPE(this, FixStaticCalls);
   class StaticCallTableEntryFixer : public CodeVisitor {
    public:
     explicit StaticCallTableEntryFixer(Zone* zone)
@@ -1857,6 +1900,7 @@ void Precompiler::DropFields() {
 }
 
 void Precompiler::AttachOptimizedTypeTestingStub() {
+  PRECOMPILER_TIMER_SCOPE(this, AttachTTS);
   Isolate::Current()->heap()->CollectAllGarbage();
   GrowableHandlePtrArray<const AbstractType> types(Z, 200);
   {
@@ -2565,11 +2609,13 @@ bool PrecompileParsedFunctionHelper::Compile(CompilationPipeline* pipeline) {
 
       CompilerState compiler_state(thread(), /*is_aot=*/true,
                                    CompilerState::ShouldTrace(function));
+      compiler_state.stats = Precompiler::Instance()->compiler_stats();
 
       {
         ic_data_array = new (zone) ZoneGrowableArray<const ICData*>();
 
         TIMELINE_DURATION(thread(), CompilerVerbose, "BuildFlowGraph");
+        PRECOMPILER_TIMER_SCOPE(Precompiler::Instance(), BuildGraph);
         flow_graph =
             pipeline->BuildFlowGraph(zone, parsed_function(), ic_data_array,
                                      Compiler::kNoOSRDeoptId, optimized());
@@ -2590,32 +2636,37 @@ bool PrecompileParsedFunctionHelper::Compile(CompilationPipeline* pipeline) {
 
       CompilerPassState pass_state(thread(), flow_graph, &speculative_policy,
                                    precompiler_);
+      pass_state.stats = Precompiler::Instance()->compiler_stats();
       pass_state.reorder_blocks =
           FlowGraph::ShouldReorderBlocks(function, optimized());
 
-      if (function.ForceOptimize()) {
-        ASSERT(optimized());
-        TIMELINE_DURATION(thread(), CompilerVerbose, "OptimizationPasses");
-        flow_graph = CompilerPass::RunForceOptimizedPipeline(CompilerPass::kAOT,
-                                                             &pass_state);
-      } else if (optimized()) {
-        TIMELINE_DURATION(thread(), CompilerVerbose, "OptimizationPasses");
+      {
+        PRECOMPILER_TIMER_SCOPE(Precompiler::Instance(), Optimize);
 
-        pass_state.inline_id_to_function.Add(&function);
-        // We do not add the token position now because we don't know the
-        // position of the inlined call until later. A side effect of this
-        // is that the length of |inline_id_to_function| is always larger
-        // than the length of |inline_id_to_token_pos| by one.
-        // Top scope function has no caller (-1). We do this because we expect
-        // all token positions to be at an inlined call.
-        // Top scope function has no caller (-1).
-        pass_state.caller_inline_id.Add(-1);
+        if (function.ForceOptimize()) {
+          ASSERT(optimized());
+          TIMELINE_DURATION(thread(), CompilerVerbose, "OptimizationPasses");
+          flow_graph = CompilerPass::RunForceOptimizedPipeline(CompilerPass::kAOT,
+                                                              &pass_state);
+        } else if (optimized()) {
+          TIMELINE_DURATION(thread(), CompilerVerbose, "OptimizationPasses");
 
-        AotCallSpecializer call_specializer(precompiler_, flow_graph,
-                                            &speculative_policy);
-        pass_state.call_specializer = &call_specializer;
+          pass_state.inline_id_to_function.Add(&function);
+          // We do not add the token position now because we don't know the
+          // position of the inlined call until later. A side effect of this
+          // is that the length of |inline_id_to_function| is always larger
+          // than the length of |inline_id_to_token_pos| by one.
+          // Top scope function has no caller (-1). We do this because we expect
+          // all token positions to be at an inlined call.
+          // Top scope function has no caller (-1).
+          pass_state.caller_inline_id.Add(-1);
 
-        flow_graph = CompilerPass::RunPipeline(CompilerPass::kAOT, &pass_state);
+          AotCallSpecializer call_specializer(precompiler_, flow_graph,
+                                              &speculative_policy);
+          pass_state.call_specializer = &call_specializer;
+
+          flow_graph = CompilerPass::RunPipeline(CompilerPass::kAOT, &pass_state);
+        }
       }
 
       ASSERT(pass_state.inline_id_to_function.length() ==
@@ -2666,10 +2717,12 @@ bool PrecompileParsedFunctionHelper::Compile(CompilationPipeline* pipeline) {
           pass_state.inline_id_to_token_pos, pass_state.caller_inline_id,
           ic_data_array, function_stats);
       {
+        PRECOMPILER_TIMER_SCOPE(Precompiler::Instance(), EmitCode);
         TIMELINE_DURATION(thread(), CompilerVerbose, "CompileGraph");
         graph_compiler.CompileGraph();
       }
       {
+        PRECOMPILER_TIMER_SCOPE(Precompiler::Instance(), FinalizeCode);
         TIMELINE_DURATION(thread(), CompilerVerbose, "FinalizeCompilation");
         ASSERT(thread()->IsMutatorThread());
         FinalizeCompilation(&assembler, &graph_compiler, flow_graph,
@@ -2779,7 +2832,7 @@ static ErrorPtr PrecompileFunctionHelper(Precompiler* precompiler,
     Zone* const zone = stack_zone.GetZone();
     const bool trace_compiler =
         FLAG_trace_compiler || (FLAG_trace_optimizing_compiler && optimized);
-    Timer per_compile_timer(trace_compiler, "Compilation time");
+    Timer per_compile_timer;
     per_compile_timer.Start();
 
     ParsedFunction* parsed_function = new (zone)

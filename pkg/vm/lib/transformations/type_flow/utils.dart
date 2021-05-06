@@ -292,7 +292,7 @@ class UnionFind {
     if (id1 == id2) return;
     final int w1 = _elements[id1];
     final int w2 = _elements[id2];
-    assertx(w1 < 0 && w2 < 0);
+    assert(w1 < 0 && w2 < 0);
     if (w1 < w2) {
       _elements[id1] += w2;
       _elements[id2] = id1;

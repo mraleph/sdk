@@ -22,6 +22,7 @@
 #include "vm/compiler/aot/aot_call_specializer.h"
 #include "vm/compiler/aot/precompiler.h"
 #endif
+#include "vm/thread.h"
 #include "vm/timeline.h"
 
 #define COMPILER_PASS_REPEAT(Name, Body)                                       \
@@ -192,7 +193,10 @@ void CompilerPass::Run(CompilerPassState* state) const {
     PrintGraph(state, kTraceBefore, round);
     {
       TIMELINE_DURATION(thread, CompilerVerbose, name());
-      repeat = DoBody(state);
+      {
+        TimerScope ts(thread, state->stats != nullptr ? &state->stats->timers_[id()] : nullptr);
+        repeat = DoBody(state);
+      }
       thread->CheckForSafepoint();
     }
     PrintGraph(state, kTraceAfter, round);

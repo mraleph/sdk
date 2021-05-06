@@ -898,6 +898,22 @@ class CallSiteInliner : public ValueObject {
                    const Array& argument_names,
                    InlinedCallData* call_data,
                    bool stricter_heuristic) {
+    Timer timer;
+    timer.Start();
+    const bool success = TryInliningImpl(function, argument_names, call_data, stricter_heuristic);
+    timer.Stop();
+    auto stats = CompilerState::Current().stats;
+    if (stats != nullptr) {
+      Timer* target = success ? &stats->try_inlining_ : &stats->try_inlining_failure_;
+      target->AddTotal(timer);
+    }
+    return success;
+  }
+
+  bool TryInliningImpl(const Function& function,
+                   const Array& argument_names,
+                   InlinedCallData* call_data,
+                   bool stricter_heuristic) {
     if (trace_inlining()) {
       String& name = String::Handle(function.QualifiedUserVisibleName());
       THR_Print("  => %s (deopt count %d)\n", name.ToCString(),

@@ -12,6 +12,7 @@
 #include <initializer_list>
 
 #include "vm/growable_array.h"
+#include "vm/timer.h"
 #include "vm/token_position.h"
 #include "vm/zone.h"
 
@@ -58,12 +59,14 @@ namespace dart {
 class AllocationSinking;
 class BlockScheduler;
 class CallSpecializer;
+struct CompilerStats;
 class FlowGraph;
 class Function;
 class Precompiler;
 class SpeculativeInliningPolicy;
 class TimelineStream;
 class Thread;
+
 
 struct CompilerPassState {
   CompilerPassState(Thread* thread,
@@ -105,6 +108,8 @@ struct CompilerPassState {
 
   intptr_t sticky_flags;
 
+  CompilerStats* stats = nullptr;
+
  private:
   FlowGraph* flow_graph_;
 };
@@ -121,7 +126,7 @@ class CompilerPass {
   static constexpr intptr_t kNumPasses = 0 COMPILER_PASS_LIST(ADD_ONE);
 #undef ADD_ONE
 
-  CompilerPass(Id id, const char* name) : name_(name), flags_(0) {
+  CompilerPass(Id id, const char* name) : id_(id), name_(name), flags_(0) {
     ASSERT(passes_[id] == NULL);
     passes_[id] = this;
 
@@ -144,6 +149,7 @@ class CompilerPass {
 
   intptr_t flags() const { return flags_; }
   const char* name() const { return name_; }
+  Id id() const { return id_; }
 
   bool IsFlagSet(Flag flag) const { return (flags() & flag) != 0; }
 
@@ -198,9 +204,17 @@ class CompilerPass {
 
   static CompilerPass* passes_[];
 
+  Id id_;
   const char* name_;
   intptr_t flags_;
 };
+
+struct CompilerStats {
+  Timer try_inlining_;
+  Timer try_inlining_failure_;
+  Timer timers_[CompilerPass::kNumPasses];
+};
+
 
 }  // namespace dart
 

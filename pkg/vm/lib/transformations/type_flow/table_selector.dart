@@ -88,7 +88,7 @@ class TableSelectorAssigner {
   int _selectorIdForMap(Map<Class, Map<Name, int>> map, Member member) {
     int memberId = map[member.enclosingClass][member.name];
     if (memberId == null) {
-      assertx(member is Procedure &&
+      assert(member is Procedure &&
           ((identical(map, _getterMemberIds) &&
                   (member.kind == ProcedureKind.Operator ||
                       member.kind == ProcedureKind.Setter)) ||

@@ -133,7 +133,7 @@ std::unique_ptr<Program> Program::ReadFrom(Reader* reader, const char** error) {
   uint8_t sdkHash[kSdkHashSizeInBytes + 1];
   reader->ReadBytes(sdkHash, kSdkHashSizeInBytes);
   sdkHash[kSdkHashSizeInBytes] = 0;  // Null terminate.
-  if (strcmp(Version::SdkHash(), kSdkHashNull) != 0 &&
+  if (false && strcmp(Version::SdkHash(), kSdkHashNull) != 0 &&
       strcmp((const char*)sdkHash, kSdkHashNull) != 0 &&
       strcmp((const char*)sdkHash, Version::SdkHash()) != 0) {
     if (error != nullptr) {

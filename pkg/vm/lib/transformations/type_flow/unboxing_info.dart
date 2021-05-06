@@ -37,7 +37,7 @@ class UnboxingInfoManager {
   }
 
   UnboxingInfoMetadata getUnboxingInfoOfMember(Member member) {
-    assertx(_finishedGraph);
+    assert(_finishedGraph);
     member = _validMemberOrNull(member);
     if ((member == null || (!_memberIds.containsKey(member)))) {
       return null;
@@ -53,7 +53,7 @@ class UnboxingInfoManager {
   }
 
   void finishGraph() {
-    assertx(!_finishedGraph);
+    assert(!_finishedGraph);
     final oldToNewId = {};
     final newUnboxingInfo = <UnboxingInfoMetadata>[];
     for (int i = 0; i < _allUnboxingInfo.length; i++) {
@@ -65,7 +65,7 @@ class UnboxingInfoManager {
     }
     for (final key in _memberIds.keys) {
       final newId = oldToNewId[_partitionIds[_memberIds[key]]];
-      assertx(newId != null);
+      assert(newId != null);
       _memberIds[key] = newId;
     }
     _allUnboxingInfo.clear();
@@ -82,10 +82,10 @@ class UnboxingInfoManager {
   }
 
   void applyToArg(Member member, int argPos, Type type) {
-    assertx(_finishedGraph);
+    assert(_finishedGraph);
     member = _validMemberOrNull(member);
     if (member == null) return;
-    assertx(_memberIds.containsKey(member));
+    assert(_memberIds.containsKey(member));
     final partitionId = _memberIds[member];
 
     if (argPos < 0 ||
@@ -108,10 +108,10 @@ class UnboxingInfoManager {
   }
 
   void applyToReturn(Member member, Type type) {
-    assertx(_finishedGraph);
+    assert(_finishedGraph);
     member = _validMemberOrNull(member);
     if (member == null) return;
-    assertx(_memberIds.containsKey(member));
+    assert(_memberIds.containsKey(member));
     final partitionId = _memberIds[member];
     final unboxingInfo = _allUnboxingInfo[partitionId];
 
@@ -171,15 +171,15 @@ class UnboxingInfoManager {
   }
 
   void _addMember(Member member) {
-    assertx(!_finishedGraph);
+    assert(!_finishedGraph);
 
     if (_cannotUnbox(member)) {
       _mustBox.add(member);
     }
 
     final int memberId = _allUnboxingInfo.length;
-    assertx(memberId == _partitionIds.length);
-    assertx(_partitionIds.length == _partitionRank.length);
+    assert(memberId == _partitionIds.length);
+    assert(_partitionIds.length == _partitionRank.length);
     final int argsLen = member is Field
         ? (member.hasSetter ? 1 : 0)
         : member.function.requiredParameterCount;
@@ -219,7 +219,7 @@ class UnboxingInfoManager {
   }
 
   int _find(int memberId) {
-    assertx(!_finishedGraph);
+    assert(!_finishedGraph);
     if (memberId == _partitionIds[memberId]) {
       return memberId;
     }
@@ -230,7 +230,7 @@ class UnboxingInfoManager {
   }
 
   void _union(int memberId1, int memberId2) {
-    assertx(!_finishedGraph);
+    assert(!_finishedGraph);
     final partitionId1 = _find(memberId1);
     final partitionId2 = _find(memberId2);
 

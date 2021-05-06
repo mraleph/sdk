@@ -47,7 +47,7 @@ BENCHMARK(CorelibCompileAll) {
   TransitionNativeToVM transition(thread);
   StackZone zone(thread);
   HANDLESCOPE(thread);
-  Timer timer(true, "Compile all of Core lib benchmark");
+  Timer timer;
   timer.Start();
   const Error& error =
       Error::Handle(Library::CompileAll(/*ignore_error=*/true));
@@ -132,7 +132,7 @@ static int64_t GenKernelKernelBenchmark(const char* name,
   bool read_fully = file->ReadFully(kernel_buffer, kernel_buffer_size);
   EXPECT(read_fully);
 
-  Timer timer(true, name);
+  Timer timer;
   if (benchmark_load) {
     timer.Start();
   }
@@ -193,7 +193,7 @@ BENCHMARK_MEMORY(GenKernelKernelMaxRSS) {
 //
 BENCHMARK(CorelibIsolateStartup) {
   const int kNumIterations = 1000;
-  Timer timer(true, "CorelibIsolateStartup");
+  Timer timer;
   Isolate* isolate = thread->isolate();
   Dart_ExitIsolate();
   for (int i = 0; i < kNumIterations; i++) {
@@ -293,7 +293,7 @@ BENCHMARK(UseDartApi) {
   result = Dart_Invoke(lib, NewString("benchmark"), 1, args);
   EXPECT_VALID(result);
 
-  Timer timer(true, "UseDartApi benchmark");
+  Timer timer;
   timer.Start();
   result = Dart_Invoke(lib, NewString("benchmark"), 1, args);
   EXPECT_VALID(result);
@@ -311,7 +311,7 @@ static void NoopFinalizer(void* isolate_callback_data,
 //
 BENCHMARK(DartStringAccess) {
   const int kNumIterations = 10000000;
-  Timer timer(true, "DartStringAccess benchmark");
+  Timer timer;
   timer.Start();
   Dart_EnterScope();
 
@@ -385,7 +385,7 @@ BENCHMARK(KernelServiceCompileAll) {
   result = Dart_FinalizeLoading(false);
   EXPECT_VALID(result);
 
-  Timer timer(true, "Compile all of kernel service benchmark");
+  Timer timer;
   timer.Start();
 #if !defined(PRODUCT)
   const bool old_flag = FLAG_background_compilation;
@@ -407,7 +407,7 @@ BENCHMARK(KernelServiceCompileAll) {
 // Measure frame lookup during stack traversal.
 //
 static void StackFrame_accessFrame(Dart_NativeArguments args) {
-  Timer timer(true, "LookupDartCode benchmark");
+  Timer timer;
   timer.Start();
   {
     Thread* thread = Thread::Current();
@@ -596,7 +596,7 @@ BENCHMARK(CreateMirrorSystem) {
 
   Dart_Handle lib = TestCase::LoadTestScript(kScriptChars, NULL);
 
-  Timer timer(true, "currentMirrorSystem() benchmark");
+  Timer timer;
   timer.Start();
   Dart_Handle result = Dart_Invoke(lib, NewString("benchmark"), 0, NULL);
   EXPECT_VALID(result);
@@ -618,7 +618,7 @@ BENCHMARK(EnterExitIsolate) {
     Api::CheckAndFinalizePendingClasses(thread);
   }
   Dart_Isolate isolate = Dart_CurrentIsolate();
-  Timer timer(true, "Enter and Exit isolate");
+  Timer timer;
   timer.Start();
   for (intptr_t i = 0; i < kLoopCount; i++) {
     Dart_ExitIsolate();
@@ -635,7 +635,7 @@ BENCHMARK(SerializeNull) {
   HANDLESCOPE(thread);
   const Object& null_object = Object::Handle();
   const intptr_t kLoopCount = 1000000;
-  Timer timer(true, "Serialize Null");
+  Timer timer;
   timer.Start();
   for (intptr_t i = 0; i < kLoopCount; i++) {
     StackZone zone(thread);
@@ -658,7 +658,7 @@ BENCHMARK(SerializeSmi) {
   HANDLESCOPE(thread);
   const Integer& smi_object = Integer::Handle(Smi::New(42));
   const intptr_t kLoopCount = 1000000;
-  Timer timer(true, "Serialize Smi");
+  Timer timer;
   timer.Start();
   for (intptr_t i = 0; i < kLoopCount; i++) {
     StackZone zone(thread);
@@ -683,7 +683,7 @@ BENCHMARK(SimpleMessage) {
   array_object.SetAt(0, Integer::Handle(Smi::New(42)));
   array_object.SetAt(1, Object::Handle());
   const intptr_t kLoopCount = 1000000;
-  Timer timer(true, "Simple Message");
+  Timer timer;
   timer.Start();
   for (intptr_t i = 0; i < kLoopCount; i++) {
     StackZone zone(thread);
@@ -717,7 +717,7 @@ BENCHMARK(LargeMap) {
   Instance& map = Instance::Handle();
   map ^= Api::UnwrapHandle(h_result);
   const intptr_t kLoopCount = 100;
-  Timer timer(true, "Large Map");
+  Timer timer;
   timer.Start();
   for (intptr_t i = 0; i < kLoopCount; i++) {
     StackZone zone(thread);

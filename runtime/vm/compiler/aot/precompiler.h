@@ -16,6 +16,7 @@
 #include "vm/hash_table.h"
 #include "vm/object.h"
 #include "vm/symbols.h"
+#include "vm/timer.h"
 
 namespace dart {
 
@@ -206,6 +207,40 @@ class InstanceKeyValueTrait {
 
 typedef DirectChainedHashMap<InstanceKeyValueTrait> InstanceSet;
 
+class PrecompilerStats {
+ public:
+#define PRECOMPILER_STATS_TIMERS(V) \
+  V(CompileAll) \
+  V(Compile)   \
+  V(BuildGraph) \
+  V(Optimize) \
+  V(EmitCode) \
+  V(FinalizeCode) \
+  V(AttachTTS) \
+  V(Trace)     \
+  V(FinalizeDispatchTable) \
+  V(FixStaticCalls) \
+  V(Drop)      \
+  V(Obfuscate) \
+  V(Dedup)     \
+  V(SymbolsCompact) \
+
+  enum {
+#define DECLARE(Name) k##Name,
+PRECOMPILER_STATS_TIMERS(DECLARE)
+#undef DECLARE
+  };
+
+#define INC(Name) +1
+  static constexpr intptr_t kNumTimers = 0 PRECOMPILER_STATS_TIMERS(INC);
+#undef INC
+
+  Timer timers[kNumTimers];
+};
+
+#define PRECOMPILER_TIMER_SCOPE(precompiler, Name) \
+  TimerScope timer_scope_##__COUNTER__((precompiler)->thread(), &(precompiler)->stats()->timers[PrecompilerStats::k##Name])
+
 class Precompiler : public ValueObject {
  public:
   static ErrorPtr CompileAll();
@@ -248,6 +283,12 @@ class Precompiler : public ValueObject {
 
   bool is_tracing() const { return is_tracing_; }
 
+  CompilerStats* compiler_stats() { return &compiler_stats_; }
+  PrecompilerStats* stats() { return &stats_; }
+  Thread* thread() const { return thread_; }
+  Zone* zone() const { return zone_; }
+  Isolate* isolate() const { return isolate_; }
+
  private:
   static Precompiler* singleton_;
 
@@ -269,6 +310,8 @@ class Precompiler : public ValueObject {
 
   explicit Precompiler(Thread* thread);
   ~Precompiler();
+
+  void ReportStats();
 
   void DoCompileAll();
   void AddRoots();
@@ -328,9 +371,6 @@ class Precompiler : public ValueObject {
     il_serialization_stream_ = file;
   }
 
-  Thread* thread() const { return thread_; }
-  Zone* zone() const { return zone_; }
-  Isolate* isolate() const { return isolate_; }
 
   Thread* thread_;
   Zone* zone_;
@@ -366,6 +406,9 @@ class Precompiler : public ValueObject {
   Error& error_;
 
   compiler::DispatchTableGenerator* dispatch_table_generator_;
+
+  PrecompilerStats stats_;
+  CompilerStats compiler_stats_;
 
   bool get_runtime_type_is_unique_;
   void* il_serialization_stream_;

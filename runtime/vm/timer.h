@@ -13,17 +13,30 @@
 
 namespace dart {
 
+struct MeasureMonotonic {
+  static inline int64_t Now() {
+    return OS::GetCurrentMonotonicMicros();
+  }
+};
+
+struct MeasureCpu {
+  static inline int64_t Now() {
+    return OS::GetCurrentThreadCPUMicros();
+  }
+};
+
 // Timer class allows timing of specific operations in the VM.
-class Timer : public ValueObject {
+template<typename Measure>
+class TimerImpl : public ValueObject {
  public:
-  Timer(bool report, const char* message) : report_(report), message_(message) {
+  TimerImpl() {
     Reset();
   }
-  ~Timer() {}
+  ~TimerImpl() {}
 
   // Start timer.
   void Start() {
-    start_ = OS::GetCurrentMonotonicMicros();
+    start_ = Measure::Now();
     running_ = true;
   }
 
@@ -31,7 +44,7 @@ class Timer : public ValueObject {
   void Stop() {
     ASSERT(start_ != 0);
     ASSERT(running());
-    stop_ = OS::GetCurrentMonotonicMicros();
+    stop_ = Measure::Now();
     int64_t elapsed = ElapsedMicros();
     max_contiguous_ = Utils::Maximum(max_contiguous_.load(), elapsed);
     // Make increment atomic in case it occurs in parallel with aggregation.
@@ -43,7 +56,7 @@ class Timer : public ValueObject {
   int64_t TotalElapsedTime() const {
     int64_t result = total_;
     if (running_) {
-      int64_t now = OS::GetCurrentMonotonicMicros();
+      int64_t now = Measure::Now();
       result += (now - start_);
     }
     return result;
@@ -52,7 +65,7 @@ class Timer : public ValueObject {
   int64_t MaxContiguous() const {
     int64_t result = max_contiguous_;
     if (running_) {
-      int64_t now = OS::GetCurrentMonotonicMicros();
+      int64_t now = Measure::Now();
       result = Utils::Maximum(result, now - start_);
     }
     return result;
@@ -71,12 +84,21 @@ class Timer : public ValueObject {
            (max_contiguous_ == 0) && !running_;
   }
 
-  void AddTotal(const Timer& other) { total_.fetch_add(other.total_); }
+  void AddTotal(const TimerImpl& other) { total_.fetch_add(other.total_); }
+
+  const char* FormatElapsedHumanReadable(Zone* zone) {
+    auto total = TotalElapsedTime();
+    if (total > kMicrosecondsPerSecond) {
+      return OS::SCreate(zone, "%f s", MicrosecondsToSeconds(total));
+    } else if (total > kMicrosecondsPerMillisecond) {
+      return OS::SCreate(zone, "%f ms", MicrosecondsToMilliseconds(total));
+    } else {
+      return OS::SCreate(zone, "%" Pd64 " \u00B5s", total);
+    }
+  }
 
   // Accessors.
-  bool report() const { return report_; }
   bool running() const { return running_; }
-  const char* message() const { return message_; }
 
  private:
   int64_t ElapsedMicros() const {
@@ -89,11 +111,72 @@ class Timer : public ValueObject {
   RelaxedAtomic<int64_t> stop_;
   RelaxedAtomic<int64_t> total_;
   RelaxedAtomic<int64_t> max_contiguous_;
-  bool report_;
+
   bool running_;
-  const char* message_;
+
+  DISALLOW_COPY_AND_ASSIGN(TimerImpl);
+};
+
+class Timer : public ValueObject {
+ public:
+  Timer()  {
+    Reset();
+  }
+  ~Timer() {}
+
+  // Start timer.
+  void Start() {
+    cpu_.Start();
+    monotonic_.Start();
+  }
+
+  // Stop timer.
+  void Stop() {
+    cpu_.Stop();
+    monotonic_.Stop();
+  }
+
+  // Get total cumulative elapsed time in micros.
+  int64_t TotalElapsedTime() const {
+    return monotonic_.TotalElapsedTime();
+  }
+
+  int64_t MaxContiguous() const {
+    return monotonic_.MaxContiguous();
+  }
+
+  void Reset() {
+    monotonic_.Reset();
+    cpu_.Reset();
+  }
+
+  bool IsReset() const {
+    return monotonic_.IsReset();
+  }
+
+  void AddTotal(const Timer& other) {
+    monotonic_.AddTotal(other.monotonic_);
+    cpu_.AddTotal(other.cpu_);
+  }
+
+  const char* FormatElapsedHumanReadable(Zone* zone) {
+    return OS::SCreate(zone, "%s (cpu %s)", monotonic_.FormatElapsedHumanReadable(zone), cpu_.FormatElapsedHumanReadable(zone));
+  }
+
+ private:
+  TimerImpl<MeasureMonotonic> monotonic_;
+  TimerImpl<MeasureCpu> cpu_;
 
   DISALLOW_COPY_AND_ASSIGN(Timer);
+};
+
+class TimerScope : public StackResource {
+ public:
+  TimerScope(ThreadState* thread, Timer* timer) : StackResource(thread), timer_(timer) { if (timer_ != nullptr) timer_->Start(); }
+  ~TimerScope() { if (timer_ != nullptr) timer_->Stop(); }
+
+ private:
+  Timer* const timer_;
 };
 
 }  // namespace dart

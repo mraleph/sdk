@@ -12,11 +12,13 @@
 #include "vm/compiler/api/deopt_id.h"
 #include "vm/compiler/cha.h"
 #include "vm/heap/safepoint.h"
+#include "vm/timer.h"
 #include "vm/thread.h"
 
 namespace dart {
 
 class Function;
+struct CompilerStats;
 class LocalScope;
 class LocalVariable;
 class SlotCache;
@@ -107,6 +109,8 @@ class CompilerState : public ThreadStackResource {
 
   // Returns class Comparable<T> from dart:core.
   const Class& ComparableClass();
+
+  CompilerStats* stats;
 
  private:
   CHA cha_;
