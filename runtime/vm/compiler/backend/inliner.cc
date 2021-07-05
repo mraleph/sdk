@@ -208,7 +208,6 @@ class GraphInfoCollector : public ValueObject {
         if (current->IsAllocateObject()) {
           instruction_count_ += current->InputCount();
         } else if (current->ArgumentCount() > 0) {
-          ASSERT(!current->HasPushArguments());
           instruction_count_ += current->ArgumentCount();
         }
         if (current->IsInstanceCall() || current->IsStaticCall() ||
@@ -1549,8 +1548,6 @@ class CallSiteInliner : public ValueObject {
     exit_collector->PrepareGraphs(callee_graph);
     ReplaceParameterStubs(zone(), caller_graph_, call_data, NULL);
     exit_collector->ReplaceCall(callee_function_entry);
-
-    ASSERT(!call_data->call->HasPushArguments());
   }
 
   static intptr_t CountConstants(const GrowableArray<Value*>& arguments) {
@@ -2234,8 +2231,6 @@ TargetEntryInstr* PolymorphicInliner::BuildDecisionGraph() {
       }
     }
   }
-
-  ASSERT(!call_->HasPushArguments());
 
   // Handle any non-inlined variants.
   if (!non_inlined_variants_->is_empty()) {
@@ -3438,8 +3433,6 @@ bool FlowGraphInliner::TryReplaceInstanceCallWithInline(
       flow_graph->AddExactnessGuard(call, receiver_cid);
     }
 
-    ASSERT(!call->HasPushArguments());
-
     // Replace all uses of this definition with the result.
     if (call->HasUses()) {
       ASSERT(result != nullptr && result->HasSSATemp());
@@ -3488,7 +3481,6 @@ bool FlowGraphInliner::TryReplaceStaticCallWithInline(
     ASSERT((last != nullptr && result != nullptr) ||
            (call->function().recognized_kind() ==
             MethodRecognizer::kObjectConstructor));
-    ASSERT(!call->HasPushArguments());
     // Replace all uses of this definition with the result.
     if (call->HasUses()) {
       ASSERT(result->HasSSATemp());

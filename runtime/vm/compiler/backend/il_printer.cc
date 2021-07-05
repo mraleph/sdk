@@ -99,14 +99,6 @@ class IlTestPrinter : public AllStatic {
           writer->PrintValue(instr->InputAt(i)->definition()->ssa_temp_index());
         }
         writer->CloseArray();
-      } else if (instr->ArgumentCount() != 0 &&
-                 instr->GetPushArguments() != nullptr) {
-        writer->OpenArray("i");
-        for (intptr_t i = 0; i < instr->ArgumentCount(); i++) {
-          writer->PrintValue(
-              instr->ArgumentValueAt(i)->definition()->ssa_temp_index());
-        }
-        writer->CloseArray();
       }
       AttributesSerializer serializer(writer);
       instr->Accept(&serializer);
@@ -1357,10 +1349,6 @@ void TailCallInstr::PrintOperandsTo(BaseTextBuffer* f) const {
   f->AddString(")");
 }
 
-void PushArgumentInstr::PrintOperandsTo(BaseTextBuffer* f) const {
-  value()->PrintTo(f);
-}
-
 void GotoInstr::PrintTo(BaseTextBuffer* f) const {
   if (GetDeoptId() != DeoptId::kNone) {
     f->Printf("goto:%" Pd " B%" Pd "", GetDeoptId(), successor()->block_id());
@@ -1413,14 +1401,9 @@ void Utf8ScanInstr::PrintTo(BaseTextBuffer* f) const {
 
 void Environment::PrintTo(BaseTextBuffer* f) const {
   f->AddString(" env={ ");
-  int arg_count = 0;
   for (intptr_t i = 0; i < values_.length(); ++i) {
     if (i > 0) f->AddString(", ");
-    if (values_[i]->definition()->IsPushArgument()) {
-      f->Printf("a%d", arg_count++);
-    } else {
-      values_[i]->PrintTo(f);
-    }
+    values_[i]->PrintTo(f);
     if ((locations_ != NULL) && !locations_[i].IsInvalid()) {
       f->AddString(" [");
       locations_[i].PrintTo(f);

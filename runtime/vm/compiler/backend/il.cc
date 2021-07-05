@@ -1483,15 +1483,19 @@ void Instruction::UnuseAllInputs() {
 void Instruction::RepairPushArgsInEnvironment() const {
   // Some calls (e.g. closure calls) have more inputs than actual arguments.
   // Those extra inputs will be consumed from the stack before the call.
-  const intptr_t after_args_input_count = env()->LazyDeoptPruneCount();
-  PushArgumentsArray* push_arguments = GetPushArguments();
-  ASSERT(push_arguments != nullptr);
   const intptr_t arg_count = ArgumentCount();
+  if (arg_count == 0) {
+    return;
+  }
+
+  const intptr_t after_args_input_count = env()->LazyDeoptPruneCount();
   ASSERT((arg_count + after_args_input_count) <= env()->Length());
   const intptr_t env_base =
       env()->Length() - arg_count - after_args_input_count;
   for (intptr_t i = 0; i < arg_count; ++i) {
-    env()->ValueAt(env_base + i)->BindToEnvironment(push_arguments->At(i));
+    env()
+        ->ValueAt(env_base + i)
+        ->BindToEnvironment(ArgumentValueAt(i)->definition());
   }
 }
 
@@ -4915,15 +4919,16 @@ LocationSummary* DispatchTableCallInstr::MakeLocationSummary(Zone* zone,
                                                              bool opt) const {
   const intptr_t kNumInputs = 1;
   const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kCall);
-  summary->set_in(
-      0, Location::RegisterLocation(DispatchTableNullErrorABI::kClassIdReg));
+  LocationSummary* summary = new (zone) LocationSummary(
+      zone, ArgumentCount() + kNumInputs, kNumTemps, LocationSummary::kCall);
+  summary->set_in(ArgumentCount(), Location::RegisterLocation(
+                                       DispatchTableNullErrorABI::kClassIdReg));
   return MakeCallSummary(zone, this, summary);
 }
 
 void DispatchTableCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  ASSERT(locs()->in(0).reg() == DispatchTableNullErrorABI::kClassIdReg);
+  ASSERT(locs()->in(ArgumentCount()).reg() ==
+         DispatchTableNullErrorABI::kClassIdReg);
   Array& arguments_descriptor = Array::ZoneHandle();
   if (selector()->requires_args_descriptor) {
     ArgumentsInfo args_info(type_args_len(), ArgumentCount(), ArgumentsSize(),
@@ -4941,7 +4946,7 @@ void DispatchTableCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       compiler->AddNullCheck(source(), function_name);
     }
   }
-  __ Drop(ArgumentsSize());
+  compiler->EmitDropArguments(ArgumentsSize());
 
   compiler->AddDispatchTableCallTarget(selector());
 }

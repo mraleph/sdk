@@ -38,8 +38,31 @@ LocationSummary* Instruction::MakeCallSummary(Zone* zone,
   ASSERT(locs == nullptr || locs->always_calls());
   LocationSummary* result =
       ((locs == nullptr)
-           ? (new (zone) LocationSummary(zone, 0, 0, LocationSummary::kCall))
+           ? (new (zone) LocationSummary(zone, instr->ArgumentCount(), 0,
+                                         LocationSummary::kCall))
            : locs);
+  ASSERT(result->input_count() >= instr->ArgumentCount());
+  for (intptr_t i = instr->ArgumentCount() - 1, sp_relative_index = 0; i >= 0;
+       --i) {
+    const auto rep = instr->RequiredInputRepresentation(i);
+    switch (rep) {
+      case kTagged:
+        result->set_in(i, Location::StackSlot(sp_relative_index, SPREG));
+        sp_relative_index += 1;
+        break;
+      case kUnboxedDouble:
+        result->set_in(i, Location::DoubleStackSlot(sp_relative_index, SPREG));
+        sp_relative_index += compiler::target::kDoubleSpillFactor;
+        break;
+      case kUnboxedInt64:
+        result->set_in(i, Location::StackSlot(sp_relative_index, SPREG));
+        sp_relative_index += compiler::target::kIntSpillFactor;
+        break;
+      default:
+        UNREACHABLE();
+        break;
+    }
+  }
   const auto representation = instr->representation();
   switch (representation) {
     case kTagged:
@@ -281,100 +304,6 @@ void MemoryCopyInstr::EmitComputeStartPointer(FlowGraphCompiler* compiler,
   }
 }
 
-LocationSummary* PushArgumentInstr::MakeLocationSummary(Zone* zone,
-                                                        bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* locs = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  if (representation() == kUnboxedDouble) {
-    locs->set_in(0, Location::RequiresFpuRegister());
-  } else if (representation() == kUnboxedInt64) {
-    locs->set_in(0, Location::RequiresRegister());
-  } else {
-    locs->set_in(0, LocationAnyOrConstant(value()));
-  }
-  return locs;
-}
-
-// Buffers registers in order to use STP to push
-// two registers at once.
-class ArgumentsPusher : public ValueObject {
- public:
-  ArgumentsPusher() {}
-
-  // Flush all buffered registers.
-  void Flush(FlowGraphCompiler* compiler) {
-    if (pending_register_ != kNoRegister) {
-      __ Push(pending_register_);
-      pending_register_ = kNoRegister;
-    }
-  }
-
-  // Buffer given register. May push buffered registers if needed.
-  void PushRegister(FlowGraphCompiler* compiler, Register reg) {
-    if (pending_register_ != kNoRegister) {
-      __ PushPair(reg, pending_register_);
-      pending_register_ = kNoRegister;
-      return;
-    }
-    pending_register_ = reg;
-  }
-
-  // Returns free temp register to hold argument value.
-  Register GetFreeTempRegister(FlowGraphCompiler* compiler) {
-    CLOBBERS_LR({
-      // While pushing arguments only Push, PushPair, LoadObject and
-      // LoadFromOffset are used. They do not clobber TMP or LR.
-      static_assert(((1 << LR) & kDartAvailableCpuRegs) == 0,
-                    "LR should not be allocatable");
-      static_assert(((1 << TMP) & kDartAvailableCpuRegs) == 0,
-                    "TMP should not be allocatable");
-      return (pending_register_ == TMP) ? LR : TMP;
-    });
-  }
-
- private:
-  Register pending_register_ = kNoRegister;
-};
-
-void PushArgumentInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  // In SSA mode, we need an explicit push. Nothing to do in non-SSA mode
-  // where arguments are pushed by their definitions.
-  if (compiler->is_optimizing()) {
-    if (previous()->IsPushArgument()) {
-      // Already generated.
-      return;
-    }
-    ArgumentsPusher pusher;
-    for (PushArgumentInstr* push_arg = this; push_arg != nullptr;
-         push_arg = push_arg->next()->AsPushArgument()) {
-      const Location value = push_arg->locs()->in(0);
-      Register reg = kNoRegister;
-      if (value.IsRegister()) {
-        reg = value.reg();
-      } else if (value.IsConstant()) {
-        if (compiler::IsSameObject(compiler::NullObject(), value.constant())) {
-          reg = NULL_REG;
-        } else {
-          reg = pusher.GetFreeTempRegister(compiler);
-          __ LoadObject(reg, value.constant());
-        }
-      } else if (value.IsFpuRegister()) {
-        pusher.Flush(compiler);
-        __ PushDouble(value.fpu_reg());
-        continue;
-      } else {
-        ASSERT(value.IsStackSlot());
-        const intptr_t value_offset = value.ToStackSlotOffset();
-        reg = pusher.GetFreeTempRegister(compiler);
-        __ LoadFromOffset(reg, value.base_reg(), value_offset);
-      }
-      pusher.PushRegister(compiler, reg);
-    }
-    pusher.Flush(compiler);
-  }
-}
 
 LocationSummary* ReturnInstr::MakeLocationSummary(Zone* zone, bool opt) const {
   const intptr_t kNumInputs = 1;
@@ -508,9 +437,10 @@ LocationSummary* ClosureCallInstr::MakeLocationSummary(Zone* zone,
                                                        bool opt) const {
   const intptr_t kNumInputs = 1;
   const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kCall);
-  summary->set_in(0, Location::RegisterLocation(R0));  // Function.
+  LocationSummary* summary = new (zone) LocationSummary(
+      zone, ArgumentCount() + kNumInputs, kNumTemps, LocationSummary::kCall);
+  summary->set_in(ArgumentCount(),
+                  Location::RegisterLocation(R0));  // Function.
   return MakeCallSummary(zone, this, summary);
 }
 
@@ -521,7 +451,7 @@ void ClosureCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       Array::ZoneHandle(Z, GetArgumentsDescriptor());
   __ LoadObject(R4, arguments_descriptor);
 
-  ASSERT(locs()->in(0).reg() == R0);
+  ASSERT(locs()->in(ArgumentCount()).reg() == R0);
   if (FLAG_precompiled_mode) {
     // R0: Closure with a cached entry point.
     __ LoadFieldFromOffset(R2, R0,
@@ -544,7 +474,7 @@ void ClosureCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   __ blr(R2);
   compiler->EmitCallsiteMetadata(source(), deopt_id(),
                                  UntaggedPcDescriptors::kOther, locs(), env());
-  __ Drop(argument_count);
+  compiler->EmitDropArguments(argument_count);
 }
 
 LocationSummary* LoadLocalInstr::MakeLocationSummary(Zone* zone,
@@ -1179,7 +1109,7 @@ void NativeCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   SetupNative();
   const Register result = locs()->out(0).reg();
 
-  // All arguments are already @SP due to preceding PushArgument()s.
+  // All arguments are already @SP.
   ASSERT(ArgumentCount() ==
          function().NumParameters() + (function().IsGeneric() ? 1 : 0));
 
@@ -1224,7 +1154,7 @@ void NativeCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   }
   __ Pop(result);
 
-  __ Drop(ArgumentCount());  // Drop the arguments.
+  compiler->EmitDropArguments(ArgumentCount());  // Drop the arguments.
 }
 
 LocationSummary* FfiCallInstr::MakeLocationSummary(Zone* zone,

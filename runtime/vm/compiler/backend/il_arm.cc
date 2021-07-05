@@ -40,8 +40,34 @@ LocationSummary* Instruction::MakeCallSummary(Zone* zone,
   ASSERT(locs == nullptr || locs->always_calls());
   LocationSummary* result =
       ((locs == nullptr)
-           ? (new (zone) LocationSummary(zone, 0, 0, LocationSummary::kCall))
+           ? (new (zone) LocationSummary(zone, instr->ArgumentCount(), 0,
+                                         LocationSummary::kCall))
            : locs);
+  ASSERT(result->input_count() >= instr->ArgumentCount());
+  for (intptr_t i = instr->ArgumentCount() - 1, sp_relative_index = 0; i >= 0;
+       --i) {
+    const auto rep = instr->RequiredInputRepresentation(i);
+    switch (rep) {
+      case kTagged:
+        result->set_in(i, Location::StackSlot(sp_relative_index, SPREG));
+        sp_relative_index += 1;
+        break;
+      case kUnboxedDouble:
+        result->set_in(i, Location::DoubleStackSlot(sp_relative_index, SPREG));
+        sp_relative_index += compiler::target::kDoubleSpillFactor;
+        break;
+      case kUnboxedInt64:
+        result->set_in(
+            i,
+            Location::Pair(Location::StackSlot(sp_relative_index, SPREG),
+                           Location::StackSlot(sp_relative_index + 1, SPREG)));
+        sp_relative_index += compiler::target::kIntSpillFactor;
+        break;
+      default:
+        UNREACHABLE();
+        break;
+    }
+  }
   const auto representation = instr->representation();
   switch (representation) {
     case kTagged:
@@ -274,169 +300,6 @@ void MemoryCopyInstr::EmitComputeStartPointer(FlowGraphCompiler* compiler,
   }
 }
 
-LocationSummary* PushArgumentInstr::MakeLocationSummary(Zone* zone,
-                                                        bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* locs = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  if (representation() == kUnboxedDouble) {
-    locs->set_in(0, Location::RequiresFpuRegister());
-  } else if (representation() == kUnboxedInt64) {
-    locs->set_in(0, Location::Pair(Location::RequiresRegister(),
-                                   Location::RequiresRegister()));
-  } else {
-    locs->set_in(0, LocationAnyOrConstant(value()));
-  }
-  return locs;
-}
-
-// Buffers registers to use STMDB in order to push
-// multiple registers at once.
-class ArgumentsPusher : public ValueObject {
- public:
-  ArgumentsPusher() {}
-
-  // Flush all buffered registers.
-  void Flush(FlowGraphCompiler* compiler) {
-    if (pending_regs_ != 0) {
-      if (is_single_register_) {
-        __ Push(lowest_register_);
-      } else {
-        __ PushList(pending_regs_);
-      }
-      pending_regs_ = 0;
-      lowest_register_ = kNoRegister;
-      is_single_register_ = false;
-    }
-  }
-
-  // Buffer given register. May push previously buffered registers if needed.
-  void PushRegister(FlowGraphCompiler* compiler, Register reg) {
-    if (pending_regs_ != 0) {
-      ASSERT(lowest_register_ != kNoRegister);
-      // STMDB pushes higher registers first, so we can only buffer
-      // lower registers.
-      if (reg < lowest_register_) {
-        pending_regs_ |= (1 << reg);
-        lowest_register_ = reg;
-        is_single_register_ = false;
-        return;
-      }
-      Flush(compiler);
-    }
-    pending_regs_ = (1 << reg);
-    lowest_register_ = reg;
-    is_single_register_ = true;
-  }
-
-  // Return a register which can be used to hold a value of an argument.
-  Register FindFreeRegister(FlowGraphCompiler* compiler,
-                            Instruction* push_arg) {
-    // Dart calling conventions do not have callee-save registers,
-    // so arguments pushing can clobber all allocatable registers
-    // except registers used in arguments which were not pushed yet,
-    // as well as ParallelMove and inputs of a call instruction.
-    intptr_t busy = kReservedCpuRegisters;
-    for (Instruction* instr = push_arg;; instr = instr->next()) {
-      ASSERT(instr != nullptr);
-      if (ParallelMoveInstr* parallel_move = instr->AsParallelMove()) {
-        for (intptr_t i = 0, n = parallel_move->NumMoves(); i < n; ++i) {
-          const auto src_loc = parallel_move->MoveOperandsAt(i)->src();
-          if (src_loc.IsRegister()) {
-            busy |= (1 << src_loc.reg());
-          } else if (src_loc.IsPairLocation()) {
-            busy |= (1 << src_loc.AsPairLocation()->At(0).reg());
-            busy |= (1 << src_loc.AsPairLocation()->At(1).reg());
-          }
-        }
-      } else {
-        ASSERT(instr->IsPushArgument() || (instr->ArgumentCount() > 0));
-        for (intptr_t i = 0, n = instr->locs()->input_count(); i < n; ++i) {
-          const auto in_loc = instr->locs()->in(i);
-          if (in_loc.IsRegister()) {
-            busy |= (1 << in_loc.reg());
-          } else if (in_loc.IsPairLocation()) {
-            const auto pair_location = in_loc.AsPairLocation();
-            busy |= (1 << pair_location->At(0).reg());
-            busy |= (1 << pair_location->At(1).reg());
-          }
-        }
-        if (instr->ArgumentCount() > 0) {
-          break;
-        }
-      }
-    }
-    if (pending_regs_ != 0) {
-      // Find the highest available register which can be pushed along with
-      // pending registers.
-      Register reg = HighestAvailableRegister(busy, lowest_register_);
-      if (reg != kNoRegister) {
-        return reg;
-      }
-      Flush(compiler);
-    }
-    // At this point there are no pending buffered registers.
-    // Use LR as it's the highest free register, it is not allocatable and
-    // it is clobbered by the call.
-    CLOBBERS_LR({
-      static_assert(((1 << LR) & kDartAvailableCpuRegs) == 0,
-                    "LR should not be allocatable");
-      return LR;
-    });
-  }
-
- private:
-  RegList pending_regs_ = 0;
-  Register lowest_register_ = kNoRegister;
-  bool is_single_register_ = false;
-
-  Register HighestAvailableRegister(intptr_t busy, Register upper_bound) {
-    for (intptr_t i = upper_bound - 1; i >= 0; --i) {
-      if ((busy & (1 << i)) == 0) {
-        return static_cast<Register>(i);
-      }
-    }
-    return kNoRegister;
-  }
-};
-
-void PushArgumentInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  // In SSA mode, we need an explicit push. Nothing to do in non-SSA mode
-  // where arguments are pushed by their definitions.
-  if (compiler->is_optimizing()) {
-    if (previous()->IsPushArgument()) {
-      // Already generated.
-      return;
-    }
-    ArgumentsPusher pusher;
-    for (PushArgumentInstr* push_arg = this; push_arg != nullptr;
-         push_arg = push_arg->next()->AsPushArgument()) {
-      const Location value = push_arg->locs()->in(0);
-      if (value.IsRegister()) {
-        pusher.PushRegister(compiler, value.reg());
-      } else if (value.IsPairLocation()) {
-        pusher.PushRegister(compiler, value.AsPairLocation()->At(1).reg());
-        pusher.PushRegister(compiler, value.AsPairLocation()->At(0).reg());
-      } else if (value.IsFpuRegister()) {
-        pusher.Flush(compiler);
-        __ vstmd(DB_W, SP, EvenDRegisterOf(value.fpu_reg()), 1);
-      } else {
-        const Register reg = pusher.FindFreeRegister(compiler, push_arg);
-        ASSERT(reg != kNoRegister);
-        if (value.IsConstant()) {
-          __ LoadObject(reg, value.constant());
-        } else {
-          ASSERT(value.IsStackSlot());
-          const intptr_t value_offset = value.ToStackSlotOffset();
-          __ LoadFromOffset(reg, value.base_reg(), value_offset);
-        }
-        pusher.PushRegister(compiler, reg);
-      }
-    }
-    pusher.Flush(compiler);
-  }
-}
 
 LocationSummary* ReturnInstr::MakeLocationSummary(Zone* zone, bool opt) const {
   const intptr_t kNumInputs = 1;
@@ -584,9 +447,10 @@ LocationSummary* ClosureCallInstr::MakeLocationSummary(Zone* zone,
                                                        bool opt) const {
   const intptr_t kNumInputs = 1;
   const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kCall);
-  summary->set_in(0, Location::RegisterLocation(R0));  // Function.
+  LocationSummary* summary = new (zone) LocationSummary(
+      zone, ArgumentCount() + kNumInputs, kNumTemps, LocationSummary::kCall);
+  summary->set_in(ArgumentCount(),
+                  Location::RegisterLocation(R0));  // Function.
   return MakeCallSummary(zone, this, summary);
 }
 
@@ -597,7 +461,7 @@ void ClosureCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       Array::ZoneHandle(Z, GetArgumentsDescriptor());
   __ LoadObject(R4, arguments_descriptor);
 
-  ASSERT(locs()->in(0).reg() == R0);
+  ASSERT(locs()->in(ArgumentCount()).reg() == R0);
   if (FLAG_precompiled_mode) {
     // R0: Closure with a cached entry point.
     __ ldr(R2, compiler::FieldAddress(
@@ -620,7 +484,7 @@ void ClosureCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   __ blx(R2);
   compiler->EmitCallsiteMetadata(source(), deopt_id(),
                                  UntaggedPcDescriptors::kOther, locs(), env());
-  __ Drop(argument_count);
+  compiler->EmitDropArguments(argument_count);
 }
 
 LocationSummary* LoadLocalInstr::MakeLocationSummary(Zone* zone,
@@ -1352,7 +1216,7 @@ void NativeCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   SetupNative();
   const Register result = locs()->out(0).reg();
 
-  // All arguments are already @SP due to preceding PushArgument()s.
+  // All arguments are already @SP.
   ASSERT(ArgumentCount() ==
          function().NumParameters() + (function().IsGeneric() ? 1 : 0));
 
@@ -1399,7 +1263,7 @@ void NativeCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   }
   __ Pop(result);
 
-  __ Drop(ArgumentCount());  // Drop the arguments.
+  compiler->EmitDropArguments(ArgumentCount());  // Drop the arguments.
 }
 
 LocationSummary* FfiCallInstr::MakeLocationSummary(Zone* zone,

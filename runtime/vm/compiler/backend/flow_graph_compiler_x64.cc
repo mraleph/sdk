@@ -94,9 +94,6 @@ TypedDataPtr CompilerDeoptInfo::CreateDeoptInfo(FlowGraphCompiler* compiler,
     return TypedData::null();
   }
 
-  intptr_t stack_height = compiler->StackSize();
-  AllocateIncomingParametersRecursive(deopt_env_, &stack_height);
-
   intptr_t slot_ix = 0;
   Environment* current = deopt_env_;
 
@@ -464,7 +461,7 @@ void FlowGraphCompiler::EmitUnoptimizedStaticCall(
   __ LoadObject(RBX, ic_data);
   GenerateDartCall(deopt_id, source, stub,
                    UntaggedPcDescriptors::kUnoptStaticCall, locs, entry_kind);
-  __ Drop(size_with_type_args, RCX);
+  EmitDropArguments(size_with_type_args);
 }
 
 void FlowGraphCompiler::EmitEdgeCounter(intptr_t edge_id) {
@@ -503,7 +500,7 @@ void FlowGraphCompiler::EmitOptimizedInstanceCall(
   __ LoadUniqueObject(RBX, ic_data);
   GenerateDartCall(deopt_id, source, stub, UntaggedPcDescriptors::kIcCall, locs,
                    entry_kind);
-  __ Drop(ic_data.SizeWithTypeArgs(), RCX);
+  EmitDropArguments(ic_data.SizeWithTypeArgs());
 }
 
 void FlowGraphCompiler::EmitInstanceCallJIT(const Code& stub,
@@ -528,7 +525,7 @@ void FlowGraphCompiler::EmitInstanceCallJIT(const Code& stub,
   __ call(compiler::FieldAddress(CODE_REG, entry_point_offset));
   EmitCallsiteMetadata(source, deopt_id, UntaggedPcDescriptors::kIcCall, locs,
                        pending_deoptimization_env_);
-  __ Drop(ic_data.SizeWithTypeArgs(), RCX);
+  EmitDropArguments(ic_data.SizeWithTypeArgs());
 }
 
 void FlowGraphCompiler::EmitMegamorphicInstanceCall(
@@ -575,7 +572,7 @@ void FlowGraphCompiler::EmitMegamorphicInstanceCall(
     }
   }
   RecordCatchEntryMoves(pending_deoptimization_env_);
-  __ Drop(args_desc.SizeWithTypeArgs(), RCX);
+  EmitDropArguments(args_desc.SizeWithTypeArgs());
 }
 
 void FlowGraphCompiler::EmitInstanceCallAOT(const ICData& ic_data,
@@ -617,7 +614,7 @@ void FlowGraphCompiler::EmitInstanceCallAOT(const ICData& ic_data,
 
   EmitCallsiteMetadata(source, deopt_id, UntaggedPcDescriptors::kOther, locs,
                        pending_deoptimization_env_);
-  __ Drop(ic_data.SizeWithTypeArgs(), RCX);
+  EmitDropArguments(ic_data.SizeWithTypeArgs());
 }
 
 void FlowGraphCompiler::EmitOptimizedStaticCall(
@@ -641,7 +638,7 @@ void FlowGraphCompiler::EmitOptimizedStaticCall(
   // we can record the outgoing edges to other code.
   GenerateStaticDartCall(deopt_id, source, UntaggedPcDescriptors::kOther, locs,
                          function, entry_kind);
-  __ Drop(size_with_type_args, RCX);
+  EmitDropArguments(size_with_type_args);
 }
 
 void FlowGraphCompiler::EmitDispatchTableCall(

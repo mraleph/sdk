@@ -1235,10 +1235,6 @@ CompileType ParameterInstr::ComputeType() const {
   return CompileType::Dynamic();
 }
 
-CompileType PushArgumentInstr::ComputeType() const {
-  return CompileType::Dynamic();
-}
-
 CompileType ConstantInstr::ComputeType() const {
   if (value().IsNull()) {
     return CompileType::Null();

@@ -39,8 +39,31 @@ LocationSummary* Instruction::MakeCallSummary(Zone* zone,
   ASSERT(locs == nullptr || locs->always_calls());
   LocationSummary* result =
       ((locs == nullptr)
-           ? (new (zone) LocationSummary(zone, 0, 0, LocationSummary::kCall))
+           ? (new (zone) LocationSummary(zone, instr->ArgumentCount(), 0,
+                                         LocationSummary::kCall))
            : locs);
+  ASSERT(result->input_count() >= instr->ArgumentCount());
+  for (intptr_t i = instr->ArgumentCount() - 1, sp_relative_index = 0; i >= 0;
+       --i) {
+    const auto rep = instr->RequiredInputRepresentation(i);
+    switch (rep) {
+      case kTagged:
+        result->set_in(i, Location::StackSlot(sp_relative_index, SPREG));
+        sp_relative_index += 1;
+        break;
+      case kUnboxedDouble:
+        result->set_in(i, Location::DoubleStackSlot(sp_relative_index, SPREG));
+        sp_relative_index += compiler::target::kDoubleSpillFactor;
+        break;
+      case kUnboxedInt64:
+        result->set_in(i, Location::StackSlot(sp_relative_index, SPREG));
+        sp_relative_index += compiler::target::kIntSpillFactor;
+        break;
+      default:
+        UNREACHABLE();
+        break;
+    }
+  }
   const auto representation = instr->representation();
   switch (representation) {
     case kTagged:
@@ -268,40 +291,6 @@ void MemoryCopyInstr::EmitComputeStartPointer(FlowGraphCompiler* compiler,
   __ leaq(array_reg, compiler::Address(array_reg, start_reg, scale, offset));
 }
 
-LocationSummary* PushArgumentInstr::MakeLocationSummary(Zone* zone,
-                                                        bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* locs = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  if (representation() == kUnboxedDouble) {
-    locs->set_in(0, Location::RequiresFpuRegister());
-  } else if (representation() == kUnboxedInt64) {
-    locs->set_in(0, Location::RequiresRegister());
-  } else {
-    locs->set_in(0, LocationAnyOrConstant(value()));
-  }
-  return locs;
-}
-
-void PushArgumentInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  // In SSA mode, we need an explicit push. Nothing to do in non-SSA mode
-  // where arguments are pushed by their definitions.
-  if (compiler->is_optimizing()) {
-    Location value = locs()->in(0);
-    if (value.IsRegister()) {
-      __ pushq(value.reg());
-    } else if (value.IsConstant()) {
-      __ PushObject(value.constant());
-    } else if (value.IsFpuRegister()) {
-      __ AddImmediate(RSP, compiler::Immediate(-kDoubleSize));
-      __ movsd(compiler::Address(RSP, 0), value.fpu_reg());
-    } else {
-      ASSERT(value.IsStackSlot());
-      __ pushq(LocationToStackSlotAddress(value));
-    }
-  }
-}
 
 LocationSummary* ReturnInstr::MakeLocationSummary(Zone* zone, bool opt) const {
   const intptr_t kNumInputs = 1;
@@ -1133,7 +1122,7 @@ void NativeCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   Register result = locs()->out(0).reg();
   const intptr_t argc_tag = NativeArguments::ComputeArgcTag(function());
 
-  // All arguments are already @RSP due to preceding PushArgument()s.
+  // All arguments are already @RSP.
   ASSERT(ArgumentCount() ==
          function().NumParameters() + (function().IsGeneric() ? 1 : 0));
 
@@ -1172,7 +1161,7 @@ void NativeCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   }
   __ popq(result);
 
-  __ Drop(ArgumentCount());  // Drop the arguments.
+  compiler->EmitDropArguments(ArgumentCount());
 }
 
 LocationSummary* FfiCallInstr::MakeLocationSummary(Zone* zone,
@@ -6910,11 +6899,12 @@ Condition StrictCompareInstr::EmitComparisonCodeRegConstant(
 
 LocationSummary* ClosureCallInstr::MakeLocationSummary(Zone* zone,
                                                        bool opt) const {
-  const intptr_t kNumInputs = 1;
+  const intptr_t kNumInputs = ArgumentCount() + 1;
   const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kCall);
-  summary->set_in(0, Location::RegisterLocation(RAX));  // Function.
+  LocationSummary* summary = new (zone) LocationSummary(
+      zone, ArgumentCount() + kNumInputs, kNumTemps, LocationSummary::kCall);
+  summary->set_in(ArgumentCount(),
+                  Location::RegisterLocation(RAX));  // Function.
   return MakeCallSummary(zone, this, summary);
 }
 
@@ -6925,7 +6915,7 @@ void ClosureCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
       Array::ZoneHandle(Z, GetArgumentsDescriptor());
   __ LoadObject(R10, arguments_descriptor);
 
-  ASSERT(locs()->in(0).reg() == RAX);
+  ASSERT(locs()->in(ArgumentCount()).reg() == RAX);
   if (FLAG_precompiled_mode) {
     // RAX: Closure with cached entry point.
     __ movq(RCX, compiler::FieldAddress(
@@ -6949,7 +6939,7 @@ void ClosureCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   __ call(RCX);
   compiler->EmitCallsiteMetadata(source(), deopt_id(),
                                  UntaggedPcDescriptors::kOther, locs(), env());
-  __ Drop(argument_count);
+  compiler->EmitDropArguments(argument_count);
 }
 
 LocationSummary* BooleanNegateInstr::MakeLocationSummary(Zone* zone,

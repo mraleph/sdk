@@ -1224,7 +1224,6 @@ main() {
       kMatchAndMoveStoreIndexed,
       kMatchAndMoveBox,
       kMatchAndMoveStoreIndexed,
-      kMatchAndMovePushArgument,
       {kMatchAndMoveStaticCall, &string_interpolate},
       kMatchReturn,
   }));

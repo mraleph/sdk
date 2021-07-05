@@ -98,9 +98,6 @@ class CompilerDeoptInfo : public ZoneAllocated {
  private:
   void EmitMaterializations(Environment* env, DeoptInfoBuilder* builder);
 
-  void AllocateIncomingParametersRecursive(Environment* env,
-                                           intptr_t* stack_height);
-
   intptr_t pc_offset_;
   const intptr_t deopt_id_;
   const ICData::DeoptReasonId reason_;
@@ -894,6 +891,11 @@ class FlowGraphCompiler : public ValueObject {
                                      bool jump_on_miss = true);
 
   bool IsEmptyBlock(BlockEntryInstr* block) const;
+
+  // Drop arguments pushed for the call. Does nothing in the optimized
+  // code, which simply places arguments into the prereserved area at
+  // the top of the stack.
+  void EmitDropArguments(intptr_t count);
 
  private:
   friend class BoxInt64Instr;            // For AddPcRelativeCallStubTarget().

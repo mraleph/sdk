@@ -188,6 +188,10 @@ void SSALivenessAnalysis::ComputeInitialSets() {
     for (BackwardInstructionIterator it(block); !it.Done(); it.Advance()) {
       Instruction* current = it.Current();
 
+      if (current->env() != nullptr) {
+        current->RepairPushArgsInEnvironment();
+      }
+
       // Initialize location summary for instruction.
       current->InitializeLocationSummary(zone(), true);  // opt
 
@@ -231,7 +235,7 @@ void SSALivenessAnalysis::ComputeInitialSets() {
             // MaterializeObject instruction is not in the graph.
             // Treat its inputs as part of the environment.
             DeepLiveness(defn->AsMaterializeObject(), live_in);
-          } else if (!defn->IsPushArgument() && !defn->IsConstant()) {
+          } else if (!defn->IsConstant()) {
             live_in->Add(defn->ssa_temp_index());
             if (defn->HasPairRepresentation()) {
               live_in->Add(ToSecondPairVreg(defn->ssa_temp_index()));
@@ -947,6 +951,7 @@ void FlowGraphAllocator::ConnectIncomingPhiMoves(JoinEntryInstr* join) {
 void FlowGraphAllocator::ProcessEnvironmentUses(BlockEntryInstr* block,
                                                 Instruction* current) {
   ASSERT(current->env() != NULL);
+  const intptr_t argc = current->ArgumentCount();
   Environment* env = current->env();
   while (env != NULL) {
     // Any value mentioned in the deoptimization environment should survive
@@ -967,19 +972,15 @@ void FlowGraphAllocator::ProcessEnvironmentUses(BlockEntryInstr* block,
 
     Location* locations = flow_graph_.zone()->Alloc<Location>(env->Length());
 
-    for (intptr_t i = 0; i < env->Length(); ++i) {
+    const intptr_t first_argument =
+        env == current->env() ? env->Length() - argc : env->Length();
+    for (intptr_t i = 0; i < first_argument; ++i) {
       Value* value = env->ValueAt(i);
       Definition* def = value->definition();
       if (def->HasPairRepresentation()) {
         locations[i] = Location::Pair(Location::Any(), Location::Any());
       } else {
         locations[i] = Location::Any();
-      }
-
-      if (def->IsPushArgument()) {
-        // Frame size is unknown until after allocation.
-        locations[i] = Location::NoLocation();
-        continue;
       }
 
       ConstantInstr* constant = def->AsConstant();
@@ -1018,6 +1019,10 @@ void FlowGraphAllocator::ProcessEnvironmentUses(BlockEntryInstr* block,
         range->AddUseInterval(block_start_pos, use_pos);
         range->AddUse(use_pos, &locations[i]);
       }
+    }
+
+    for (intptr_t i = first_argument; i < env->Length(); ++i) {
+      locations[i] = current->locs()->in(i - first_argument);
     }
 
     env->set_locations(locations);
@@ -1089,7 +1094,19 @@ void FlowGraphAllocator::ProcessOneInput(BlockEntryInstr* block,
   ASSERT(input != NULL);
   ASSERT(block != NULL);
   LiveRange* range = GetLiveRange(vreg);
-  if (in_ref->IsMachineRegister()) {
+  if (in_ref->IsStackSlot() || in_ref->IsDoubleStackSlot()) {
+    // TODO(vegorov) XXX review for pair registers.
+    // Input is expected in a fixed stack slot. Expected shape of
+    // live ranges:
+    //
+    //                 j' i  i'
+    //      value    --*
+    //      stack slot [-----)
+    //
+    MoveOperands* move = AddMoveAt(pos, *in_ref, Location::Any());
+    range->AddUseInterval(block->start_pos(), pos);
+    range->AddUse(pos, move->src_slot());
+  } else if (in_ref->IsMachineRegister()) {
     // Input is expected in a fixed register. Expected shape of
     // live ranges:
     //
@@ -1271,6 +1288,26 @@ void FlowGraphAllocator::ProcessOneOutput(BlockEntryInstr* block,
 void FlowGraphAllocator::ProcessOneInstruction(BlockEntryInstr* block,
                                                Instruction* current,
                                                BitVector* interference_set) {
+  const intptr_t pos = GetLifetimePosition(current);
+
+  // Calculate space needed on the stack for the outgoing arguments (if any).
+  const intptr_t arg_count = current->ArgumentCount();
+  if (arg_count != 0) {
+    intptr_t arguments_area_size_in_words = 0;
+#if defined(TARGET_ARCH_IS_32_BIT)
+    for (intptr_t i = 0; i < arg_count; ++i) {
+      const intptr_t value_size = RepresentationUtils::ValueSize(
+          instruction->RequiredInputRepresentation(i));
+      ASSERT(value_size % kWordSize == 0);
+      arguments_area_size_in_words += value_size / kWordSize;
+    }
+#else
+    arguments_area_size_in_words = arg_count;
+#endif
+    arguments_area_size_in_words_ = Utils::Maximum(
+        arguments_area_size_in_words_, arguments_area_size_in_words);
+  }
+
   LocationSummary* locs = current->locs();
 
   Definition* def = current->AsDefinition();
@@ -1302,7 +1339,6 @@ void FlowGraphAllocator::ProcessOneInstruction(BlockEntryInstr* block,
     }
   }
 
-  const intptr_t pos = GetLifetimePosition(current);
   ASSERT(IsInstructionStartPosition(pos));
 
   ASSERT(locs->input_count() == current->InputCount());
@@ -2753,7 +2789,8 @@ static LiveRange* FindCover(LiveRange* parent, intptr_t pos) {
       return range;
     }
   }
-  UNREACHABLE();
+  FATAL("range v%" Pd " is expected to cover but does not %" Pd "",
+        parent->vreg(), pos);
   return nullptr;
 }
 
@@ -3258,7 +3295,11 @@ void FlowGraphAllocator::AllocateRegisters() {
   GraphEntryInstr* entry = block_order_[0]->AsGraphEntry();
   ASSERT(entry != NULL);
   intptr_t double_spill_slot_count = spill_slots_.length() * kDoubleSpillFactor;
-  entry->set_spill_slot_count(cpu_spill_slot_count_ + double_spill_slot_count);
+
+  const intptr_t total_spill_slots = cpu_spill_slot_count_ +
+                                     double_spill_slot_count +
+                                     arguments_area_size_in_words_;
+  entry->set_spill_slot_count(total_spill_slots);
 
   RemoveFrameIfNotNeeded();
 

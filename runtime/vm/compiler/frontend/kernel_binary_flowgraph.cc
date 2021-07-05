@@ -2217,7 +2217,7 @@ Fragment StreamingFlowGraphBuilder::BuildInstanceGet(TokenPosition* p) {
 
   LocalVariable* receiver = nullptr;
   if (direct_call.check_receiver_for_null_) {
-    // Duplicate receiver for CheckNull before it is consumed by PushArgument.
+    // Duplicate receiver for CheckNull.
     receiver = MakeTemporary();
     instructions += LoadLocal(receiver);
   }
@@ -2271,7 +2271,7 @@ Fragment StreamingFlowGraphBuilder::BuildDynamicGet(TokenPosition* p) {
 
   LocalVariable* receiver = nullptr;
   if (direct_call.check_receiver_for_null_) {
-    // Duplicate receiver for CheckNull before it is consumed by PushArgument.
+    // Duplicate receiver for CheckNull.
     receiver = MakeTemporary();
     instructions += LoadLocal(receiver);
   }
@@ -2326,7 +2326,7 @@ Fragment StreamingFlowGraphBuilder::BuildInstanceTearOff(TokenPosition* p) {
 
   LocalVariable* receiver = nullptr;
   if (direct_call.check_receiver_for_null_) {
-    // Duplicate receiver for CheckNull before it is consumed by PushArgument.
+    // Duplicate receiver for CheckNull.
     receiver = MakeTemporary();
     instructions += LoadLocal(receiver);
   }
@@ -2378,7 +2378,7 @@ Fragment StreamingFlowGraphBuilder::BuildFunctionTearOff(TokenPosition* p) {
 
   LocalVariable* receiver = nullptr;
   if (direct_call.check_receiver_for_null_) {
-    // Duplicate receiver for CheckNull before it is consumed by PushArgument.
+    // Duplicate receiver for CheckNull.
     receiver = MakeTemporary();
     instructions += LoadLocal(receiver);
   }
@@ -2442,7 +2442,7 @@ Fragment StreamingFlowGraphBuilder::BuildInstanceSet(TokenPosition* p) {
 
   LocalVariable* receiver = nullptr;
   if (direct_call.check_receiver_for_null_) {
-    // Duplicate receiver for CheckNull before it is consumed by PushArgument.
+    // Duplicate receiver for CheckNull.
     receiver = MakeTemporary();
     instructions += LoadLocal(receiver);
   }
@@ -2514,7 +2514,7 @@ Fragment StreamingFlowGraphBuilder::BuildDynamicSet(TokenPosition* p) {
 
   LocalVariable* receiver = nullptr;
   if (direct_call.check_receiver_for_null_) {
-    // Duplicate receiver for CheckNull before it is consumed by PushArgument.
+    // Duplicate receiver for CheckNull.
     receiver = MakeTemporary();
     instructions += LoadLocal(receiver);
   }
@@ -2973,7 +2973,7 @@ Fragment StreamingFlowGraphBuilder::BuildMethodInvocation(TokenPosition* p,
 
   LocalVariable* receiver_temp = nullptr;
   if (direct_call.check_receiver_for_null_) {
-    // Duplicate receiver for CheckNull before it is consumed by PushArgument.
+    // Duplicate receiver for CheckNull.
     receiver_temp = MakeTemporary();
     if (type_arguments_temp != nullptr) {
       // If call has type arguments then push them before pushing the receiver.

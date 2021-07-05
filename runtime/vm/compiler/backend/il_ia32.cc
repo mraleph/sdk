@@ -34,12 +34,18 @@ namespace dart {
 LocationSummary* Instruction::MakeCallSummary(Zone* zone,
                                               const Instruction* instr,
                                               LocationSummary* locs) {
-  // This is unused on ia32.
-  ASSERT(locs == nullptr);
-  const intptr_t kNumInputs = 0;
   const intptr_t kNumTemps = 0;
-  LocationSummary* result = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kCall);
+  LocationSummary* result =
+      new (zone) locs == nullptr
+          ? LocationSummary(zone, ArgumentCount(), kNumTemps,
+                            LocationSummary::kCall)
+          : locs;
+  ASSERT(result->input_count() >= instr->ArgumentCount());
+  for (intptr_t i = instr->ArgumentCount() - 1, sp_relative_index = 0; i >= 0;
+       --i) {
+    ASSERT(instr->RequiredInputRepresentation(i) == kTagged);
+    result->set_in(i, Location::StackSlot(sp_relative_index, SPREG));
+  }
   result->set_out(0, Location::RegisterLocation(EAX));
   return result;
 }
@@ -189,32 +195,6 @@ void MemoryCopyInstr::EmitComputeStartPointer(FlowGraphCompiler* compiler,
   __ leal(array_reg, compiler::Address(array_reg, start_reg, scale, offset));
 }
 
-LocationSummary* PushArgumentInstr::MakeLocationSummary(Zone* zone,
-                                                        bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* locs = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  ASSERT(representation() == kTagged);
-  locs->set_in(0, LocationAnyOrConstant(value()));
-  return locs;
-}
-
-void PushArgumentInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  // In SSA mode, we need an explicit push. Nothing to do in non-SSA mode
-  // where arguments are pushed by their definitions.
-  if (compiler->is_optimizing()) {
-    Location value = locs()->in(0);
-    if (value.IsRegister()) {
-      __ pushl(value.reg());
-    } else if (value.IsConstant()) {
-      __ PushObject(value.constant());
-    } else {
-      ASSERT(value.IsStackSlot());
-      __ pushl(LocationToStackSlotAddress(value));
-    }
-  }
-}
 
 LocationSummary* ReturnInstr::MakeLocationSummary(Zone* zone, bool opt) const {
   const intptr_t kNumInputs = 1;
@@ -962,7 +942,7 @@ void NativeCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   Register result = locs()->out(0).reg();
   const intptr_t argc_tag = NativeArguments::ComputeArgcTag(function());
 
-  // All arguments are already @ESP due to preceding PushArgument()s.
+  // All arguments are already @ESP.
   ASSERT(ArgumentCount() ==
          function().NumParameters() + (function().IsGeneric() ? 1 : 0));
 
@@ -995,7 +975,7 @@ void NativeCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
 
   __ popl(result);
 
-  __ Drop(ArgumentCount());  // Drop the arguments.
+  compiler->EmitDropArguments(ArgumentCount());  // Drop the arguments.
 }
 
 LocationSummary* FfiCallInstr::MakeLocationSummary(Zone* zone,
@@ -6568,11 +6548,11 @@ LocationSummary* ClosureCallInstr::MakeLocationSummary(Zone* zone,
                                                        bool opt) const {
   const intptr_t kNumInputs = 1;
   const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kCall);
-  summary->set_in(0, Location::RegisterLocation(EAX));  // Function.
-  summary->set_out(0, Location::RegisterLocation(EAX));
-  return summary;
+  LocationSummary* summary = new (zone) LocationSummary(
+      zone, ArgumentCount() + kNumInputs, kNumTemps, LocationSummary::kCall);
+  summary->set_in(ArgumentCount(),
+                  Location::RegisterLocation(EAX));  // Function.
+  return MakeCallSummary(zone, this, summary);
 }
 
 void ClosureCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
@@ -6583,7 +6563,7 @@ void ClosureCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   __ LoadObject(EDX, arguments_descriptor);
 
   // EBX: Code (compiled code or lazy compile stub).
-  ASSERT(locs()->in(0).reg() == EAX);
+  ASSERT(locs()->in(ArgumentCount()).reg() == EAX);
   __ movl(EBX, compiler::FieldAddress(EAX, Function::entry_point_offset()));
 
   // EAX: Function.
@@ -6593,7 +6573,7 @@ void ClosureCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   __ call(EBX);
   compiler->EmitCallsiteMetadata(source(), deopt_id(),
                                  UntaggedPcDescriptors::kOther, locs(), env());
-  __ Drop(argument_count);
+  compiler->EmitDropArguments(argument_count);
 }
 
 LocationSummary* BooleanNegateInstr::MakeLocationSummary(Zone* zone,

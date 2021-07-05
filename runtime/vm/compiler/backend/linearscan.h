@@ -349,6 +349,8 @@ class FlowGraphAllocator : public ValueObject {
 
   intptr_t cpu_spill_slot_count_;
 
+  intptr_t arguments_area_size_in_words_ = 0;
+
   const bool intrinsic_mode_;
 
   DISALLOW_COPY_AND_ASSIGN(FlowGraphAllocator);

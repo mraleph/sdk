@@ -841,7 +841,7 @@
         "vm-options": []
       }
     },
-    "dartkp-(linux|mac)-(product|release)-(x64|x64c)": {},
+    "dartkp-(linux|mac)-(product|release)-(x64|x64c)": { "options": { "use-elf": true } },
     "dartkp-obfuscate-(linux|mac|win)-(debug|product|release)-(x64|x64c)": {
       "options": {
         "builder-tag": "obfuscated",

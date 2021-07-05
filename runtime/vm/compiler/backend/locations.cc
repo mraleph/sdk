@@ -367,11 +367,11 @@ void Location::PrintTo(BaseTextBuffer* f) const {
     return;
   }
   if (kind() == kStackSlot) {
-    f->Printf("S%+" Pd "", stack_index());
+    f->Printf("%s[%" Pd "]", base_reg() == FPREG ? "FP" : "SP", stack_index());
   } else if (kind() == kDoubleStackSlot) {
-    f->Printf("DS%+" Pd "", stack_index());
+    f->Printf("%s[%" Pd "]D", base_reg() == FPREG ? "FP" : "SP", stack_index());
   } else if (kind() == kQuadStackSlot) {
-    f->Printf("QS%+" Pd "", stack_index());
+    f->Printf("%s[%" Pd "]Q", base_reg() == FPREG ? "FP" : "SP", stack_index());
   } else if (IsPairLocation()) {
     f->AddString("(");
     AsPairLocation()->At(0).PrintTo(f);
@@ -392,7 +392,11 @@ const char* Location::ToCString() const {
 
 void Location::Print() const {
   if (kind() == kStackSlot) {
-    THR_Print("S%+" Pd "", stack_index());
+    if (base_reg() == FPREG) {
+      THR_Print("FP[%" Pd "]", stack_index());
+    } else {
+      THR_Print("SP[%" Pd "]", stack_index());
+    }
   } else {
     THR_Print("%s", Name());
   }

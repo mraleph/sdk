@@ -536,7 +536,6 @@ COMPILER_PASS(AllocationSinking_DetachMaterializations, {
 });
 
 COMPILER_PASS(AllocateRegisters, {
-  flow_graph->InsertPushArguments();
   // Ensure loop hierarchy has been computed.
   flow_graph->GetLoopHierarchy();
   // Perform register allocation on the SSA graph.

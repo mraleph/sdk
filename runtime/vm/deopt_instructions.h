@@ -454,6 +454,7 @@ class DeoptInfoBuilder : public ValueObject {
  public:
   DeoptInfoBuilder(Zone* zone,
                    const intptr_t num_args,
+                   const intptr_t spill_slot_count,
                    compiler::Assembler* assembler);
 
   // Return address before instruction.
@@ -521,6 +522,7 @@ class DeoptInfoBuilder : public ValueObject {
 
   GrowableArray<DeoptInstr*> instructions_;
   const intptr_t num_args_;
+  const intptr_t spill_slot_count_;
   compiler::Assembler* assembler_;
 
   // Used to compress entries by sharing suffixes.

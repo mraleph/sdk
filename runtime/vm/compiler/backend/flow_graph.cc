@@ -155,9 +155,6 @@ void FlowGraph::ReplaceCurrentInstruction(ForwardInstructionIterator* iterator,
       THR_Print("Removing v%" Pd ".\n", current_defn->ssa_temp_index());
     }
   }
-  if (current->ArgumentCount() != 0) {
-    ASSERT(!current->HasPushArguments());
-  }
   iterator->RemoveCurrentFromGraph();
 }
 
@@ -1533,10 +1530,6 @@ void FlowGraph::RenameRecursive(
         break;
       }
 
-      case Instruction::kPushArgument:
-        UNREACHABLE();
-        break;
-
       case Instruction::kCheckStackOverflow:
         // Assert environment integrity at checkpoints.
         ASSERT((variable_count() +
@@ -1603,7 +1596,6 @@ void FlowGraph::RenameRecursive(
           // Rename input operand.
           Definition* input = (*env)[i];
           ASSERT(input != nullptr);
-          ASSERT(!input->IsPushArgument());
           Value* use = new (zone()) Value(input);
           phi->SetInputAt(pred_index, use);
         }
@@ -2287,7 +2279,6 @@ void FlowGraph::WidenSmiToInt32() {
         if (use_defn == NULL) {
           // We assume that tagging before returning or pushing argument costs
           // very little compared to the cost of the return/call itself.
-          ASSERT(!instr->IsPushArgument());
           if (!instr->IsReturn() &&
               (use->use_index() >= instr->ArgumentCount())) {
             gain--;
@@ -2853,37 +2844,6 @@ PhiInstr* FlowGraph::AddPhi(JoinEntryInstr* join,
   join->InsertPhi(phi);
 
   return phi;
-}
-
-void FlowGraph::InsertPushArguments() {
-  for (BlockIterator block_it = reverse_postorder_iterator(); !block_it.Done();
-       block_it.Advance()) {
-    thread()->CheckForSafepoint();
-    for (ForwardInstructionIterator instr_it(block_it.Current());
-         !instr_it.Done(); instr_it.Advance()) {
-      Instruction* instruction = instr_it.Current();
-      const intptr_t arg_count = instruction->ArgumentCount();
-      if (arg_count == 0) {
-        continue;
-      }
-      PushArgumentsArray* arguments =
-          new (Z) PushArgumentsArray(zone(), arg_count);
-      for (intptr_t i = 0; i < arg_count; ++i) {
-        Value* arg = instruction->ArgumentValueAt(i);
-        PushArgumentInstr* push_arg = new (Z) PushArgumentInstr(
-            arg->CopyWithType(Z), instruction->RequiredInputRepresentation(i));
-        arguments->Add(push_arg);
-        // Insert all PushArgument instructions immediately before call.
-        // PushArgumentInstr::EmitNativeCode may generate more efficient
-        // code for subsequent PushArgument instructions (ARM, ARM64).
-        InsertBefore(instruction, push_arg, /*env=*/nullptr, kEffect);
-      }
-      instruction->ReplaceInputsWithPushArguments(arguments);
-      if (instruction->env() != nullptr) {
-        instruction->RepairPushArgsInEnvironment();
-      }
-    }
-  }
 }
 
 void FlowGraph::Print(const char* phase) {

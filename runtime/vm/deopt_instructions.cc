@@ -1016,10 +1016,12 @@ class DeoptInfoBuilder::TrieNode : public ZoneAllocated {
 
 DeoptInfoBuilder::DeoptInfoBuilder(Zone* zone,
                                    const intptr_t num_args,
+                                   const intptr_t spill_slot_count,
                                    compiler::Assembler* assembler)
     : zone_(zone),
       instructions_(),
       num_args_(num_args),
+      spill_slot_count_(spill_slot_count),
       assembler_(assembler),
       trie_root_(new (zone) TrieNode()),
       current_info_number_(0),
@@ -1032,8 +1034,11 @@ intptr_t DeoptInfoBuilder::FindOrAddObjectInTable(const Object& obj) const {
 
 intptr_t DeoptInfoBuilder::CalculateStackIndex(
     const Location& source_loc) const {
-  intptr_t index = -compiler::target::frame_layout.VariableIndexForFrameSlot(
-      source_loc.stack_index());
+  const intptr_t fp_relative_index =
+      source_loc.ToFPRelative(spill_slot_count_).stack_index();
+  const intptr_t index =
+      -compiler::target::frame_layout.VariableIndexForFrameSlot(
+          fp_relative_index);
   return index < 0 ? index + num_args_
                    : index + num_args_ + kDartFrameFixedSize;
 }
