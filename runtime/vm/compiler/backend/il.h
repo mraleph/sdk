@@ -1370,6 +1370,7 @@ class TemplateInstruction
 class MoveOperands : public ZoneAllocated {
  public:
   MoveOperands(Location dest, Location src) : dest_(dest), src_(src) {}
+  MoveOperands(const MoveOperands& other) = default;
 
   MoveOperands& operator=(const MoveOperands& other) {
     dest_ = other.dest_;
