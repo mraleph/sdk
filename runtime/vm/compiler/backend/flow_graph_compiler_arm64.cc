@@ -841,9 +841,7 @@ int FlowGraphCompiler::EmitTestAndCallCheckCid(compiler::Assembler* assembler,
 #undef __
 #define __ assembler()->
 
-void FlowGraphCompiler::EmitMove(Location destination,
-                                 Location source,
-                                 TemporaryRegisterAllocator* allocator) {
+void FlowGraphCompiler::EmitMove(Location destination, Location source) {
   if (destination.Equals(source)) return;
 
   if (source.IsRegister()) {
@@ -863,13 +861,15 @@ void FlowGraphCompiler::EmitMove(Location destination,
       VRegister dst = destination.fpu_reg();
       __ LoadDFromOffset(dst, source.base_reg(), src_offset);
     } else {
-      ASSERT(destination.IsStackSlot());
-      const intptr_t source_offset = source.ToStackSlotOffset();
-      const intptr_t dest_offset = destination.ToStackSlotOffset();
-      Register tmp = allocator->AllocateTemporary();
-      __ LoadFromOffset(tmp, source.base_reg(), source_offset);
-      __ StoreToOffset(tmp, destination.base_reg(), dest_offset);
-      allocator->ReleaseTemporary();
+      // Should be legalized.
+      UNREACHABLE();
+      // ASSERT(destination.IsStackSlot());
+      // const intptr_t source_offset = source.ToStackSlotOffset();
+      // const intptr_t dest_offset = destination.ToStackSlotOffset();
+      // Register tmp = allocator->AllocateTemporary();
+      // __ LoadFromOffset(tmp, source.base_reg(), source_offset);
+      // __ StoreToOffset(tmp, destination.base_reg(), dest_offset);
+      // allocator->ReleaseTemporary();
     }
   } else if (source.IsFpuRegister()) {
     if (destination.IsFpuRegister()) {
@@ -915,9 +915,7 @@ void FlowGraphCompiler::EmitMove(Location destination,
   } else {
     ASSERT(source.IsConstant());
     if (destination.IsStackSlot()) {
-      Register tmp = allocator->AllocateTemporary();
-      source.constant_instruction()->EmitMoveToLocation(this, destination, tmp);
-      allocator->ReleaseTemporary();
+      UNREACHABLE();  // Should be legalized.
     } else {
       source.constant_instruction()->EmitMoveToLocation(this, destination);
     }

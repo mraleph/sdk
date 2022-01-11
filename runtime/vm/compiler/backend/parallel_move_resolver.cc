@@ -88,6 +88,10 @@ void ParallelMoveResolver::Resolve(ParallelMoveInstr* parallel_move) {
   }
   moves_.Clear();
 
+  LegalizeMoves();
+
+  AllocateTemporaries(parallel_move);
+
   // Schedule is ready. Update parallel move itself.
   parallel_move->set_move_schedule(MoveSchedule::From(scheduled_ops_));
   scheduled_ops_.Clear();
@@ -198,6 +202,187 @@ void ParallelMoveResolver::AddSwapToSchedule(int index) {
   }
 }
 
+void ParallelMoveResolver::LegalizeMoves() {
+  auto move_requires_temporary = [](Location src, Location dst) {
+    return (src.IsStackSlot() && dst.IsStackSlot()) ||
+           (src.IsConstant() && dst.IsStackSlot());
+  };
+
+  for (intptr_t i = 0; i < scheduled_ops_.length(); ++i) {
+    const auto& op = scheduled_ops_[i];
+    if (op.kind == OpKind::kMove &&
+        move_requires_temporary(op.operands.src(), op.operands.dest())) {
+      auto src = op.operands.src();
+      auto dst = op.operands.dest();
+
+      const Location temp = Location(
+          Location::kRegister, kNumberOfCpuRegisters + temporaries_.length());
+      temporaries_.Add(Location());
+
+      scheduled_ops_[i] = {OpKind::kMove, {temp, src}};
+      scheduled_ops_.InsertAt(i + 1, {OpKind::kMove, {dst, temp}});
+      i++;
+    }
+  }
+}
+
+void ParallelMoveResolver::AllocateTemporaries(ParallelMoveInstr* parallel_move) {
+  if (temporaries_.is_empty()) {
+    return;
+  }
+
+  if (parallel_move->next() != nullptr &&
+      parallel_move->next()->locs()->always_calls()) {
+    // We have an instruction that always calls, which means that we can use any
+    // register that is not an input register for the call as a scratch. The
+    // rest will be spilled.
+    auto locs = parallel_move->next()->locs();
+    intptr_t live_registers = 0;
+    for (intptr_t i = 0; i < locs->input_count(); i++) {
+      const auto loc = locs->in(i);
+      if (loc.IsRegister()) {
+        live_registers |= 1 << loc.reg();
+      }
+    }
+    live_registers_ = live_registers;
+  } else {
+    live_registers_ = -1;
+  }
+
+  // We need to assign registers to temporaries. For that we are going to
+  // use essentially a simple linear scan.
+
+  // Compute mask of registers which can't be used as temporaries.
+  intptr_t blocked_mask = kReservedCpuRegisters;
+  if (compiler_->intrinsic_mode()) {
+    // Block additional registers that must be preserved for intrinsics.
+    blocked_mask |= RegMaskBit(ARGS_DESC_REG);
+#if !defined(TARGET_ARCH_IA32)
+    // Need to preserve CODE_REG to be able to store the PC marker
+    // and load the pool pointer.
+    blocked_mask |= RegMaskBit(CODE_REG);
+#endif
+  }
+
+  intptr_t last_use_pos[kNumberOfCpuRegisters];
+  for (intptr_t i = 0; i < kNumberOfCpuRegisters; i++) {
+    last_use_pos[i] = -1;
+  }
+
+  GrowableArray<intptr_t> def_pos(temporaries_.length());
+  def_pos.EnsureLength(temporaries_.length(), -1);
+
+  auto record_use = [&](const Location& loc, intptr_t pos) {
+    if (loc.IsRegister()) {
+      if (loc.register_code() < kNumberOfCpuRegisters) {
+        last_use_pos[loc.register_code()] = pos;
+      }
+    }
+  };
+
+  auto record_def = [&](const Location& loc, intptr_t pos) {
+    if (loc.IsRegister()) {
+      if (loc.register_code() >= kNumberOfCpuRegisters) {
+        def_pos[loc.register_code() - kNumberOfCpuRegisters] = pos;
+      }
+    }
+  };
+
+  for (intptr_t i = 0; i < scheduled_ops_.length(); i++) {
+    const auto& op = scheduled_ops_[i];
+    switch (op.kind) {
+      case OpKind::kNop:
+        break;
+      case OpKind::kSwap:
+        record_def(op.operands.src(), i);
+        record_def(op.operands.dest(), i);
+        record_use(op.operands.src(), i);
+        record_use(op.operands.dest(), i);
+        break;
+      case OpKind::kMove:
+        record_def(op.operands.dest(), i);
+        record_use(op.operands.src(), i);
+        break;
+    }
+  }
+
+  SmallSet<Register> available(~live_registers_);
+
+  auto allocate_temporary = [&](intptr_t def_pos) -> Register {
+    auto available_regs =
+        static_cast<uint64_t>(
+            (available.data() & ~blocked_mask & kAllCpuRegistersList)) |
+        (static_cast<uint64_t>(1) << kNumberOfCpuRegisters);
+    for (intptr_t i = 0; i < kNumberOfCpuRegisters; i++) {
+      if (last_use_pos[i] > def_pos) {
+        available_regs &= ~(static_cast<uint64_t>(1) << i);
+      }
+    }
+    auto reg = Utils::CountTrailingZeros64(available_regs);
+    if (reg == kNumberOfCpuRegisters) {
+      // No free CPU register - everything is blocked.
+      UNREACHABLE();
+    }
+    const auto result = static_cast<Register>(reg);
+    available.Remove(result);
+    return result;
+  };
+
+  auto def = [&](Location& loc) {
+    if (loc.IsRegister()) {
+      if (loc.register_code() >= kNumberOfCpuRegisters) {
+        const auto temp_index = loc.register_code() - kNumberOfCpuRegisters;
+        ASSERT(temporaries_[temp_index].IsRegister());
+        loc = temporaries_[temp_index];
+      } else {
+        available.Add(loc.reg());
+      }
+    }
+  };
+
+  auto alloc = [&](Location& loc) {
+    if (loc.IsRegister()) {
+      if (loc.register_code() >= kNumberOfCpuRegisters) {
+        const auto temp_index = loc.register_code() - kNumberOfCpuRegisters;
+        if (temporaries_[temp_index].IsInvalid()) {
+          temporaries_[temp_index] = Location::RegisterLocation(
+              allocate_temporary(def_pos[temp_index]));
+        }
+        loc = temporaries_[temp_index];
+      }
+    }
+  };
+
+  auto use = [&](Location& loc) {
+    if (loc.IsRegister()) {
+      if (loc.register_code() < kNumberOfCpuRegisters) {
+        available.Remove(loc.reg());
+      }
+    }
+  };
+
+  for (intptr_t i = scheduled_ops_.length() - 1; i >= 0; i--) {
+    auto& op = scheduled_ops_[i];
+    switch (op.kind) {
+      case OpKind::kNop:
+        break;
+      case OpKind::kSwap:
+        def(*op.operands.src_slot());
+        def(*op.operands.dest_slot());
+        use(*op.operands.src_slot());
+        use(*op.operands.dest_slot());
+        alloc(*op.operands.src_slot());
+        alloc(*op.operands.dest_slot());
+        break;
+      case OpKind::kMove:
+        def(*op.operands.dest_slot());
+        use(*op.operands.src_slot());
+        alloc(*op.operands.src_slot());
+        break;
+    }
+  }
+}
+
 void ParallelMoveEmitter::EmitNativeCode() {
   for (auto op : *parallel_move_->move_schedule()) {
     switch (op.kind) {
@@ -216,16 +401,7 @@ void ParallelMoveEmitter::EmitNativeCode() {
 void ParallelMoveEmitter::EmitMove(const MoveOperands& move) {
   const Location src = move.src();
   const Location dst = move.dest();
-  ParallelMoveEmitter::TemporaryAllocator temp(this, /*blocked=*/kNoRegister);
-  compiler_->EmitMove(dst, src, &temp);
-#if defined(DEBUG)
-  // Allocating a scratch register here may cause stack spilling. Neither the
-  // source nor destination register should be SP-relative in that case.
-  for (const Location& loc : {dst, src}) {
-    ASSERT(!temp.DidAllocateTemporary() || !loc.HasStackIndex() ||
-           loc.base_reg() != SPREG);
-  }
-#endif
+  compiler_->EmitMove(dst, src);
 }
 
 bool ParallelMoveEmitter::IsScratchLocation(Location loc) {

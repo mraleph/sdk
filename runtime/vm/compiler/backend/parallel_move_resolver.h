@@ -41,6 +41,10 @@ class ParallelMoveResolver : public ValueObject {
   // source to destination is removed from the move graph.
   void AddSwapToSchedule(int index);
 
+  void LegalizeMoves();
+
+  void AllocateTemporaries(ParallelMoveInstr* parallel_move);
+
   FlowGraphCompiler* compiler_;
 
   // List of moves not yet resolved.
@@ -56,6 +60,9 @@ class ParallelMoveResolver : public ValueObject {
     OpKind kind;
     MoveOperands operands;
   };
+
+  GrowableArray<Location> temporaries_;
+  intptr_t live_registers_;
 
   GrowableArray<Op> scheduled_ops_;
 

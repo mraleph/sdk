@@ -1723,7 +1723,7 @@ void FlowGraphCompiler::AllocateRegistersLocally(Instruction* instr) {
           // Moves top of stack location of the peephole into the required
           // input. None of the required moves needs a temp register allocator.
           EmitMove(Location::RegisterLocation(reg),
-                   top_of_stack_->locs()->out(0), nullptr);
+                   top_of_stack_->locs()->out(0));
         }
         top_of_stack_ = nullptr;  // consumed!
       } else if (loc.IsConstant()) {
@@ -1797,7 +1797,6 @@ void FlowGraphCompiler::AllocateRegistersLocally(Instruction* instr) {
     locs->set_out(0, result_location);
   }
 }
-
 
 const ICData* FlowGraphCompiler::GetOrAddInstanceCallICData(
     intptr_t deopt_id,
@@ -3308,7 +3307,6 @@ void FlowGraphCompiler::EmitMoveFromNative(
     EmitNativeMove(dest, src, temp);
   }
 }
-
 
 // The assignment to loading units here must match that in
 // AssignLoadingUnitsCodeVisitor, which runs after compilation is done.

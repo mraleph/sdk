@@ -425,6 +425,9 @@ class Location : public ValueObject {
   static Location read(uword value) { return Location(value); }
   uword write() const { return value_; }
 
+  Location(Kind kind, uword payload)
+      : value_(KindField::encode(kind) | PayloadField::encode(payload)) {}
+
  private:
   explicit Location(uword value) : value_(value) {}
 
@@ -439,9 +442,6 @@ class Location : public ValueObject {
     value_ = PayloadField::update(StackSlotBaseField::update(reg, payload()),
                                   value_);
   }
-
-  Location(Kind kind, uword payload)
-      : value_(KindField::encode(kind) | PayloadField::encode(payload)) {}
 
   uword payload() const { return PayloadField::decode(value_); }
 

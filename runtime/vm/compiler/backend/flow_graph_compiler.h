@@ -484,7 +484,7 @@ class FlowGraphCompiler : public ValueObject {
   //
   // TODO(dartbug.com/40400): Express this in terms of EmitMove(NativeLocation
   // NativeLocation) to remove code duplication.
-  void EmitMove(Location dst, Location src, TemporaryRegisterAllocator* temp);
+  void EmitMove(Location dst, Location src);
 
   // Emits code for a move from a location `src` to a location `dst`.
   //

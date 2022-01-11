@@ -292,7 +292,12 @@ const char* Location::Name() const {
     case kInvalid:
       return "?";
     case kRegister:
-      return RegisterNames::RegisterName(reg());
+      if (register_code() < kNumberOfCpuRegisters) {
+        return RegisterNames::RegisterName(reg());
+      } else {
+        return OS::SCreate(Thread::Current()->zone(), "%%%" Pd "",
+                           register_code() - kNumberOfCpuRegisters);
+      }
     case kFpuRegister:
       return RegisterNames::FpuRegisterName(fpu_reg());
     case kStackSlot:

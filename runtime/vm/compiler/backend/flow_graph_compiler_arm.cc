@@ -831,9 +831,7 @@ int FlowGraphCompiler::EmitTestAndCallCheckCid(compiler::Assembler* assembler,
 #undef __
 #define __ assembler()->
 
-void FlowGraphCompiler::EmitMove(Location destination,
-                                 Location source,
-                                 TemporaryRegisterAllocator* allocator) {
+void FlowGraphCompiler::EmitMove(Location destination, Location source) {
   if (destination.Equals(source)) return;
 
   if (source.IsRegister()) {
@@ -930,10 +928,8 @@ void FlowGraphCompiler::EmitMove(Location destination,
     ASSERT(source.IsConstant());
     if (destination.IsFpuRegister() || destination.IsDoubleStackSlot() ||
         destination.IsStackSlot()) {
-      Register tmp = allocator->AllocateTemporary();
-      source.constant_instruction()->EmitMoveToLocation(this, destination, tmp,
-                                                        source.pair_index());
-      allocator->ReleaseTemporary();
+      // TODO(vegorov) XXX should be legalized.
+      UNREACHABLE();
     } else {
       source.constant_instruction()->EmitMoveToLocation(
           this, destination, kNoRegister, source.pair_index());

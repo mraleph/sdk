@@ -810,9 +810,7 @@ int FlowGraphCompiler::EmitTestAndCallCheckCid(compiler::Assembler* assembler,
 #undef __
 #define __ assembler()->
 
-void FlowGraphCompiler::EmitMove(Location destination,
-                                 Location source,
-                                 TemporaryRegisterAllocator* tmp) {
+void FlowGraphCompiler::EmitMove(Location destination, Location source) {
   if (destination.Equals(source)) return;
 
   if (source.IsRegister()) {
