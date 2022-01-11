@@ -58,8 +58,13 @@ class MoveSchedule : public LengthPrefixedArray<ParallelMoveResolver::Op> {
   }
 };
 
-ParallelMoveResolver::ParallelMoveResolver(bool is_intrinsic)
-    : is_intrinsic_(is_intrinsic), moves_(32) {}
+ParallelMoveResolver::ParallelMoveResolver(bool is_intrinsic,
+                                           bool has_frame,
+                                           intptr_t spill_slot_count)
+    : is_intrinsic_(is_intrinsic),
+      has_frame_(has_frame),
+      spill_slot_count_(spill_slot_count),
+      moves_(32) {}
 
 void ParallelMoveResolver::Resolve(ParallelMoveInstr* parallel_move) {
   ASSERT(moves_.is_empty());
@@ -92,6 +97,17 @@ void ParallelMoveResolver::Resolve(ParallelMoveInstr* parallel_move) {
 
   AllocateTemporaries(parallel_move);
 
+  // Rebase SPREG based stack slots to use FPREG is this is possible and
+  // it improves the code quality.
+  for (auto op : scheduled_ops_) {
+    if (op.kind != OpKind::kNop) {
+      op.operands.set_src(
+          RebaseStackSlotIfBeneficial(op.operands.src(), /*move_pair=*/false));
+      op.operands.set_dest(
+          RebaseStackSlotIfBeneficial(op.operands.dest(), /*move_pair=*/false));
+    }
+  }
+
   // Schedule is ready. Update parallel move itself.
   parallel_move->set_move_schedule(MoveSchedule::From(scheduled_ops_));
   scheduled_ops_.Clear();
@@ -99,13 +115,25 @@ void ParallelMoveResolver::Resolve(ParallelMoveInstr* parallel_move) {
 
 void ParallelMoveResolver::BuildInitialMoveList(
     ParallelMoveInstr* parallel_move) {
+  // Rebase FP relative moves to have uniform encoding of operands.
+  auto rebase_stack_location = [&](const Location& loc) -> Location {
+    if (loc.IsStackSlot() || loc.IsDoubleStackSlot()) {
+      if (loc.base_reg() == FPREG) {
+        return loc.ToSPRelative(spill_slot_count_);
+      }
+    }
+    return loc;
+  };
+
   // Perform a linear sweep of the moves to add them to the initial list of
   // moves to perform, ignoring any move that is redundant (the source is
   // the same as the destination, the destination is ignored and
   // unallocated, or the move was already eliminated).
   for (int i = 0; i < parallel_move->NumMoves(); i++) {
-    MoveOperands* move = parallel_move->MoveOperandsAt(i);
-    if (!move->IsRedundant()) moves_.Add(*move);
+    auto move = *parallel_move->MoveOperandsAt(i);
+    move.set_dest(rebase_stack_location(move.dest()));
+    move.set_src(rebase_stack_location(move.src()));
+    if (!move.IsRedundant()) moves_.Add(move);
   }
 }
 
@@ -737,6 +765,63 @@ void ParallelMoveResolver::AllocateTemporaries(
     }
   }
 */
+}
+
+Location ParallelMoveResolver::RebaseStackSlotIfBeneficial(const Location& loc,
+                                                           bool move_pair) {
+#if defined(TARGET_ARCH_ARM) || defined(TARGET_ARCH_ARM64)
+  if (has_frame_) {
+#if defined(TARGET_ARCH_ARM64)
+    const auto can_hold = [&](compiler::OperandSize operand_size,
+                              int32_t offset) -> bool {
+      return compiler::Address::CanHoldOffset(
+          offset,
+          move_pair ? compiler::Address::PairOffset : compiler::Address::Offset,
+          operand_size);
+    };
+#else
+    const auto can_hold = [&](compiler::OperandSize operand_size,
+                              int32_t offset) -> bool {
+      int32_t offset_mask;
+      return compiler::Address::CanHoldLoadOffset(operand_size, offset,
+                                                  &offset_mask);
+    };
+#endif
+
+    compiler::OperandSize operand_size;
+
+    switch (loc.kind()) {
+      case Location::kStackSlot: {
+        operand_size = compiler::kWordBytes;
+        break;
+      }
+      case Location::kDoubleStackSlot:
+        ASSERT(!move_pair);
+        operand_size = compiler::kDWord;
+        break;
+      case Location::kQuadStackSlot:
+        ASSERT(!move_pair);
+        operand_size = compiler::kQWord;
+        break;
+
+      default:
+        return loc;
+    }
+
+    ASSERT(loc.base_reg() == SPREG);
+    int32_t offset = loc.ToStackSlotOffset();
+    if (!can_hold(operand_size, offset)) {
+      // Offset is too big. Check if we can use FP relative offset.
+      offset -= spill_slot_count_ * compiler::target::kWordSize;
+      if (can_hold(operand_size, offset)) {
+        return Location::StackSlot(loc.stack_index() - spill_slot_count_,
+                                   FPREG);
+      }
+    }
+  }
+#endif
+
+  return loc;
 }
 
 void ParallelMoveResolver::PrintScheduleTo(const MoveSchedule& schedule,

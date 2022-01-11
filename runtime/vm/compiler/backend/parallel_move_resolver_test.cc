@@ -27,7 +27,9 @@ ISOLATE_UNIT_TEST_CASE(ParallelMove_TwoCycles) {
         }
 
         OS::PrintErr("before scheduling: %s\n", instr->ToCString());
-        ParallelMoveResolver(/*is_intrinsic=*/false).Resolve(instr);
+        ParallelMoveResolver(/*is_intrinsic=*/false, /*has_frame=*/true,
+                             /*spill_slot_count=*/0)
+            .Resolve(instr);
         OS::PrintErr("after scheduling: %s\n", instr->ToCString());
       };
 

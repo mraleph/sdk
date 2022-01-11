@@ -408,6 +408,9 @@ class Location : public ValueObject {
   // Returns the offset from the frame pointer for stack slot locations.
   intptr_t ToStackSlotOffset() const;
 
+  Location ToFPRelative(intptr_t spill_slot_count) const;
+  Location ToSPRelative(intptr_t spill_slot_count) const;
+
   const char* Name() const;
   void PrintTo(BaseTextBuffer* f) const;
   void Print() const;

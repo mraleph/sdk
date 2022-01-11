@@ -3194,7 +3194,9 @@ void FlowGraphAllocator::RemoveFrameIfNotNeeded() {
 }
 
 void FlowGraphAllocator::ScheduleParallelMoves() {
-  ParallelMoveResolver resolver(intrinsic_mode_);
+  const auto entry = block_order_[0]->AsGraphEntry();
+  ParallelMoveResolver resolver(intrinsic_mode_, entry->NeedsFrame(),
+                                entry->spill_slot_count());
 
   for (auto block : flow_graph_.reverse_postorder()) {
     if (block->HasParallelMove()) {

@@ -283,6 +283,28 @@ intptr_t Location::ToStackSlotOffset() const {
   return stack_index() * compiler::target::kWordSize;
 }
 
+Location Location::ToFPRelative(intptr_t spill_slot_count) const {
+  if (base_reg() == FPREG) {
+    return *this;
+  }
+  ASSERT(base_reg() == SPREG);
+  const intptr_t fp_relative_index = stack_index() - spill_slot_count;
+  return Location(
+      kind(), StackSlotBaseField::encode(FPREG) |
+                  StackIndexField::encode(EncodeStackIndex(fp_relative_index)));
+}
+
+Location Location::ToSPRelative(intptr_t spill_slot_count) const {
+  if (base_reg() == SPREG) {
+    return *this;
+  }
+  ASSERT(base_reg() == FPREG);
+  const intptr_t sp_relative_index = stack_index() + spill_slot_count;
+  return Location(
+      kind(), StackSlotBaseField::encode(SPREG) |
+                  StackIndexField::encode(EncodeStackIndex(sp_relative_index)));
+}
+
 const Object& Location::constant() const {
   return constant_instruction()->value();
 }

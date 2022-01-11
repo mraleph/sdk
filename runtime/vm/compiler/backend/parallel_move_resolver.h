@@ -21,7 +21,9 @@ class MoveOperands;
 
 class ParallelMoveResolver : public ValueObject {
  public:
-  ParallelMoveResolver(bool is_intrinsic);
+  ParallelMoveResolver(bool is_intrinsic,
+                       bool has_frame,
+                       intptr_t spill_slot_count);
 
   // Schedule moves specified by the given parallel move and store the
   // schedule on the parallel move itself.
@@ -53,7 +55,11 @@ class ParallelMoveResolver : public ValueObject {
     return Location(kind, kNumberOfCpuRegisters + temporaries_.length() - 1);
   }
 
+  Location RebaseStackSlotIfBeneficial(const Location& loc, bool move_pair);
+
   const bool is_intrinsic_;
+  const bool has_frame_;
+  const intptr_t spill_slot_count_;
 
   // List of moves not yet resolved.
   GrowableArray<MoveOperands> moves_;
