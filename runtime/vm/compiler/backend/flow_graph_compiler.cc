@@ -1821,7 +1821,7 @@ void ParallelMoveResolver::EmitNativeCode(ParallelMoveInstr* parallel_move) {
 
   const InstructionSource& move_source = InstructionSource(
       TokenPosition::kParallelMove, parallel_move->inlining_id());
-  for (int i = 0; i < moves_.length(); ++i) {
+  for (intptr_t i = 0; i < moves_.length(); ++i) {
     const MoveOperands& move = *moves_[i];
     // Skip constants to perform them last.  They don't block other moves
     // and skipping such moves with register destinations keeps those
@@ -1832,17 +1832,28 @@ void ParallelMoveResolver::EmitNativeCode(ParallelMoveInstr* parallel_move) {
   }
 
   // Perform the moves with constant sources.
-  for (int i = 0; i < moves_.length(); ++i) {
-    const MoveOperands& move = *moves_[i];
-    if (!move.IsEliminated()) {
-      ASSERT(move.src().IsConstant());
-      compiler_->BeginCodeSourceRange(move_source);
-      EmitMove(i);
-      compiler_->EndCodeSourceRange(move_source);
+  for (auto move : moves_) {
+    if (!move->IsEliminated()) {
+      ASSERT(move->src().IsConstant());
+      scheduled_ops_.Add({OpKind::kMove, *move});
     }
   }
-
   moves_.Clear();
+
+  // Schedule is ready. Emit the moves.
+  for (auto op : scheduled_ops_) {
+    switch (op.kind) {
+      case OpKind::kNop:
+        break;
+      case OpKind::kMove:
+        EmitMove(op.operands);
+        break;
+      case OpKind::kSwap:
+        EmitSwap(op.operands);
+        break;
+    }
+  }
+  scheduled_ops_.Clear();
 }
 
 void ParallelMoveResolver::BuildInitialMoveList(
@@ -1913,28 +1924,48 @@ void ParallelMoveResolver::PerformMove(const InstructionSource& source,
     const MoveOperands& other_move = *moves_[i];
     if (other_move.Blocks(destination)) {
       ASSERT(other_move.IsPending());
-      compiler_->BeginCodeSourceRange(source);
-      EmitSwap(index);
-      compiler_->EndCodeSourceRange(source);
+      AddSwapToSchedule(index);
       return;
     }
   }
 
   // This move is not blocked.
-  compiler_->BeginCodeSourceRange(source);
-  EmitMove(index);
-  compiler_->EndCodeSourceRange(source);
+  AddMoveToSchedule(index);
 }
 
-void ParallelMoveResolver::EmitMove(int index) {
-  MoveOperands* const move = moves_[index];
-  const Location dst = move->dest();
-  if (dst.IsStackSlot() || dst.IsDoubleStackSlot()) {
-    ASSERT((dst.base_reg() != FPREG) ||
-           ((-compiler::target::frame_layout.VariableIndexForFrameSlot(
-                dst.stack_index())) < compiler_->StackSize()));
+void ParallelMoveResolver::AddMoveToSchedule(int index) {
+  const auto move = moves_[index];
+  scheduled_ops_.Add({OpKind::kMove, *move});
+  move->Eliminate();
+}
+
+void ParallelMoveResolver::AddSwapToSchedule(int index) {
+  const auto move = moves_[index];
+  const auto source = move->src();
+  const auto destination = move->dest();
+
+  scheduled_ops_.Add({OpKind::kSwap, *move});
+
+  // The swap of source and destination has executed a move from source to
+  // destination.
+  move->Eliminate();
+
+  // Any unperformed (including pending) move with a source of either
+  // this move's source or destination needs to have their source
+  // changed to reflect the state of affairs after the swap.
+  for (int i = 0; i < moves_.length(); ++i) {
+    const auto& other_move = *moves_[i];
+    if (other_move.Blocks(source)) {
+      moves_[i]->set_src(destination);
+    } else if (other_move.Blocks(destination)) {
+      moves_[i]->set_src(source);
+    }
   }
-  const Location src = move->src();
+}
+
+void ParallelMoveResolver::EmitMove(const MoveOperands& move) {
+  const Location src = move.src();
+  const Location dst = move.dest();
   ParallelMoveResolver::TemporaryAllocator temp(this, /*blocked=*/kNoRegister);
   compiler_->EmitMove(dst, src, &temp);
 #if defined(DEBUG)
@@ -1945,18 +1976,18 @@ void ParallelMoveResolver::EmitMove(int index) {
            loc.base_reg() != SPREG);
   }
 #endif
-  move->Eliminate();
 }
 
 bool ParallelMoveResolver::IsScratchLocation(Location loc) {
-  for (int i = 0; i < moves_.length(); ++i) {
-    if (moves_[i]->Blocks(loc)) {
+  for (auto op : scheduled_ops_) {
+    if (op.operands.src().Equals(loc) ||
+        (op.kind == OpKind::kSwap && op.operands.dest().Equals(loc))) {
       return false;
     }
   }
 
-  for (int i = 0; i < moves_.length(); ++i) {
-    if (moves_[i]->dest().Equals(loc)) {
+  for (auto op : scheduled_ops_) {
+    if (op.kind == OpKind::kMove && op.operands.dest().Equals(loc)) {
       return true;
     }
   }

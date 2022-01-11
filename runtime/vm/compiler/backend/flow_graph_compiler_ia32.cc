@@ -1058,10 +1058,9 @@ void FlowGraphCompiler::EmitNativeMoveArchitecture(
 #undef __
 #define __ compiler_->assembler()->
 
-void ParallelMoveResolver::EmitSwap(int index) {
-  MoveOperands* move = moves_[index];
-  const Location source = move->src();
-  const Location destination = move->dest();
+void ParallelMoveResolver::EmitSwap(const MoveOperands& move) {
+  const Location source = move.src();
+  const Location destination = move.dest();
 
   if (source.IsRegister() && destination.IsRegister()) {
     __ xchgl(destination.reg(), source.reg());
@@ -1119,22 +1118,6 @@ void ParallelMoveResolver::EmitSwap(int index) {
     __ movups(source_slot_address, ensure_scratch.reg());
   } else {
     UNREACHABLE();
-  }
-
-  // The swap of source and destination has executed a move from source to
-  // destination.
-  move->Eliminate();
-
-  // Any unperformed (including pending) move with a source of either
-  // this move's source or destination needs to have their source
-  // changed to reflect the state of affairs after the swap.
-  for (int i = 0; i < moves_.length(); ++i) {
-    const MoveOperands& other_move = *moves_[i];
-    if (other_move.Blocks(source)) {
-      moves_[i]->set_src(destination);
-    } else if (other_move.Blocks(destination)) {
-      moves_[i]->set_src(source);
-    }
   }
 }
 

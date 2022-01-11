@@ -136,12 +136,18 @@ class ParallelMoveResolver : public ValueObject {
   // other moves to satisfy dependencies).
   void PerformMove(const InstructionSource& source, int index);
 
-  // Emit a move and remove it from the move graph.
-  void EmitMove(int index);
+  // Schedule a move and remove it from the move graph.
+  void AddMoveToSchedule(int index);
 
-  // Execute a move by emitting a swap of two operands.  The move from
+  // Schedule a swap of two operands. The move from
   // source to destination is removed from the move graph.
-  void EmitSwap(int index);
+  void AddSwapToSchedule(int index);
+
+  // Generate the code for a move from source to destination.
+  void EmitMove(const MoveOperands& move);
+
+  // Generate the code for a swap of source and destination.
+  void EmitSwap(const MoveOperands& move);
 
   // Verify the move list before performing moves.
   void Verify();
@@ -162,6 +168,19 @@ class ParallelMoveResolver : public ValueObject {
 
   // List of moves not yet resolved.
   GrowableArray<MoveOperands*> moves_;
+
+  enum class OpKind {
+    kNop,
+    kMove,
+    kSwap,
+  };
+
+  struct Op {
+    OpKind kind;
+    MoveOperands operands;
+  };
+
+  GrowableArray<Op> scheduled_ops_;
 };
 
 // Used for describing a deoptimization point after call (lazy deoptimization).
