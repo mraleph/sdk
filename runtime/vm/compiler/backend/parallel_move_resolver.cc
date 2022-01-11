@@ -95,6 +95,8 @@ void ParallelMoveResolver::Resolve(ParallelMoveInstr* parallel_move) {
 
   LegalizeMoves();
 
+  FuseIntoPairMoves();
+
   AllocateTemporaries(parallel_move);
 
   // Rebase SPREG based stack slots to use FPREG is this is possible and
@@ -261,6 +263,103 @@ void ParallelMoveResolver::LegalizeMoves() {
       }
     }
   }
+}
+
+void ParallelMoveResolver::FuseIntoPairMoves() {
+  // TODO(vegorov) completely rewrite
+#if 0
+#if defined(TARGET_ARCH_ARM64)
+  enum class MoveType { kRegToMem, kMemToReg, kOther };
+
+  struct Classified {
+    MoveType type;
+    intptr_t slot_index;
+  };
+
+  auto classify_op = [](const Op& op) -> Classified {
+    if (op.kind == OpKind::kMove) {
+      if (op.operands.src().IsRegister() && op.operands.dest().IsStackSlot()) {
+        return {MoveType::kRegToMem, op.operands.dest().stack_index()};
+      } else if (op.operands.src().IsStackSlot() &&
+                 op.operands.dest().IsRegister()) {
+        return {MoveType::kMemToReg, op.operands.src().stack_index()};
+      }
+    }
+    return {MoveType::kOther, 0};
+  };
+
+  auto destroys = [](const Op& op, Location dst) {
+    return op.operands.dest().Equals(dst);
+  };
+
+  auto consumes = [](const Op& op, Location src) {
+    return op.operands.src().Equals(src);
+  };
+
+  // On ARM64 make use of STP/LDP instructions to fuse loads from consequitive
+  // addresses.
+  for (intptr_t i = 0; i < scheduled_ops_.length(); ++i) {
+    const auto& op = scheduled_ops_[i];
+    auto move_type = classify_op(op);
+    if (move_type.type == MoveType::kOther) {
+      continue;  // Can't fuse.
+    }
+    // Look forward for another move which can form a pair with this one.
+    for (intptr_t j = i + 1; j < scheduled_ops_.length(); ++j) {
+      const auto& other_op = scheduled_ops_[j];
+      if (destroys(other_op, op.operands.src())) {
+        break;
+      }
+      if (consumes(other_op, op.operands.dest())) {
+        break;
+      }
+      auto other_move_type = classify_op(other_op);
+      if (other_move_type.type == move_type.type &&
+          Utils::Abs(other_move_type.slot_index - move_type.slot_index) == 1) {
+        // We can fuse these operations into a pair move, which will be emitted
+        // at the j position.
+        MoveOperands lo = other_move_type.slot_index > move_type.slot_index
+                              ? op.operands
+                              : other_op.operands;
+        MoveOperands hi = other_move_type.slot_index > move_type.slot_index
+                              ? other_op.operands
+                              : op.operands;
+        scheduled_ops_[j] = {OpKind::kMovePair, lo, hi};
+        scheduled_ops_[i].kind = OpKind::kNop;
+        break;
+      }
+    }
+    // Look backwards for another move which can form a pair with this one.
+    for (intptr_t j = i - 1; j >= 0; --j) {
+      const auto& other_op = scheduled_ops_[j];
+      if (destroys(other_op, op.operands.src())) {
+        break;
+      }
+      if (destroys(other_op, op.operands.dest())) {
+        break;
+      }
+      if (consumes(other_op, op.operands.dest())) {
+        break;
+      }
+      auto other_move_type = classify_op(other_op);
+      if (other_move_type.type == move_type.type &&
+          Utils::Abs(other_move_type.slot_index - move_type.slot_index) == 1) {
+        // We can fuse these operations into a pair move, which will be emitted
+        // at the j position.
+        MoveOperands lo = other_move_type.slot_index > move_type.slot_index
+                              ? op.operands
+                              : other_op.operands;
+        MoveOperands hi = other_move_type.slot_index > move_type.slot_index
+                              ? other_op.operands
+                              : op.operands;
+        scheduled_ops_[j] = {OpKind::kMovePair, lo, hi};
+        scheduled_ops_[i].kind = OpKind::kNop;
+        break;
+      }
+    }
+  }
+#endif
+#endif
 }
 
 namespace {
@@ -869,5 +968,24 @@ void ParallelMoveEmitter::EmitMove(const ParallelMoveResolver::Op& op) {
 
   compiler_->EmitMove(dst, src);
 }
+
+#if 0
+void ParallelMoveResolver::EmitMovePair(const MoveOperands& lo,
+    const MoveOperands& hi) {
+#if defined(TARGET_ARCH_ARM64)
+  if (lo.src().IsRegister()) {
+    compiler_->assembler()->StorePairToOffset(lo.src().reg(), hi.src().reg(),
+              lo.dest().base_reg(),
+              lo.dest().ToStackSlotOffset());
+  } else {
+    compiler_->assembler()->LoadPairFromOffset(lo.dest().reg(), hi.dest().reg(),
+              lo.src().base_reg(),
+              lo.src().ToStackSlotOffset());
+  }
+#else
+  UNREACHABLE();
+#endif
+}
+#endif
 
 }  // namespace dart

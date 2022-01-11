@@ -435,6 +435,53 @@ void Assembler::LoadWordFromPoolIndex(Register dst,
   }
 }
 
+Address Assembler::PrepareAddress(Register base,
+                                  int32_t offset,
+                                  Address::AddressType address_type) {
+  ASSERT(base != TMP2);
+
+  Operand op;
+  const uint32_t magnitude = Utils::Abs(offset);
+  const uint32_t upper20 = magnitude & 0xfffff000;
+  const uint32_t lower12 = magnitude & 0x00000fff;
+  if (Address::CanHoldOffset(offset, address_type)) {
+    return Address(base, offset, address_type);
+  } else if (Operand::CanHold(magnitude, kXRegSizeInBits, &op) ==
+             Operand::Immediate) {
+    if (offset > 0) {
+      add(TMP2, base, op);
+    } else {
+      sub(TMP2, base, op);
+    }
+    return Address(TMP2, 0, address_type);
+  } else if (offset > 0 &&
+             Operand::CanHold(upper20, kXRegSizeInBits, &op) ==
+                 Operand::Immediate &&
+             Address::CanHoldOffset(lower12, address_type)) {
+    add(TMP2, base, op);
+    return Address(TMP2, lower12, address_type);
+  } else {
+    AddImmediate(TMP2, base, offset);
+    return Address(TMP2, 0, address_type);
+  }
+}
+
+void Assembler::LoadPairFromOffset(Register lower,
+                                   Register upper,
+                                   Register base,
+                                   int32_t offset) {
+  const auto addr = PrepareAddress(base, offset, Address::PairOffset);
+  ldp(lower, upper, addr);
+}
+
+void Assembler::StorePairToOffset(Register lower,
+                                  Register upper,
+                                  Register base,
+                                  int32_t offset) {
+  const auto addr = PrepareAddress(base, offset, Address::PairOffset);
+  stp(lower, upper, addr);
+}
+
 void Assembler::LoadDoubleWordFromPoolIndex(Register lower,
                                             Register upper,
                                             intptr_t index) {

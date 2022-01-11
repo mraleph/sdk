@@ -48,6 +48,8 @@ class ParallelMoveResolver : public ValueObject {
 
   void LegalizeMoves();
 
+  void FuseIntoPairMoves();
+
   void AllocateTemporaries(ParallelMoveInstr* parallel_move);
 
   Location CreateTemporary(Location::Kind kind) {

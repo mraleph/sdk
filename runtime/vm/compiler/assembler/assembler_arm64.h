@@ -2002,6 +2002,15 @@ class Assembler : public AssemblerBase {
   // Note: the function never clobbers TMP, TMP2 scratch registers.
   void LoadWordFromPoolIndex(Register dst, intptr_t index, Register pp = PP);
 
+  void LoadPairFromOffset(Register lower,
+                          Register upper,
+                          Register base,
+                          int32_t offset);
+  void StorePairToOffset(Register lower,
+                         Register upper,
+                         Register base,
+                         int32_t offset);
+
   void LoadDoubleWordFromPoolIndex(Register lower,
                                    Register upper,
                                    intptr_t index);
@@ -2903,6 +2912,10 @@ class Assembler : public AssemblerBase {
   // so they should be manually preserved.
   void EnterCallRuntimeFrame(intptr_t frame_size, bool is_leaf);
   void LeaveCallRuntimeFrame(bool is_leaf);
+
+  Address PrepareAddress(Register base,
+                         int32_t offset,
+                         Address::AddressType address_type);
 
   friend class dart::FlowGraphCompiler;
   std::function<void(Register reg)> generate_invoke_write_barrier_wrapper_;
