@@ -62,7 +62,6 @@ class ParallelMoveResolver : public ValueObject {
   };
 
   GrowableArray<Location> temporaries_;
-  intptr_t live_registers_;
 
   GrowableArray<Op> scheduled_ops_;
 

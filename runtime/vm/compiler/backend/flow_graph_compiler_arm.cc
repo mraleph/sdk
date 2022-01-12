@@ -919,16 +919,11 @@ void FlowGraphCompiler::EmitMove(Location destination, Location source) {
       __ LoadMultipleDFromOffset(dtmp0, 2, source.base_reg(), source_offset);
       __ StoreMultipleDToOffset(dtmp0, 2, destination.base_reg(), dest_offset);
     }
-  } else if (source.IsPairLocation()) {
-    ASSERT(destination.IsPairLocation());
-    for (intptr_t i : {0, 1}) {
-      EmitMove(destination.Component(i), source.Component(i), allocator);
-    }
   } else {
     ASSERT(source.IsConstant());
     if (destination.IsFpuRegister() || destination.IsDoubleStackSlot() ||
         destination.IsStackSlot()) {
-      // TODO(vegorov) XXX should be legalized.
+      // Should be legalized.
       UNREACHABLE();
     } else {
       source.constant_instruction()->EmitMoveToLocation(

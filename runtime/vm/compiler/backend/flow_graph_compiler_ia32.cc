@@ -852,12 +852,8 @@ void FlowGraphCompiler::EmitMove(Location destination, Location source) {
       __ movss(destination.fpu_reg(), LocationToStackSlotAddress(source));
     } else {
       ASSERT(destination.IsStackSlot());
-      // TODO(vegorov) XXX should be legalized.
+      // Should be legalized.
       UNREACHABLE();
-      // Register scratch = tmp->AllocateTemporary();
-      // __ MoveMemoryToMemory(LocationToStackSlotAddress(destination),
-      //                      LocationToStackSlotAddress(source), scratch);
-      // tmp->ReleaseTemporary();
     }
   } else if (source.IsFpuRegister()) {
     if (destination.IsFpuRegister()) {
@@ -894,11 +890,6 @@ void FlowGraphCompiler::EmitMove(Location destination, Location source) {
       ASSERT(destination.IsQuadStackSlot());
       __ movups(FpuTMP, LocationToStackSlotAddress(source));
       __ movups(LocationToStackSlotAddress(destination), FpuTMP);
-    }
-  } else if (source.IsPairLocation()) {
-    ASSERT(destination.IsPairLocation());
-    for (intptr_t i : {0, 1}) {
-      EmitMove(destination.Component(i), source.Component(i), tmp);
     }
   } else {
     ASSERT(source.IsConstant());

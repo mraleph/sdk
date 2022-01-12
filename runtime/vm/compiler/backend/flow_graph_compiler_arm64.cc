@@ -862,14 +862,8 @@ void FlowGraphCompiler::EmitMove(Location destination, Location source) {
       __ LoadDFromOffset(dst, source.base_reg(), src_offset);
     } else {
       // Should be legalized.
+      ASSERT(destination.IsStackSlot());
       UNREACHABLE();
-      // ASSERT(destination.IsStackSlot());
-      // const intptr_t source_offset = source.ToStackSlotOffset();
-      // const intptr_t dest_offset = destination.ToStackSlotOffset();
-      // Register tmp = allocator->AllocateTemporary();
-      // __ LoadFromOffset(tmp, source.base_reg(), source_offset);
-      // __ StoreToOffset(tmp, destination.base_reg(), dest_offset);
-      // allocator->ReleaseTemporary();
     }
   } else if (source.IsFpuRegister()) {
     if (destination.IsFpuRegister()) {

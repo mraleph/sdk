@@ -203,9 +203,18 @@ void ParallelMoveResolver::AddSwapToSchedule(int index) {
 }
 
 void ParallelMoveResolver::LegalizeMoves() {
-  auto move_requires_temporary = [](Location src, Location dst) {
-    return (src.IsStackSlot() && dst.IsStackSlot()) ||
-           (src.IsConstant() && dst.IsStackSlot());
+  auto move_requires_temporary = [](Location src, Location dst) -> bool {
+#if defined(TARGET_ARCH_X64)
+    return false;
+#elif defined(TARGET_ARCH_IA32)
+    return (src.IsStackSlot() && dst.IsStackSlot());
+#elif defined(TARGET_ARCH_ARM64)
+    return dst.IsStackSlot() && (src.IsStackSlot() || src.IsConstant());
+#elif defined(TARGET_ARCH_ARM)
+    return src.IsConstant() && (dst.IsStackSlot() || dst.IsDoubleStackSlot() || dst.IsDoubleRegister());
+#else
+#error Unknown target architecture
+#endif
   };
 
   for (intptr_t i = 0; i < scheduled_ops_.length(); ++i) {
@@ -231,22 +240,20 @@ void ParallelMoveResolver::AllocateTemporaries(ParallelMoveInstr* parallel_move)
     return;
   }
 
+  intptr_t live_registers = -1;
   if (parallel_move->next() != nullptr &&
       parallel_move->next()->locs()->always_calls()) {
     // We have an instruction that always calls, which means that we can use any
     // register that is not an input register for the call as a scratch. The
     // rest will be spilled.
     auto locs = parallel_move->next()->locs();
-    intptr_t live_registers = 0;
+    live_registers = 0;
     for (intptr_t i = 0; i < locs->input_count(); i++) {
       const auto loc = locs->in(i);
       if (loc.IsRegister()) {
         live_registers |= 1 << loc.reg();
       }
     }
-    live_registers_ = live_registers;
-  } else {
-    live_registers_ = -1;
   }
 
   // We need to assign registers to temporaries. For that we are going to
@@ -306,7 +313,7 @@ void ParallelMoveResolver::AllocateTemporaries(ParallelMoveInstr* parallel_move)
     }
   }
 
-  SmallSet<Register> available(~live_registers_);
+  SmallSet<Register> available(~live_registers);
 
   auto allocate_temporary = [&](intptr_t def_pos) -> Register {
     auto available_regs =

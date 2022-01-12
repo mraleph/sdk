@@ -1721,7 +1721,7 @@ void FlowGraphCompiler::AllocateRegistersLocally(Instruction* instr) {
       if (top_of_stack_ != nullptr) {
         if (!loc.IsConstant()) {
           // Moves top of stack location of the peephole into the required
-          // input. None of the required moves needs a temp register allocator.
+          // input.
           EmitMove(Location::RegisterLocation(reg),
                    top_of_stack_->locs()->out(0));
         }
