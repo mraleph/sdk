@@ -59,6 +59,7 @@ class ParallelMoveResolver : public ValueObject {
   struct Op {
     OpKind kind;
     MoveOperands operands;
+    Location temp = Location();
   };
 
   GrowableArray<Location> temporaries_;
@@ -134,7 +135,7 @@ class ParallelMoveEmitter : public ValueObject {
   void RestoreFpuScratch(FpuRegister reg);
 
   // Generate the code for a move from source to destination.
-  void EmitMove(const MoveOperands& move);
+  void EmitMove(const ParallelMoveResolver::Op& move);
 
   void EmitSwap(const MoveOperands& swap);
 

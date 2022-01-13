@@ -211,26 +211,39 @@ void ParallelMoveResolver::LegalizeMoves() {
 #elif defined(TARGET_ARCH_ARM64)
     return dst.IsStackSlot() && (src.IsStackSlot() || src.IsConstant());
 #elif defined(TARGET_ARCH_ARM)
-    return src.IsConstant() && (dst.IsStackSlot() || dst.IsDoubleStackSlot() || dst.IsDoubleRegister());
+    return src.IsConstant() && dst.IsStackSlot();
 #else
 #error Unknown target architecture
 #endif
   };
 
+  auto allocate_temporary = [&]() -> Location {
+    temporaries_.Add(Location());
+    return Location(
+        Location::kRegister,
+        kNumberOfCpuRegisters + temporaries_.length() - 1);
+  };
+
   for (intptr_t i = 0; i < scheduled_ops_.length(); ++i) {
     const auto& op = scheduled_ops_[i];
-    if (op.kind == OpKind::kMove &&
-        move_requires_temporary(op.operands.src(), op.operands.dest())) {
-      auto src = op.operands.src();
-      auto dst = op.operands.dest();
+    if (op.kind == OpKind::kMove) {
+      if (move_requires_temporary(op.operands.src(), op.operands.dest())) {
+        auto src = op.operands.src();
+        auto dst = op.operands.dest();
 
-      const Location temp = Location(
-          Location::kRegister, kNumberOfCpuRegisters + temporaries_.length());
-      temporaries_.Add(Location());
-
-      scheduled_ops_[i] = {OpKind::kMove, {temp, src}};
-      scheduled_ops_.InsertAt(i + 1, {OpKind::kMove, {dst, temp}});
-      i++;
+        const auto temp = allocate_temporary();
+        scheduled_ops_[i] = {OpKind::kMove, {temp, src}};
+        scheduled_ops_.InsertAt(i + 1, {OpKind::kMove, {dst, temp}});
+        i++;
+      } else {
+#if defined(TARGET_ARCH_ARM)
+        if (op.operands.src().IsConstant() &&
+            (op.operands.dest().IsFpuRegister() ||
+             op.operands.dest().IsDoubleStackSlot())) {
+          scheduled_ops_[i].temp = allocate_temporary();
+        }
+#endif
+      }
     }
   }
 }
@@ -240,8 +253,12 @@ void ParallelMoveResolver::AllocateTemporaries(ParallelMoveInstr* parallel_move)
     return;
   }
 
+  // Caveat: parallel_move->next() might be a parallel move itself and thus
+  // will have locs() == nullptr.
+  // TODO(vegorov) delete this once we normalize live range splitting policy.
   intptr_t live_registers = -1;
   if (parallel_move->next() != nullptr &&
+      parallel_move->next()->locs() != nullptr &&
       parallel_move->next()->locs()->always_calls()) {
     // We have an instruction that always calls, which means that we can use any
     // register that is not an input register for the call as a scratch. The
@@ -279,7 +296,7 @@ void ParallelMoveResolver::AllocateTemporaries(ParallelMoveInstr* parallel_move)
   GrowableArray<intptr_t> def_pos(temporaries_.length());
   def_pos.EnsureLength(temporaries_.length(), -1);
 
-  auto record_use = [&](const Location& loc, intptr_t pos) {
+  const auto record_use = [&](const Location& loc, intptr_t pos) {
     if (loc.IsRegister()) {
       if (loc.register_code() < kNumberOfCpuRegisters) {
         last_use_pos[loc.register_code()] = pos;
@@ -287,7 +304,7 @@ void ParallelMoveResolver::AllocateTemporaries(ParallelMoveInstr* parallel_move)
     }
   };
 
-  auto record_def = [&](const Location& loc, intptr_t pos) {
+  const auto record_def = [&](const Location& loc, intptr_t pos) {
     if (loc.IsRegister()) {
       if (loc.register_code() >= kNumberOfCpuRegisters) {
         def_pos[loc.register_code() - kNumberOfCpuRegisters] = pos;
@@ -309,13 +326,14 @@ void ParallelMoveResolver::AllocateTemporaries(ParallelMoveInstr* parallel_move)
       case OpKind::kMove:
         record_def(op.operands.dest(), i);
         record_use(op.operands.src(), i);
+        record_def(op.temp, i - 1);
         break;
     }
   }
 
   SmallSet<Register> available(~live_registers);
 
-  auto allocate_temporary = [&](intptr_t def_pos) -> Register {
+  const auto allocate_temporary = [&](intptr_t def_pos) -> Register {
     auto available_regs =
         static_cast<uint64_t>(
             (available.data() & ~blocked_mask & kAllCpuRegistersList)) |
@@ -335,7 +353,7 @@ void ParallelMoveResolver::AllocateTemporaries(ParallelMoveInstr* parallel_move)
     return result;
   };
 
-  auto def = [&](Location& loc) {
+ const auto def = [&](Location& loc) {
     if (loc.IsRegister()) {
       if (loc.register_code() >= kNumberOfCpuRegisters) {
         const auto temp_index = loc.register_code() - kNumberOfCpuRegisters;
@@ -347,7 +365,7 @@ void ParallelMoveResolver::AllocateTemporaries(ParallelMoveInstr* parallel_move)
     }
   };
 
-  auto alloc = [&](Location& loc) {
+  const auto alloc = [&](Location& loc) {
     if (loc.IsRegister()) {
       if (loc.register_code() >= kNumberOfCpuRegisters) {
         const auto temp_index = loc.register_code() - kNumberOfCpuRegisters;
@@ -360,7 +378,7 @@ void ParallelMoveResolver::AllocateTemporaries(ParallelMoveInstr* parallel_move)
     }
   };
 
-  auto use = [&](Location& loc) {
+  const auto use = [&](Location& loc) {
     if (loc.IsRegister()) {
       if (loc.register_code() < kNumberOfCpuRegisters) {
         available.Remove(loc.reg());
@@ -370,6 +388,7 @@ void ParallelMoveResolver::AllocateTemporaries(ParallelMoveInstr* parallel_move)
 
   for (intptr_t i = scheduled_ops_.length() - 1; i >= 0; i--) {
     auto& op = scheduled_ops_[i];
+    alloc(op.temp);
     switch (op.kind) {
       case OpKind::kNop:
         break;
@@ -387,16 +406,17 @@ void ParallelMoveResolver::AllocateTemporaries(ParallelMoveInstr* parallel_move)
         alloc(*op.operands.src_slot());
         break;
     }
+    def(op.temp);
   }
 }
 
 void ParallelMoveEmitter::EmitNativeCode() {
-  for (auto op : *parallel_move_->move_schedule()) {
+  for (const auto& op : *parallel_move_->move_schedule()) {
     switch (op.kind) {
       case ParallelMoveResolver::OpKind::kNop:
         break;
       case ParallelMoveResolver::OpKind::kMove:
-        EmitMove(op.operands);
+        EmitMove(op);
         break;
       case ParallelMoveResolver::OpKind::kSwap:
         EmitSwap(op.operands);
@@ -405,9 +425,20 @@ void ParallelMoveEmitter::EmitNativeCode() {
   }
 }
 
-void ParallelMoveEmitter::EmitMove(const MoveOperands& move) {
-  const Location src = move.src();
-  const Location dst = move.dest();
+void ParallelMoveEmitter::EmitMove(const ParallelMoveResolver::Op& op) {
+  const Location src = op.operands.src();
+  const Location dst = op.operands.dest();
+
+#if defined(TARGET_ARCH_ARM)
+  if (src.IsConstant() &&
+      (dst.IsFpuRegister() ||
+        dst.IsDoubleStackSlot())) {
+    ASSERT(op.temp.IsRegister());
+    src.constant_instruction()->EmitMoveToLocation(compiler_, dst, op.temp.reg());
+    return;
+  }
+#endif
+
   compiler_->EmitMove(dst, src);
 }
 
