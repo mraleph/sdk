@@ -1822,7 +1822,7 @@ void ParallelMoveResolver::EmitNativeCode(ParallelMoveInstr* parallel_move) {
   const InstructionSource& move_source = InstructionSource(
       TokenPosition::kParallelMove, parallel_move->inlining_id());
   for (intptr_t i = 0; i < moves_.length(); ++i) {
-    const MoveOperands& move = *moves_[i];
+    const MoveOperands& move = moves_[i];
     // Skip constants to perform them last.  They don't block other moves
     // and skipping such moves with register destinations keeps those
     // registers free for the whole algorithm.
@@ -1832,10 +1832,10 @@ void ParallelMoveResolver::EmitNativeCode(ParallelMoveInstr* parallel_move) {
   }
 
   // Perform the moves with constant sources.
-  for (auto move : moves_) {
-    if (!move->IsEliminated()) {
-      ASSERT(move->src().IsConstant());
-      scheduled_ops_.Add({OpKind::kMove, *move});
+  for (const auto& move : moves_) {
+    if (!move.IsEliminated()) {
+      ASSERT(move.src().IsConstant());
+      scheduled_ops_.Add({OpKind::kMove, move});
     }
   }
   moves_.Clear();
@@ -1864,7 +1864,7 @@ void ParallelMoveResolver::BuildInitialMoveList(
   // unallocated, or the move was already eliminated).
   for (int i = 0; i < parallel_move->NumMoves(); i++) {
     MoveOperands* move = parallel_move->MoveOperandsAt(i);
-    if (!move->IsRedundant()) moves_.Add(move);
+    if (!move->IsRedundant()) moves_.Add(*move);
   }
 }
 
@@ -1877,21 +1877,21 @@ void ParallelMoveResolver::PerformMove(const InstructionSource& source,
   // which means that a call to PerformMove could change any source operand
   // in the move graph.
 
-  ASSERT(!moves_[index]->IsPending());
-  ASSERT(!moves_[index]->IsRedundant());
+  ASSERT(!moves_[index].IsPending());
+  ASSERT(!moves_[index].IsRedundant());
 
   // Clear this move's destination to indicate a pending move.  The actual
   // destination is saved in a stack-allocated local.  Recursion may allow
   // multiple moves to be pending.
-  ASSERT(!moves_[index]->src().IsInvalid());
-  Location destination = moves_[index]->MarkPending();
+  ASSERT(!moves_[index].src().IsInvalid());
+  Location destination = moves_[index].MarkPending();
 
   // Perform a depth-first traversal of the move graph to resolve
   // dependencies.  Any unperformed, unpending move with a source the same
   // as this one's destination blocks this one so recursively perform all
   // such moves.
   for (int i = 0; i < moves_.length(); ++i) {
-    const MoveOperands& other_move = *moves_[i];
+    const MoveOperands& other_move = moves_[i];
     if (other_move.Blocks(destination) && !other_move.IsPending()) {
       // Though PerformMove can change any source operand in the move graph,
       // this call cannot create a blocking move via a swap (this loop does
@@ -1908,20 +1908,19 @@ void ParallelMoveResolver::PerformMove(const InstructionSource& source,
 
   // We are about to resolve this move and don't need it marked as
   // pending, so restore its destination.
-  moves_[index]->ClearPending(destination);
+  moves_[index].ClearPending(destination);
 
   // This move's source may have changed due to swaps to resolve cycles and
   // so it may now be the last move in the cycle.  If so remove it.
-  if (moves_[index]->src().Equals(destination)) {
-    moves_[index]->Eliminate();
+  if (moves_[index].src().Equals(destination)) {
+    moves_[index].Eliminate();
     return;
   }
 
   // The move may be blocked on a (at most one) pending move, in which case
   // we have a cycle.  Search for such a blocking move and perform a swap to
   // resolve it.
-  for (int i = 0; i < moves_.length(); ++i) {
-    const MoveOperands& other_move = *moves_[i];
+  for (auto& other_move : moves_) {
     if (other_move.Blocks(destination)) {
       ASSERT(other_move.IsPending());
       AddSwapToSchedule(index);
@@ -1934,31 +1933,30 @@ void ParallelMoveResolver::PerformMove(const InstructionSource& source,
 }
 
 void ParallelMoveResolver::AddMoveToSchedule(int index) {
-  const auto move = moves_[index];
-  scheduled_ops_.Add({OpKind::kMove, *move});
-  move->Eliminate();
+  auto& move = moves_[index];
+  scheduled_ops_.Add({OpKind::kMove, move});
+  move.Eliminate();
 }
 
 void ParallelMoveResolver::AddSwapToSchedule(int index) {
-  const auto move = moves_[index];
-  const auto source = move->src();
-  const auto destination = move->dest();
+  auto& move = moves_[index];
+  const auto source = move.src();
+  const auto destination = move.dest();
 
-  scheduled_ops_.Add({OpKind::kSwap, *move});
+  scheduled_ops_.Add({OpKind::kSwap, move});
 
   // The swap of source and destination has executed a move from source to
   // destination.
-  move->Eliminate();
+  move.Eliminate();
 
   // Any unperformed (including pending) move with a source of either
   // this move's source or destination needs to have their source
   // changed to reflect the state of affairs after the swap.
-  for (int i = 0; i < moves_.length(); ++i) {
-    const auto& other_move = *moves_[i];
+  for (auto& other_move : moves_) {
     if (other_move.Blocks(source)) {
-      moves_[i]->set_src(destination);
+      other_move.set_src(destination);
     } else if (other_move.Blocks(destination)) {
-      moves_[i]->set_src(source);
+      other_move.set_src(source);
     }
   }
 }
