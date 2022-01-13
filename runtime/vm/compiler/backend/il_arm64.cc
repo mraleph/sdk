@@ -3161,7 +3161,7 @@ void CatchBlockEntryInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     }
   }
   if (HasParallelMove()) {
-    compiler->parallel_move_resolver()->EmitNativeCode(parallel_move());
+    parallel_move()->EmitNativeCode(compiler);
   }
 
   // Restore SP from FP as we are coming from a throw and the code for

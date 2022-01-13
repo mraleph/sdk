@@ -10,6 +10,7 @@
 #include "vm/compiler/backend/il.h"
 #include "vm/compiler/backend/il_printer.h"
 #include "vm/compiler/backend/loops.h"
+#include "vm/compiler/backend/parallel_move_resolver.h"
 #include "vm/log.h"
 #include "vm/parser.h"
 #include "vm/stack_frame.h"
@@ -3272,6 +3273,27 @@ void FlowGraphAllocator::RemoveFrameIfNotNeeded() {
   }
 }
 
+void FlowGraphAllocator::ScheduleParallelMoves() {
+  ParallelMoveResolver resolver;
+
+  for (auto block : flow_graph_.reverse_postorder()) {
+    if (block->HasParallelMove()) {
+      resolver.Resolve(block->parallel_move());
+    }
+    for (auto instruction : block->instructions()) {
+      if (auto move = instruction->AsParallelMove()) {
+        resolver.Resolve(move);
+      }
+    }
+    auto last = block->last_instruction();
+    if (auto goto_instr = last->AsGoto()) {
+      if (goto_instr->HasParallelMove()) {
+        resolver.Resolve(goto_instr->parallel_move());
+      }
+    }
+  }
+}
+
 void FlowGraphAllocator::AllocateRegisters() {
   CollectRepresentations();
 
@@ -3332,6 +3354,8 @@ void FlowGraphAllocator::AllocateRegisters() {
   RemoveFrameIfNotNeeded();
 
   ResolveControlFlow();
+
+  ScheduleParallelMoves();
 
   if (FLAG_print_ssa_liveranges && CompilerState::ShouldTrace()) {
     const Function& function = flow_graph_.function();

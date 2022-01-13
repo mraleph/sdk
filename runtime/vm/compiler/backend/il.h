@@ -57,6 +57,7 @@ class Instruction;
 class InstructionVisitor;
 class LocalVariable;
 class LoopInfo;
+class MoveSchedule;
 class ParsedFunction;
 class Range;
 class RangeAnalysis;
@@ -1478,10 +1479,17 @@ class ParallelMoveInstr : public TemplateInstruction<0, NoThrow> {
     return TokenPosition::kParallelMove;
   }
 
+  const MoveSchedule* move_schedule() const { return move_schedule_; }
+
+  void set_move_schedule(const MoveSchedule* schedule) {
+    move_schedule_ = schedule;
+  }
+
   PRINT_TO_SUPPORT
 
  private:
   GrowableArray<MoveOperands*> moves_;  // Elements cannot be null.
+  const MoveSchedule* move_schedule_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(ParallelMoveInstr);
 };
