@@ -23,7 +23,7 @@ ISOLATE_UNIT_TEST_CASE(ParallelMove_TwoCycles) {
   instr->AddMove(r(0), r(1));
 
   OS::PrintErr("before scheduling: %s\n", instr->ToCString());
-  ParallelMoveResolver().Resolve(instr);
+  ParallelMoveResolver(/*is_intrinsic=*/false).Resolve(instr);
   OS::PrintErr("after scheduling: %s\n", instr->ToCString());
 }
 

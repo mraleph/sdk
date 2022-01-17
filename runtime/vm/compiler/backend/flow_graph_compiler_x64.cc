@@ -824,7 +824,6 @@ void FlowGraphCompiler::EmitMove(Location destination, Location source) {
     if (destination.IsRegister()) {
       __ movq(destination.reg(), LocationToStackSlotAddress(source));
     } else if (destination.IsFpuRegister()) {
-      UNREACHABLE();
       // 32-bit float
       __ movq(TMP, LocationToStackSlotAddress(source));
       __ movq(destination.fpu_reg(), TMP);

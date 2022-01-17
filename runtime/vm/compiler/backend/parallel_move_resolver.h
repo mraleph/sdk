@@ -21,7 +21,7 @@ class MoveOperands;
 
 class ParallelMoveResolver : public ValueObject {
  public:
-  ParallelMoveResolver();
+  ParallelMoveResolver(bool is_intrinsic);
 
   // Schedule moves specified by the given parallel move and store the
   // schedule on the parallel move itself.
@@ -55,7 +55,7 @@ class ParallelMoveResolver : public ValueObject {
         kNumberOfCpuRegisters + temporaries_.length() - 1);
   }
 
-  FlowGraphCompiler* compiler_;
+  const bool is_intrinsic_;
 
   // List of moves not yet resolved.
   GrowableArray<MoveOperands> moves_;

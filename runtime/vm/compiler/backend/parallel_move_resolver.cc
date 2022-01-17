@@ -62,7 +62,7 @@ static uword RegMaskBit(Register reg) {
   return ((reg) != kNoRegister) ? (1 << (reg)) : 0;
 }
 
-ParallelMoveResolver::ParallelMoveResolver() : moves_(32) {}
+ParallelMoveResolver::ParallelMoveResolver(bool is_intrinsic) : is_intrinsic_(is_intrinsic), moves_(32) {}
 
 void ParallelMoveResolver::Resolve(ParallelMoveInstr* parallel_move) {
   ASSERT(moves_.is_empty());
@@ -170,7 +170,7 @@ void ParallelMoveResolver::PerformMove(const InstructionSource& source,
       ASSERT(other_move.IsPending());
       const auto tmp = CreateTemporary(destination.IsDoubleStackSlot() || destination.IsQuadStackSlot() || destination.IsFpuRegister() ? Location::kFpuRegister : Location::kRegister);
       scheduled_ops_.Add({OpKind::kMove, {tmp, destination}});
-      OS::PrintErr("BreakingLoop(%" Pd ", %s <- %s)\n", i, tmp.ToCString(), destination.ToCString());
+      // OS::PrintErr("BreakingLoop(%" Pd ", %s <- %s)\n", i, tmp.ToCString(), destination.ToCString());
       for (intptr_t j = i; j < moves_.length(); j++) {
         if (moves_[j].src().Equals(destination)) {
           moves_[j].set_src(tmp);
@@ -186,7 +186,7 @@ void ParallelMoveResolver::PerformMove(const InstructionSource& source,
 
 void ParallelMoveResolver::AddMoveToSchedule(int index) {
   auto& move = moves_[index];
-  OS::PrintErr("AddMoveToSchedule(%d, %s <- %s)\n", index, move.dest().ToCString(), move.src().ToCString());
+  // OS::PrintErr("AddMoveToSchedule(%d, %s <- %s)\n", index, move.dest().ToCString(), move.src().ToCString());
   scheduled_ops_.Add({OpKind::kMove, move});
   move.Eliminate();
 }
@@ -194,7 +194,8 @@ void ParallelMoveResolver::AddMoveToSchedule(int index) {
 void ParallelMoveResolver::LegalizeMoves() {
   auto move_requires_temporary = [](Location src, Location dst) -> bool {
 #if defined(TARGET_ARCH_X64)
-    return false;
+    const bool is_memory_to_memory = (src.IsStackSlot() || src.IsDoubleStackSlot() || src.IsQuadStackSlot()) && src.kind() == dst.kind();
+    return is_memory_to_memory || (src.IsConstant() && dst.IsStackSlot());
 #elif defined(TARGET_ARCH_IA32)
     return (src.IsStackSlot() && dst.IsStackSlot());
 #elif defined(TARGET_ARCH_ARM64)
@@ -258,12 +259,14 @@ void ParallelMoveResolver::AllocateTemporaries(ParallelMoveInstr* parallel_move)
   const auto kReservedFpuTemp = FpuTMP;
 #endif
 
+#if 0
   for (auto& op : scheduled_ops_) {
     if (op.kind == OpKind::kMove) {
       OS::PrintErr(" %s <- %s", op.operands.dest().ToCString(), op.operands.src().ToCString());
     }
   }
   OS::PrintErr("\n");
+#endif
 
   // Check if we can reschedule any moves which store into a register
   // to create a temporary register.
@@ -285,19 +288,21 @@ void ParallelMoveResolver::AllocateTemporaries(ParallelMoveInstr* parallel_move)
         }
       }
       if (j == scheduled_ops_.length()) {
-        OS::PrintErr("sinking %s <- %s from %" Pd " to the end\n", dst.ToCString(), src.ToCString(), i);
+        // OS::PrintErr("sinking %s <- %s from %" Pd " to the end\n", dst.ToCString(), src.ToCString(), i);
         scheduled_ops_.Add(candidate);
         scheduled_ops_[i].kind = OpKind::kNop;
       }
     }
   }
 
+#if 0
   for (auto& op : scheduled_ops_) {
     if (op.kind == OpKind::kMove) {
       OS::PrintErr(" %s <- %s", op.operands.dest().ToCString(), op.operands.src().ToCString());
     }
   }
   OS::PrintErr("\n");
+#endif
 
   // Caveat: parallel_move->next() might be a parallel move itself and thus
   // will have locs() == nullptr.
@@ -335,7 +340,7 @@ void ParallelMoveResolver::AllocateTemporaries(ParallelMoveInstr* parallel_move)
 
   // Compute mask of registers which can't be used as temporaries.
   intptr_t not_blocked[2] = {~kReservedCpuRegisters, ~0};
-  if (compiler_->intrinsic_mode()) {
+  if (is_intrinsic_) {
     // Block additional registers that must be preserved for intrinsics.
     not_blocked[0] &= ~RegMaskBit(ARGS_DESC_REG);
 #if !defined(TARGET_ARCH_IA32)
@@ -418,9 +423,8 @@ void ParallelMoveResolver::AllocateTemporaries(ParallelMoveInstr* parallel_move)
         const auto temp_index = loc.register_code() - max_registers[index];
         RELEASE_ASSERT(temporaries_[temp_index].kind() == loc.kind());
         loc = temporaries_[temp_index];
-      } else {
-        available[index].Add(loc.reg());
       }
+      available[index].Add(loc.reg());
     }
   };
 
@@ -446,8 +450,26 @@ void ParallelMoveResolver::AllocateTemporaries(ParallelMoveInstr* parallel_move)
     }
   };
 
+  // auto print_set = [&](intptr_t regs) {
+  //  bool comma = false;
+  //  for (intptr_t i = 0; i < kNumberOfCpuRegisters; i++) {
+  //    if (regs & (1 << i)) {
+  //      OS::PrintErr("%s%s", comma ? ", " : "", RegisterNames::RegisterName(static_cast<Register>(i)));
+  //      comma = true;
+  //    }
+  //  }
+  //  OS::PrintErr("\n");
+  // };
+
   for (intptr_t i = scheduled_ops_.length() - 1; i >= 0; i--) {
     auto& op = scheduled_ops_[i];
+    // if (op.kind == OpKind::kMove) {
+      // OS::PrintErr("%" Pd ": %s -> %s\n", i, op.operands.src().ToCString(), op.operands.dest().ToCString());
+      // OS::PrintErr("  avail: ");
+      // print_set(available[0].data());
+      // OS::PrintErr("  not_blocked: ");
+    //  print_set(not_blocked[0]);
+    //}
     alloc(op.temp);
     switch (op.kind) {
       case OpKind::kNop:
