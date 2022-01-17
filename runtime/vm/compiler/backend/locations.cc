@@ -295,11 +295,16 @@ const char* Location::Name() const {
       if (register_code() < kNumberOfCpuRegisters) {
         return RegisterNames::RegisterName(reg());
       } else {
-        return OS::SCreate(Thread::Current()->zone(), "%%%" Pd "",
+        return OS::SCreate(Thread::Current()->zone(), "%%%" Pd "r",
                            register_code() - kNumberOfCpuRegisters);
       }
     case kFpuRegister:
-      return RegisterNames::FpuRegisterName(fpu_reg());
+      if (register_code() < kNumberOfFpuRegisters) {
+        return RegisterNames::FpuRegisterName(fpu_reg());
+      } else {
+        return OS::SCreate(Thread::Current()->zone(), "%%%" Pd "f",
+                           register_code() - kNumberOfCpuRegisters);
+      }
     case kStackSlot:
       return "S";
     case kDoubleStackSlot:
