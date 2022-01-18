@@ -12,20 +12,53 @@
 namespace dart {
 
 ISOLATE_UNIT_TEST_CASE(ParallelMove_TwoCycles) {
-  ParallelMoveInstr* instr = new ParallelMoveInstr();
   auto r = [](intptr_t reg) {
     return Location::MachineRegisterLocation(Location::kRegister, reg);
   };
 
-  instr->AddMove(r(1), r(0));
-  instr->AddMove(r(3), r(2));
-  instr->AddMove(r(2), r(3));
-  instr->AddMove(r(0), r(1));
+  auto s = [](intptr_t index) { return Location::StackSlot(index, FPREG); };
 
-  OS::PrintErr("before scheduling: %s\n", instr->ToCString());
-  ParallelMoveResolver(/*is_intrinsic=*/false).Resolve(instr);
-  OS::PrintErr("after scheduling: %s\n", instr->ToCString());
+  auto run_test =
+      [&](std::initializer_list<std::pair<Location, Location>> moves) {
+        ParallelMoveInstr* instr = new ParallelMoveInstr();
+
+        for (const auto& move : moves) {
+          instr->AddMove(move.first, move.second);
+        }
+
+        OS::PrintErr("before scheduling: %s\n", instr->ToCString());
+        ParallelMoveResolver(/*is_intrinsic=*/false).Resolve(instr);
+        OS::PrintErr("after scheduling: %s\n", instr->ToCString());
+      };
+
+  run_test({
+      {r(1), r(0)},
+      {r(3), r(2)},
+      {r(2), r(3)},
+      {r(0), r(1)},
+  });
+
+  run_test({
+      {r(0), s(-3)},
+      {s(-1), s(-2)},
+      {s(-2), s(-1)},
+  });
+
+  run_test({
+      {s(-1), s(-2)},
+      {s(-2), s(-1)},
+      {s(-3), r(0)},
+  });
+
+  run_test({
+      {s(-1), s(-2)},
+      {s(-2), s(-1)},
+      {s(-4), r(0)},
+      {s(-3), r(0)},
+  });
+
+  // TODO(vegorov) test case r0 <- S-3, S-1 <- S-2, S-2 <- S-1
+  // TODO(vegorov) test case S-1 <- S-2, S-2 <- S-1, S-3 <- r0
 }
-
 
 }  // namespace dart

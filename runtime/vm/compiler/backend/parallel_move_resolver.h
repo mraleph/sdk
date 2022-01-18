@@ -50,9 +50,7 @@ class ParallelMoveResolver : public ValueObject {
 
   Location CreateTemporary(Location::Kind kind) {
     temporaries_.Add(Location());
-    return Location(
-        kind,
-        kNumberOfCpuRegisters + temporaries_.length() - 1);
+    return Location(kind, kNumberOfCpuRegisters + temporaries_.length() - 1);
   }
 
   const bool is_intrinsic_;

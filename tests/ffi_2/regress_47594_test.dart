@@ -18,5 +18,7 @@ final strerror = DynamicLibrary.process()
         isLeaf: true);
 
 void main() {
-  for (var i = 0; i < 10000; i++) strerror(0).toDartString();
+  for (var i = 0; i < 10000; i++) {
+    strerror(0).toDartString();
+  }
 }
