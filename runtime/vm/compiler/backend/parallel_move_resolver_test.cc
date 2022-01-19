@@ -57,8 +57,10 @@ ISOLATE_UNIT_TEST_CASE(ParallelMove_TwoCycles) {
       {s(-3), r(0)},
   });
 
-  // TODO(vegorov) test case r0 <- S-3, S-1 <- S-2, S-2 <- S-1
-  // TODO(vegorov) test case S-1 <- S-2, S-2 <- S-1, S-3 <- r0
+  run_test({
+      {s(-1), s(-2)},
+      {s(-2), s(-1)},
+  });
 }
 
 }  // namespace dart

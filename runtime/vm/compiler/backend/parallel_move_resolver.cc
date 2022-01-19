@@ -58,10 +58,6 @@ class MoveSchedule : public LengthPrefixedArray<ParallelMoveResolver::Op> {
   }
 };
 
-static uword RegMaskBit(Register reg) {
-  return ((reg) != kNoRegister) ? (1 << (reg)) : 0;
-}
-
 ParallelMoveResolver::ParallelMoveResolver(bool is_intrinsic)
     : is_intrinsic_(is_intrinsic), moves_(32) {}
 
@@ -239,6 +235,185 @@ void ParallelMoveResolver::LegalizeMoves() {
   }
 }
 
+namespace {
+struct AllocationState {
+  static constexpr intptr_t kMaxNumberOfRegisters = std::max<intptr_t>(kNumberOfCpuRegisters, kNumberOfFpuRegisters);
+
+  AllocationState(Location::Kind kind, GrowableArray<Location>* temporaries, GrowableArray<intptr_t>* def_pos, intptr_t* spill_slot_count, GrowableArray<std::pair<intptr_t, MoveOperands>>* spill_moves)
+    : kind(kind),
+      spill_slot_size(kind == Location::kRegister ? 1 : (kFpuRegisterSize / kWordSize)),
+      max_registers(kind == Location::kRegister ? kNumberOfCpuRegisters : kNumberOfFpuRegisters),
+      spill_slot_count(spill_slot_count),
+      temporaries(*temporaries),
+      def_pos(*def_pos),
+      spill_moves(*spill_moves) {
+    last_use_pos.fill(-1);
+  }
+
+  void Init() {
+    for (intptr_t r = 0; r < max_registers; r++) {
+      if (!available.Contains(r)) {
+        alive[r] = Location::MachineRegisterLocation(kind, r);
+      }
+    }
+  }
+
+  void Finalize() {
+    for (intptr_t r = 0; r < Utils::Minimum(max_registers, restore_from.length()); r++) {
+      if (!spill_candidates.Contains(r) && !restore_from[r].IsInvalid()) {
+        // We have not reached the definition of this register. We need to
+        // actually emit spilling code.
+        spill_moves.Add({-1, {restore_from[r], Location::MachineRegisterLocation(kind, r)}});
+      }
+    }
+  }
+
+  Location AllocateTemporary(intptr_t def_pos, intptr_t cur_pos) {
+    const intptr_t kLastBit = 63;
+    auto available_regs =
+        static_cast<uint64_t>((available.data() & not_blocked.data())) |
+        (static_cast<uint64_t>(1) << kLastBit);
+    for (intptr_t i = 0; i < max_registers; i++) {
+      if (last_use_pos[i] > def_pos) {
+        available_regs &= ~(static_cast<uint64_t>(1) << i);
+      }
+    }
+    auto reg = Utils::CountTrailingZeros64(available_regs);
+    if (reg == kLastBit) {
+      // No free CPU register - everything is blocked. Check if there is a
+      // suitable spill candidate which can be used here to become a temporary.
+//      const auto available_spill_candidates =
+//          static_cast<uint64_t>(spill_candidates.data() &
+//                                ~spilled.data()) |
+//          (static_cast<uint64_t>(1) << kLastBit);
+//      reg = Utils::CountTrailingZeros64(available_spill_candidates);
+//      if (reg == kLastBit) {
+        // Now lets try to find a register which can be used as a temporary,
+        // select the candidate that has minimum last_use_pos
+        // TODO(vegorov) finally do the eviction cost computation here.
+        // e.g. prefer the candidate that is cheap to evict.
+        intptr_t candidate = -1;
+        intptr_t last_candidate_use_pos = -1;
+        for (intptr_t r = 0; r < max_registers; r++) {
+          if (!not_blocked.Contains(r)) {
+            continue;
+          }
+          if (candidate == -1 || spill_candidates.Contains(r) || last_candidate_use_pos > last_use_pos[r]) {
+            candidate = r;
+            last_candidate_use_pos = spill_candidates.Contains(r) ? -1 : last_use_pos[r];
+          }
+        }
+        ASSERT(candidate != -1);
+
+        OS::PrintErr("found spilling candidate %s free until %" Pd "\n",
+                      Location::MachineRegisterLocation(kind, candidate).ToCString(),
+                      last_use_pos[candidate]);
+
+        reg = candidate;
+//      }
+//      spilled.Add(reg);
+      Spill(cur_pos, reg);
+    }
+    available.Remove(reg);
+    return Location::MachineRegisterLocation(kind, reg);
+  }
+
+  void ProcessUse(intptr_t cur_pos, Location& loc) {
+    if (loc.register_code() < max_registers) {
+      available.Remove(loc.register_code());
+      if (!alive[loc.register_code()].Equals(loc)) {
+        Spill(cur_pos, loc.register_code());
+      }
+      alive[loc.register_code()] = loc;
+    }
+  }
+
+  void AllocateUse(intptr_t cur_pos, Location& loc) {
+    if (loc.register_code() >= max_registers) {
+      const auto temp_index = loc.register_code() - max_registers;
+      if (temporaries[temp_index].IsInvalid()) {
+        temporaries[temp_index] =
+            AllocateTemporary(def_pos[temp_index], cur_pos);
+      }
+      const auto result = temporaries[temp_index];
+      alive[result.register_code()] = loc;
+      loc = result;
+    }
+  }
+
+  void ProcessDef(intptr_t cur_pos, Location& loc) {
+    const auto register_code = loc.register_code();
+    if (register_code >= max_registers) {
+      const auto temp_index = register_code - max_registers;
+      if (temporaries[temp_index].IsInvalid()) {
+        // We have arrived here spilled. We have two options: either spilling
+        // can be fused with the current move, or we need to allocate a
+        // temporary.
+        AllocateUse(cur_pos, loc); // We allocate a temporary.
+
+        // Emit spilling move.
+        spill_moves.Add({cur_pos, {restore_from[register_code], loc}});
+        restore_from[register_code] = Location();
+      } else {
+        loc = temporaries[temp_index];
+      }
+    } else {
+      if (!alive[register_code].Equals(loc)) {
+        // We have arrive here spilled. We have two options: either spilling
+        // can be fused with the current move, or we need to allocate a
+        // temporary.
+        temporaries.Add(Location());
+        def_pos.Add(cur_pos);
+        loc = Location(kind, kNumberOfCpuRegisters + temporaries.length() - 1);
+        AllocateUse(cur_pos, loc);
+        // Emit spilling move.
+        spill_moves.Add({cur_pos, {restore_from[register_code], loc}});
+        restore_from[register_code] = Location();
+      }
+    }
+    alive[loc.register_code()] = Location();
+    available.Add(loc.register_code());
+  }
+
+  void Spill(intptr_t cur_pos, intptr_t reg) {
+    if (alive[reg].IsInvalid()) {
+      // Nothing to do. The location is not currently used.
+      return;
+    }
+
+    const intptr_t current_value = alive[reg].register_code();
+
+    if (current_value > max_registers) {
+      // Evict temporary.
+      temporaries[current_value - max_registers] = Location();
+    }
+
+    restore_from.EnsureLength(current_value + 1, Location());
+    if (restore_from[current_value].IsInvalid()) {  // We need to allocate a spill slot.
+      const intptr_t spill_slot_index = *spill_slot_count;
+      *spill_slot_count += spill_slot_size;
+      restore_from[current_value] = Location::StackSlot(spill_slot_index, FPREG);  // TODO(vegorov)
+    }
+    spill_moves.Add({cur_pos, {Location::MachineRegisterLocation(kind, reg), restore_from[current_value]}});
+  }
+
+  const Location::Kind kind;
+  const intptr_t spill_slot_size;
+  const intptr_t max_registers;
+  intptr_t* const spill_slot_count;
+  GrowableArray<Location>& temporaries;
+  GrowableArray<intptr_t>& def_pos;
+  GrowableArray<std::pair<intptr_t, MoveOperands>>& spill_moves;
+  SmallSet<intptr_t> spill_candidates;
+  SmallSet<intptr_t> spilled;
+  SmallSet<intptr_t> available;
+  SmallSet<intptr_t> not_blocked;
+  std::array<intptr_t, kMaxNumberOfRegisters> last_use_pos;
+  GrowableArray<Location> restore_from;
+  std::array<Location, kMaxNumberOfRegisters> alive;
+};
+}  // namespace
+
 void ParallelMoveResolver::AllocateTemporaries(
     ParallelMoveInstr* parallel_move) {
   if (temporaries_.is_empty()) {
@@ -247,8 +422,18 @@ void ParallelMoveResolver::AllocateTemporaries(
 
   const intptr_t kAllFpuRegistersList =
       (static_cast<intptr_t>(1) << kNumberOfFpuRegisters) - 1;
-  const intptr_t max_registers[2] = {kNumberOfCpuRegisters,
-                                     kNumberOfFpuRegisters};
+
+  intptr_t spill_slot_count = 0;
+  GrowableArray<std::pair<intptr_t, MoveOperands>> spill_moves;
+
+  GrowableArray<intptr_t> def_pos(temporaries_.length());
+  def_pos.EnsureLength(temporaries_.length(), -1);
+
+
+  AllocationState state[2] = {
+    AllocationState(Location::kRegister, &temporaries_, &def_pos, &spill_slot_count, &spill_moves),
+    AllocationState(Location::kFpuRegister, &temporaries_, &def_pos, &spill_slot_count, &spill_moves),
+  };
 
   const auto to_index = [](const Location& loc) -> intptr_t {
     if (loc.IsConstant()) {
@@ -259,7 +444,7 @@ void ParallelMoveResolver::AllocateTemporaries(
 
   const auto is_temporary = [&](const Location& loc) -> bool {
     const auto index = to_index(loc);
-    return index >= 0 && loc.register_code() >= max_registers[index];
+    return index >= 0 && loc.register_code() >= state[index].max_registers;
   };
 
 #if defined(TARGET_ARCH_X64)
@@ -349,20 +534,14 @@ void ParallelMoveResolver::AllocateTemporaries(
     }
   }
 
-  std::array<Location,
-             std::max<int>(kNumberOfCpuRegisters, kNumberOfFpuRegisters)>
-      restore_from[2];
-
-  SmallSet<intptr_t> spill_candidates[2];
-  SmallSet<intptr_t> spilled[2];
-
   for (intptr_t i = 0; i < spill_candidate_count; i++) {
     const auto& candidate = scheduled_ops_[i];
     const auto src = candidate.operands.src();
     if (candidate.kind == OpKind::kMove) {
-      const auto index = to_index(src);
-      spill_candidates[index].Add(src.register_code());
-      restore_from[index][src.register_code()] = candidate.operands.dest();
+      auto& s = state[to_index(src)];
+      s.spill_candidates.Add(src.register_code());
+      s.restore_from.EnsureLength(src.register_code() + 1, Location());
+      s.restore_from[src.register_code()] = candidate.operands.dest();
     }
   }
 
@@ -379,7 +558,6 @@ void ParallelMoveResolver::AllocateTemporaries(
   // Caveat: parallel_move->next() might be a parallel move itself and thus
   // will have locs() == nullptr.
   // TODO(vegorov) delete this once we normalize live range splitting policy.
-  SmallSet<intptr_t> available[2];
   if (parallel_move->next() != nullptr &&
       parallel_move->next()->locs() != nullptr &&
       parallel_move->next()->locs()->always_calls()) {
@@ -387,59 +565,54 @@ void ParallelMoveResolver::AllocateTemporaries(
     // register that is not an input register for the call as a scratch. The
     // rest will be spilled.
     auto locs = parallel_move->next()->locs();
-    available[0] = SmallSet<intptr_t>(kAllCpuRegistersList);
-    available[1] = SmallSet<intptr_t>(kAllFpuRegistersList);
+    state[0].available = SmallSet<intptr_t>(kAllCpuRegistersList);
+    state[1].available = SmallSet<intptr_t>(kAllFpuRegistersList);
     for (intptr_t i = 0; i < locs->input_count(); i++) {
       const auto loc = locs->in(i);
       const intptr_t index = to_index(loc);
       if (index >= 0) {
-        available[index].Remove(loc.register_code());
+        state[index].available.Remove(loc.register_code());
       }
     }
   } else {
-    available[0].Clear();
+    state[0].available.Clear();
     if (kReservedCpuTemp != kNoRegister) {
-      available[0].Add(kReservedCpuTemp);
+      state[0].available.Add(kReservedCpuTemp);
     }
-    available[1].Clear();
+    state[1].available.Clear();
     if (kReservedFpuTemp != kNoFpuRegister) {
-      available[1].Add(kReservedFpuTemp);
+      state[1].available.Add(kReservedFpuTemp);
     }
   }
+
+  state[0].Init();
+  state[1].Init();
 
   // We need to assign registers to temporaries. For that we are going to
   // use essentially a simple linear scan.
 
   // Compute mask of registers which can't be used as temporaries.
-  intptr_t not_blocked[2] = {~kReservedCpuRegisters, ~0};
+  state[0].not_blocked = SmallSet<intptr_t>(~kReservedCpuRegisters & kAllCpuRegistersList);
+  state[1].not_blocked = SmallSet<intptr_t>(kAllFpuRegistersList);
   if (is_intrinsic_) {
     // Block additional registers that must be preserved for intrinsics.
-    not_blocked[0] &= ~RegMaskBit(ARGS_DESC_REG);
+    state[0].not_blocked.Remove(ARGS_DESC_REG);
 #if !defined(TARGET_ARCH_IA32)
     // Need to preserve CODE_REG to be able to store the PC marker
     // and load the pool pointer.
-    not_blocked[0] &= ~RegMaskBit(CODE_REG);
+    state[0].not_blocked.Remove(CODE_REG);
 #endif
   }
   if (kReservedCpuTemp != kNoRegister) {
-    not_blocked[0] |= RegMaskBit(kReservedCpuTemp);
+    state[0].not_blocked.Add(kReservedCpuTemp);
   }
-  not_blocked[0] &= kAllCpuRegistersList;
-
-  std::array<intptr_t,
-             std::max<int>(kNumberOfCpuRegisters, kNumberOfFpuRegisters)>
-      last_use_pos[2];
-  last_use_pos[0].fill(-1);
-  last_use_pos[1].fill(-1);
-
-  GrowableArray<intptr_t> def_pos(temporaries_.length());
-  def_pos.EnsureLength(temporaries_.length(), -1);
 
   const auto record_use = [&](const Location& loc, intptr_t pos) {
     const auto index = to_index(loc);
     if (index >= 0) {
-      if (loc.register_code() < max_registers[index]) {
-        last_use_pos[index][loc.register_code()] = pos;
+      auto& s = state[index];
+      if (loc.register_code() < s.max_registers) {
+        s.last_use_pos[loc.register_code()] = pos;
       }
     }
   };
@@ -447,8 +620,9 @@ void ParallelMoveResolver::AllocateTemporaries(
   const auto record_def = [&](const Location& loc, intptr_t pos) {
     const auto index = to_index(loc);
     if (index >= 0) {
-      if (loc.register_code() >= max_registers[index]) {
-        def_pos[loc.register_code() - max_registers[index]] = pos;
+      const auto& s = state[index];
+      if (loc.register_code() >= s.max_registers) {
+        def_pos[loc.register_code() - s.max_registers] = pos;
       }
     }
   };
@@ -468,118 +642,81 @@ void ParallelMoveResolver::AllocateTemporaries(
 
   static_assert((Location::kFpuRegister - Location::kRegister) >> 2 == 1);
 
-  const auto allocate_temporary = [&](Location::Kind kind,
-                                      intptr_t def_pos) -> Location {
-    const intptr_t kLastBit = 63;
-    const intptr_t index = (kind - Location::kRegister) >> 2;
-    auto available_regs =
-        static_cast<uint64_t>((available[index].data() & not_blocked[index])) |
-        (static_cast<uint64_t>(1) << kLastBit);
-    for (intptr_t i = 0; i < max_registers[index]; i++) {
-      if (last_use_pos[index][i] > def_pos) {
-        available_regs &= ~(static_cast<uint64_t>(1) << i);
-      }
-    }
-    auto reg = Utils::CountTrailingZeros64(available_regs);
-    if (reg == kLastBit) {
-      // No free CPU register - everything is blocked. Check if there is a
-      // suitable spill candidate which can be used here to become a temporary.
-      const auto available_spill_candidates =
-          static_cast<uint64_t>(spill_candidates[index].data() &
-                                ~spilled[index].data()) |
-          (static_cast<uint64_t>(1) << kLastBit);
-      reg = Utils::CountTrailingZeros64(available_spill_candidates);
-      if (reg == kLastBit) {
-        OS::PrintErr("allocating %s requires spilling\n",
-                     parallel_move->ToCString());
-        UNREACHABLE();
-      }
-      spilled[index].Add(reg);
-    }
-    available[index].Remove(reg);
-    return Location::MachineRegisterLocation(kind, reg);
-  };
-
-  const auto def = [&](Location& loc) {
+  const auto def = [&](intptr_t cur_pos, Location& loc) {
     const auto index = to_index(loc);
     if (index >= 0) {
-      if (loc.register_code() >= max_registers[index]) {
-        const auto temp_index = loc.register_code() - max_registers[index];
-        RELEASE_ASSERT(temporaries_[temp_index].kind() == loc.kind());
-        loc = temporaries_[temp_index];
-      }
-      available[index].Add(loc.reg());
+      state[index].ProcessDef(cur_pos, loc);
     }
   };
 
-  const auto alloc = [&](Location& loc) {
+  const auto alloc = [&](intptr_t cur_pos, Location& loc) {
     const auto index = to_index(loc);
     if (index >= 0) {
-      if (loc.register_code() >= max_registers[index]) {
-        const auto temp_index = loc.register_code() - max_registers[index];
-        if (temporaries_[temp_index].IsInvalid()) {
-          temporaries_[temp_index] =
-              allocate_temporary(loc.kind(), def_pos[temp_index]);
-        }
-        loc = temporaries_[temp_index];
-      }
+      auto& s = state[index];
+      s.AllocateUse(cur_pos, loc);
     }
   };
 
-  const auto use = [&](Location& loc) {
+  const auto use = [&](intptr_t cur_pos, Location& loc) {
     const auto index = to_index(loc);
     if (index >= 0) {
-      if (loc.register_code() < max_registers[index]) {
-        available[index].Remove(loc.register_code());
-      }
+      state[index].ProcessUse(cur_pos, loc);
     }
   };
-
-  // auto print_set = [&](intptr_t regs) {
-  //  bool comma = false;
-  //  for (intptr_t i = 0; i < kNumberOfCpuRegisters; i++) {
-  //    if (regs & (1 << i)) {
-  //      OS::PrintErr("%s%s", comma ? ", " : "", RegisterNames::RegisterName(static_cast<Register>(i)));
-  //      comma = true;
-  //    }
-  //  }
-  //  OS::PrintErr("\n");
-  // };
 
   for (intptr_t i = scheduled_ops_.length() - 1; i >= 0; i--) {
     auto& op = scheduled_ops_[i];
-    // if (op.kind == OpKind::kMove) {
-    // OS::PrintErr("%" Pd ": %s -> %s\n", i, op.operands.src().ToCString(), op.operands.dest().ToCString());
-    // OS::PrintErr("  avail: ");
-    // print_set(available[0].data());
-    // OS::PrintErr("  not_blocked: ");
-    //  print_set(not_blocked[0]);
-    //}
-    alloc(op.temp);
+    alloc(i, op.temp);
     switch (op.kind) {
       case OpKind::kNop:
         break;
       case OpKind::kMove:
-        def(*op.operands.dest_slot());
-        use(*op.operands.src_slot());
-        alloc(*op.operands.src_slot());
+        def(i, *op.operands.dest_slot());
+        use(i, *op.operands.src_slot());
+        alloc(i, *op.operands.src_slot());
         break;
     }
-    def(op.temp);
+    def(i-1, op.temp);
   }
 
+  state[0].Finalize();
+  state[1].Finalize();
+
+  GrowableArray<Op> ops;
+
+  auto emit_spill_moves = [&](intptr_t pos) {
+    while (!spill_moves.is_empty() && spill_moves.Last().first < pos) {
+      ops.Add({OpKind::kMove, spill_moves.RemoveLast().second});
+    }
+  };
+
+  for (intptr_t i = 0; i < scheduled_ops_.length(); i++) {
+    emit_spill_moves(i);
+    if (scheduled_ops_[i].kind != OpKind::kNop) {
+      ops.Add(scheduled_ops_[i]);
+    }
+  }
+  emit_spill_moves(scheduled_ops_.length());
+
+  scheduled_ops_.Clear();
+  scheduled_ops_.AddArray(ops);
+
+
+
+/*
   for (intptr_t index = 0; index <= 1; index++) {
-    for (intptr_t reg = 0; reg < max_registers[index]; reg++) {
-      if (spilled[index].Contains(reg)) {
+    for (intptr_t reg = 0; reg < state[index].max_registers; reg++) {
+      if (state[index].spilled.Contains(reg)) {
         scheduled_ops_.Add(
             {OpKind::kMove,
              {Location::MachineRegisterLocation(
                   index == 0 ? Location::kRegister : Location::kFpuRegister,
                   reg),
-              restore_from[index][reg]}});
+              state[index].restore_from[reg]}});
       }
     }
   }
+*/
 }
 
 void ParallelMoveResolver::PrintScheduleTo(const MoveSchedule& schedule,
