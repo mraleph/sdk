@@ -943,18 +943,33 @@ Instruction* FlowGraphAllocator::ConnectOutgoingPhiMoves(
   return goto_instr->previous();
 }
 
+// Returns the minimum live range start position for all non-constant inputs
+// that can flow into the given phi.
+static intptr_t MinInputPos(PhiInstr* phi) {
+  intptr_t m = kMaxPosition;
+  for (auto input : phi->inputs()) {
+    intptr_t pos = FlowGraphAllocator::GetLifetimePosition(input);
+    if (auto input_phi = input->AsPhi()) {
+      pos = FlowGraphAllocator::GetLifetimePosition(input_phi->GetBlock());
+    } else if (input->AsConstant()) {
+      pos = kMaxPosition;
+    }
+    m = Utils::Minimum(m, pos);
+  }
+  return m;
+}
+
 void FlowGraphAllocator::ConnectIncomingPhiMoves(JoinEntryInstr* join) {
   // For join blocks we need to add destinations of phi resolution moves
   // to phi's live range so that register allocator will fill them with moves.
+  if (join->phis() == nullptr) return;
 
   // All uses are recorded at the start position in the block.
   const intptr_t pos = join->start_pos();
   const bool is_loop_header = join->IsLoopHeader();
 
   intptr_t move_idx = 0;
-  for (PhiIterator it(join); !it.Done(); it.Advance()) {
-    PhiInstr* phi = it.Current();
-    ASSERT(phi != NULL);
+  for (auto phi : *join->phis()) {
     const intptr_t vreg = phi->vreg(0);
     ASSERT(vreg >= 0);
     const bool is_pair_phi = phi->HasPairRepresentation();
@@ -965,6 +980,7 @@ void FlowGraphAllocator::ConnectIncomingPhiMoves(JoinEntryInstr* join) {
     //      phi        [--------
     //
     LiveRange* range = GetLiveRange(vreg);
+    range->set_phi(phi);
     range->DefineAt(pos);  // Shorten live range.
     if (is_loop_header) range->mark_loop_phi();
 
@@ -1653,10 +1669,26 @@ void FlowGraphAllocator::NumberInstructions() {
     // For join entry predecessors create phi resolution moves if
     // necessary. They will be populated by the register allocator.
     JoinEntryInstr* join = block->AsJoinEntry();
-    if (join != NULL) {
+    if (join != NULL && join->phis() != nullptr) {
+      // Sort all phis in the join in descending order of minimum start
+      // positions of their inputs. This ordering would mean that in the
+      // list of unallocated ranges phi ranges will be placed in the same
+      // order as their inputs with minimum input position. This leads to
+      // better allocation results because we get a better chance of
+      // coalescing phi location and its input location, especially for
+      // non-loop phis.
+      join->phis()->Sort([](PhiInstr* const *a, PhiInstr* const *b) -> int {
+        const intptr_t min_a = MinInputPos(*a);
+        const intptr_t min_b = MinInputPos(*b);
+        if (min_a == min_b) {
+          return 0;
+        }
+        return min_a < min_b ? +1 : -1;
+      });
+
       intptr_t move_count = 0;
-      for (PhiIterator it(join); !it.Done(); it.Advance()) {
-        move_count += it.Current()->HasPairRepresentation() ? 2 : 1;
+      for (auto phi : *join->phis()) {
+        move_count += phi->HasPairRepresentation() ? 2 : 1;
       }
       for (intptr_t i = 0; i < block->PredecessorCount(); i++) {
         // Insert the move between the last two instructions of the
@@ -2024,19 +2056,54 @@ void FlowGraphAllocator::AllocateSpillSlotFor(LiveRange* range) {
   const bool need_untagged = (register_kind_ == Location::kRegister) &&
                              ((range->representation() == kUntagged));
 
+  intptr_t idx = -1;
+
+  // For phi ranges try to coalesce spill splot used by the phi with
+  // spill slots used by its inputs.
+  if (auto phi = range->phi()) {
+    for (auto input : phi->inputs()) {
+      auto incomming = GetLiveRange(input->ssa_temp_index());
+      if (!incomming->spill_slot().IsInvalid() && !incomming->spill_slot().IsConstant()) {
+        const auto vindex = -compiler::target::frame_layout.VariableIndexForFrameSlot(incomming->spill_slot().stack_index());
+        if (vindex < 0) {
+          continue;
+        }
+        intptr_t candidate;
+        if (register_kind_ == Location::kRegister) {
+          candidate = vindex;
+        } else {
+          candidate = (vindex - cpu_spill_slot_count_ - (kDoubleSpillFactor - 1)) / kDoubleSpillFactor;
+        }
+
+        // Input can't have a different representation from the phi itself.
+        // This means attributes of the spill slot must match.
+        ASSERT((need_quad == quad_spill_slots_[candidate]) &&
+            (need_untagged == untagged_spill_slots_[candidate]));
+
+        // Check if the candidate spill slot is available for us.
+        if (spill_slots_[candidate] <= start) {
+          idx = candidate;
+          break;
+        }
+      }
+    }
+  }
+
   // Search for a free spill slot among allocated: the value in it should be
   // dead and its type should match (e.g. it should not be a part of the quad if
   // we are allocating normal double slot).
   // For CPU registers we need to take reserved slots for try-catch into
   // account.
-  intptr_t idx = register_kind_ == Location::kRegister
-                     ? flow_graph_.graph_entry()->fixed_slot_count()
-                     : 0;
-  for (; idx < spill_slots_.length(); idx++) {
-    if ((need_quad == quad_spill_slots_[idx]) &&
-        (need_untagged == untagged_spill_slots_[idx]) &&
-        (spill_slots_[idx] <= start)) {
-      break;
+  if (idx == -1) {
+    idx = register_kind_ == Location::kRegister
+                      ? flow_graph_.graph_entry()->fixed_slot_count()
+                      : 0;
+    for (; idx < spill_slots_.length(); idx++) {
+      if ((need_quad == quad_spill_slots_[idx]) &&
+          (need_untagged == untagged_spill_slots_[idx]) &&
+          (spill_slots_[idx] <= start)) {
+        break;
+      }
     }
   }
 
@@ -2251,6 +2318,23 @@ BitVector* ReachingDefs::Get(PhiInstr* phi) {
   return phi->reaching_defs();
 }
 
+static LiveRange* TryFindCover(LiveRange* parent, intptr_t pos) {
+  for (LiveRange* range = parent; range != nullptr;
+       range = range->next_sibling()) {
+    if (range->CanCover(pos)) {
+      return range;
+    }
+  }
+  return nullptr;
+}
+
+static LiveRange* FindCover(LiveRange* parent, intptr_t pos) {
+  auto result = TryFindCover(parent, pos);
+  ASSERT(result != nullptr);
+  return result;
+}
+
+
 bool FlowGraphAllocator::AllocateFreeRegister(LiveRange* unallocated) {
   intptr_t candidate = kNoRegister;
   intptr_t free_until = 0;
@@ -2258,6 +2342,28 @@ bool FlowGraphAllocator::AllocateFreeRegister(LiveRange* unallocated) {
   // If hint is available try hint first.
   // TODO(vegorov): ensure that phis are hinted on the back edge.
   Location hint = unallocated->finger()->FirstHint();
+  if (!hint.IsMachineRegister()) {
+    if (auto phi = unallocated->phi()) {
+      // Try coalsecing phi with an incomming value by using the location
+      // of the incomming value as a hint.
+      for (intptr_t i = 0; i < phi->InputCount(); i++) {
+        const auto input = phi->InputAt(i)->definition();
+        const auto input_range = GetLiveRange(input->ssa_temp_index());
+
+        // -3 to hit instruction position before the GotoInstr at the end
+        // of the block.
+        const auto pred_pos = phi->GetBlock()->PredecessorAt(i)->end_pos() - 3;
+        const auto covering = TryFindCover(input_range, pred_pos);
+
+        // Check
+        if (covering != nullptr &&
+            covering->assigned_location().IsMachineRegister()) {
+          hint = covering->assigned_location();
+          break;
+        }
+      }
+    }
+  }
   if (hint.IsMachineRegister()) {
     if (!blocked_registers_[hint.register_code()]) {
       free_until =
@@ -2842,17 +2948,6 @@ void FlowGraphAllocator::AllocateUnallocatedRanges() {
 bool FlowGraphAllocator::TargetLocationIsSpillSlot(LiveRange* range,
                                                    Location target) {
   return GetLiveRange(range->vreg())->spill_slot().Equals(target);
-}
-
-static LiveRange* FindCover(LiveRange* parent, intptr_t pos) {
-  for (LiveRange* range = parent; range != nullptr;
-       range = range->next_sibling()) {
-    if (range->CanCover(pos)) {
-      return range;
-    }
-  }
-  UNREACHABLE();
-  return nullptr;
 }
 
 static bool AreLocationsAllTheSame(const GrowableArray<Location>& locs) {

@@ -586,6 +586,9 @@ class LiveRange : public ZoneAllocated {
   bool is_loop_phi() const { return is_loop_phi_; }
   void mark_loop_phi() { is_loop_phi_ = true; }
 
+  void set_phi(PhiInstr* phi) { phi_ = phi; }
+  Definition* phi() const { return phi_; }
+
  private:
   LiveRange(intptr_t vreg,
             Representation rep,
@@ -624,6 +627,7 @@ class LiveRange : public ZoneAllocated {
   static constexpr intptr_t kMaxLoops = sizeof(uint64_t) * kBitsPerByte;
   uint64_t has_only_any_uses_in_loops_;
   bool is_loop_phi_;
+  PhiInstr* phi_ = nullptr;
 
   AllocationFinger finger_;
 
