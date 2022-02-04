@@ -237,16 +237,23 @@ void ParallelMoveResolver::LegalizeMoves() {
 
 namespace {
 struct AllocationState {
-  static constexpr intptr_t kMaxNumberOfRegisters = std::max<intptr_t>(kNumberOfCpuRegisters, kNumberOfFpuRegisters);
+  static constexpr intptr_t kMaxNumberOfRegisters =
+      std::max<intptr_t>(kNumberOfCpuRegisters, kNumberOfFpuRegisters);
 
-  AllocationState(Location::Kind kind, GrowableArray<Location>* temporaries, GrowableArray<intptr_t>* def_pos, intptr_t* spill_slot_count, GrowableArray<std::pair<intptr_t, MoveOperands>>* spill_moves)
-    : kind(kind),
-      spill_slot_size(kind == Location::kRegister ? 1 : (kFpuRegisterSize / kWordSize)),
-      max_registers(kind == Location::kRegister ? kNumberOfCpuRegisters : kNumberOfFpuRegisters),
-      spill_slot_count(spill_slot_count),
-      temporaries(*temporaries),
-      def_pos(*def_pos),
-      spill_moves(*spill_moves) {
+  AllocationState(Location::Kind kind,
+                  GrowableArray<Location>* temporaries,
+                  GrowableArray<intptr_t>* def_pos,
+                  intptr_t* spill_slot_count,
+                  GrowableArray<std::pair<intptr_t, MoveOperands>>* spill_moves)
+      : kind(kind),
+        spill_slot_size(
+            kind == Location::kRegister ? 1 : (kFpuRegisterSize / kWordSize)),
+        max_registers(kind == Location::kRegister ? kNumberOfCpuRegisters
+                                                  : kNumberOfFpuRegisters),
+        spill_slot_count(spill_slot_count),
+        temporaries(*temporaries),
+        def_pos(*def_pos),
+        spill_moves(*spill_moves) {
     last_use_pos.fill(-1);
   }
 
@@ -259,11 +266,14 @@ struct AllocationState {
   }
 
   void Finalize() {
-    for (intptr_t r = 0; r < Utils::Minimum(max_registers, restore_from.length()); r++) {
+    for (intptr_t r = 0;
+         r < Utils::Minimum(max_registers, restore_from.length()); r++) {
       if (!spill_candidates.Contains(r) && !restore_from[r].IsInvalid()) {
         // We have not reached the definition of this register. We need to
         // actually emit spilling code.
-        spill_moves.Add({-1, {restore_from[r], Location::MachineRegisterLocation(kind, r)}});
+        spill_moves.Add(
+            {-1,
+             {restore_from[r], Location::MachineRegisterLocation(kind, r)}});
       }
     }
   }
@@ -282,36 +292,39 @@ struct AllocationState {
     if (reg == kLastBit) {
       // No free CPU register - everything is blocked. Check if there is a
       // suitable spill candidate which can be used here to become a temporary.
-//      const auto available_spill_candidates =
-//          static_cast<uint64_t>(spill_candidates.data() &
-//                                ~spilled.data()) |
-//          (static_cast<uint64_t>(1) << kLastBit);
-//      reg = Utils::CountTrailingZeros64(available_spill_candidates);
-//      if (reg == kLastBit) {
-        // Now lets try to find a register which can be used as a temporary,
-        // select the candidate that has minimum last_use_pos
-        // TODO(vegorov) finally do the eviction cost computation here.
-        // e.g. prefer the candidate that is cheap to evict.
-        intptr_t candidate = -1;
-        intptr_t last_candidate_use_pos = -1;
-        for (intptr_t r = 0; r < max_registers; r++) {
-          if (!not_blocked.Contains(r)) {
-            continue;
-          }
-          if (candidate == -1 || spill_candidates.Contains(r) || last_candidate_use_pos > last_use_pos[r]) {
-            candidate = r;
-            last_candidate_use_pos = spill_candidates.Contains(r) ? -1 : last_use_pos[r];
-          }
+      //      const auto available_spill_candidates =
+      //          static_cast<uint64_t>(spill_candidates.data() &
+      //                                ~spilled.data()) |
+      //          (static_cast<uint64_t>(1) << kLastBit);
+      //      reg = Utils::CountTrailingZeros64(available_spill_candidates);
+      //      if (reg == kLastBit) {
+      // Now lets try to find a register which can be used as a temporary,
+      // select the candidate that has minimum last_use_pos
+      // TODO(vegorov) finally do the eviction cost computation here.
+      // e.g. prefer the candidate that is cheap to evict.
+      intptr_t candidate = -1;
+      intptr_t last_candidate_use_pos = -1;
+      for (intptr_t r = 0; r < max_registers; r++) {
+        if (!not_blocked.Contains(r)) {
+          continue;
         }
-        ASSERT(candidate != -1);
+        if (candidate == -1 || spill_candidates.Contains(r) ||
+            last_candidate_use_pos > last_use_pos[r]) {
+          candidate = r;
+          last_candidate_use_pos =
+              spill_candidates.Contains(r) ? -1 : last_use_pos[r];
+        }
+      }
+      ASSERT(candidate != -1);
 
-        OS::PrintErr("found spilling candidate %s free until %" Pd "\n",
-                      Location::MachineRegisterLocation(kind, candidate).ToCString(),
-                      last_use_pos[candidate]);
+      OS::PrintErr(
+          "found spilling candidate %s free until %" Pd "\n",
+          Location::MachineRegisterLocation(kind, candidate).ToCString(),
+          last_use_pos[candidate]);
 
-        reg = candidate;
-//      }
-//      spilled.Add(reg);
+      reg = candidate;
+      //      }
+      //      spilled.Add(reg);
       Spill(cur_pos, reg);
     }
     available.Remove(reg);
@@ -349,7 +362,7 @@ struct AllocationState {
         // We have arrived here spilled. We have two options: either spilling
         // can be fused with the current move, or we need to allocate a
         // temporary.
-        AllocateUse(cur_pos, loc); // We allocate a temporary.
+        AllocateUse(cur_pos, loc);  // We allocate a temporary.
 
         // Emit spilling move.
         spill_moves.Add({cur_pos, {restore_from[register_code], loc}});
@@ -389,12 +402,16 @@ struct AllocationState {
     }
 
     restore_from.EnsureLength(current_value + 1, Location());
-    if (restore_from[current_value].IsInvalid()) {  // We need to allocate a spill slot.
+    if (restore_from[current_value]
+            .IsInvalid()) {  // We need to allocate a spill slot.
       const intptr_t spill_slot_index = *spill_slot_count;
       *spill_slot_count += spill_slot_size;
-      restore_from[current_value] = Location::StackSlot(spill_slot_index, FPREG);  // TODO(vegorov)
+      restore_from[current_value] =
+          Location::StackSlot(spill_slot_index, FPREG);  // TODO(vegorov)
     }
-    spill_moves.Add({cur_pos, {Location::MachineRegisterLocation(kind, reg), restore_from[current_value]}});
+    spill_moves.Add({cur_pos,
+                     {Location::MachineRegisterLocation(kind, reg),
+                      restore_from[current_value]}});
   }
 
   const Location::Kind kind;
@@ -429,10 +446,11 @@ void ParallelMoveResolver::AllocateTemporaries(
   GrowableArray<intptr_t> def_pos(temporaries_.length());
   def_pos.EnsureLength(temporaries_.length(), -1);
 
-
   AllocationState state[2] = {
-    AllocationState(Location::kRegister, &temporaries_, &def_pos, &spill_slot_count, &spill_moves),
-    AllocationState(Location::kFpuRegister, &temporaries_, &def_pos, &spill_slot_count, &spill_moves),
+      AllocationState(Location::kRegister, &temporaries_, &def_pos,
+                      &spill_slot_count, &spill_moves),
+      AllocationState(Location::kFpuRegister, &temporaries_, &def_pos,
+                      &spill_slot_count, &spill_moves),
   };
 
   const auto to_index = [](const Location& loc) -> intptr_t {
@@ -592,7 +610,8 @@ void ParallelMoveResolver::AllocateTemporaries(
   // use essentially a simple linear scan.
 
   // Compute mask of registers which can't be used as temporaries.
-  state[0].not_blocked = SmallSet<intptr_t>(~kReservedCpuRegisters & kAllCpuRegistersList);
+  state[0].not_blocked =
+      SmallSet<intptr_t>(~kReservedCpuRegisters & kAllCpuRegistersList);
   state[1].not_blocked = SmallSet<intptr_t>(kAllFpuRegistersList);
   if (is_intrinsic_) {
     // Block additional registers that must be preserved for intrinsics.
@@ -676,7 +695,7 @@ void ParallelMoveResolver::AllocateTemporaries(
         alloc(i, *op.operands.src_slot());
         break;
     }
-    def(i-1, op.temp);
+    def(i - 1, op.temp);
   }
 
   state[0].Finalize();
@@ -701,9 +720,7 @@ void ParallelMoveResolver::AllocateTemporaries(
   scheduled_ops_.Clear();
   scheduled_ops_.AddArray(ops);
 
-
-
-/*
+  /*
   for (intptr_t index = 0; index <= 1; index++) {
     for (intptr_t reg = 0; reg < state[index].max_registers; reg++) {
       if (state[index].spilled.Contains(reg)) {
