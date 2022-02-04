@@ -3205,12 +3205,6 @@ void FlowGraphAllocator::ScheduleParallelMoves() {
         resolver.Resolve(move);
       }
     }
-    auto last = block->last_instruction();
-    if (auto goto_instr = last->AsGoto()) {
-      if (goto_instr->HasParallelMove()) {
-        resolver.Resolve(goto_instr->parallel_move());
-      }
-    }
   }
 }
 
