@@ -315,7 +315,7 @@ struct AllocationState {
               spill_candidates.Contains(r) ? -1 : last_use_pos[r];
         }
       }
-      ASSERT(candidate != -1);
+      RELEASE_ASSERT(candidate != -1);
 
       OS::PrintErr(
           "found spilling candidate %s free until %" Pd "\n",
@@ -332,6 +332,8 @@ struct AllocationState {
   }
 
   void ProcessUse(intptr_t cur_pos, Location& loc) {
+    OS::PrintErr("USE(%s) @ %" Pd "\n", loc.ToCString(), cur_pos);
+
     if (loc.register_code() < max_registers) {
       available.Remove(loc.register_code());
       if (!alive[loc.register_code()].Equals(loc)) {
@@ -342,6 +344,8 @@ struct AllocationState {
   }
 
   void AllocateUse(intptr_t cur_pos, Location& loc) {
+    OS::PrintErr("ALLOC(%s) @ %" Pd "\n", loc.ToCString(), cur_pos);
+
     if (loc.register_code() >= max_registers) {
       const auto temp_index = loc.register_code() - max_registers;
       if (temporaries[temp_index].IsInvalid()) {
@@ -355,6 +359,7 @@ struct AllocationState {
   }
 
   void ProcessDef(intptr_t cur_pos, Location& loc) {
+    OS::PrintErr("DEF(%s) @ %" Pd "\n", loc.ToCString(), cur_pos);
     const auto register_code = loc.register_code();
     if (register_code >= max_registers) {
       const auto temp_index = register_code - max_registers;
@@ -371,6 +376,7 @@ struct AllocationState {
         loc = temporaries[temp_index];
       }
     } else {
+      OS::PrintErr("alive -> %s vs %s\n", alive[register_code].ToCString(), loc.ToCString());
       if (!alive[register_code].Equals(loc)) {
         // We have arrive here spilled. We have two options: either spilling
         // can be fused with the current move, or we need to allocate a
@@ -487,7 +493,6 @@ void ParallelMoveResolver::AllocateTemporaries(
 
   // Check if we can reschedule any moves which store into a register
   // to create a temporary register.
-  // TODO(vegorov) check if we can reschedule
   for (intptr_t i = 0, length = scheduled_ops_.length(); i < length; i++) {
     const auto& candidate = scheduled_ops_[i];
     const auto dst = candidate.operands.dest();
@@ -563,16 +568,6 @@ void ParallelMoveResolver::AllocateTemporaries(
     }
   }
 
-#if 0
-  for (auto& op : scheduled_ops_) {
-    if (op.kind == OpKind::kMove) {
-      OS::PrintErr(" %s <- %s", op.operands.dest().ToCString(),
-                   op.operands.src().ToCString());
-    }
-  }
-  OS::PrintErr("\n");
-#endif
-
   // Caveat: parallel_move->next() might be a parallel move itself and thus
   // will have locs() == nullptr.
   // TODO(vegorov) delete this once we normalize live range splitting policy.
@@ -580,8 +575,8 @@ void ParallelMoveResolver::AllocateTemporaries(
       parallel_move->next()->locs() != nullptr &&
       parallel_move->next()->locs()->always_calls()) {
     // We have an instruction that always calls, which means that we can use any
-    // register that is not an input register for the call as a scratch. The
-    // rest will be spilled.
+    // register that is not an input register for the call (or this parallel
+    // move) as a scratch. The rest will be spilled.
     auto locs = parallel_move->next()->locs();
     state[0].available = SmallSet<intptr_t>(kAllCpuRegistersList);
     state[1].available = SmallSet<intptr_t>(kAllFpuRegistersList);
@@ -690,8 +685,16 @@ void ParallelMoveResolver::AllocateTemporaries(
       case OpKind::kNop:
         break;
       case OpKind::kMove:
+        OS::PrintErr("[%" Pd "] %s <- %s\n", i, op.operands.dest().ToCString(),
+                    op.operands.src().ToCString());
+        OS::PrintErr("~def~ %s <- %s\n", op.operands.dest().ToCString(),
+                    op.operands.src().ToCString());
         def(i, *op.operands.dest_slot());
+        OS::PrintErr("~use~ %s <- %s\n", op.operands.dest().ToCString(),
+                    op.operands.src().ToCString());
         use(i, *op.operands.src_slot());
+        OS::PrintErr("~alloc~ %s <- %s\n", op.operands.dest().ToCString(),
+                    op.operands.src().ToCString());
         alloc(i, *op.operands.src_slot());
         break;
     }
