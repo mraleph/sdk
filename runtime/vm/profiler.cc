@@ -458,12 +458,17 @@ void Profiler::DumpStackTrace(uword sp, uword fp, uword pc, bool for_crash) {
   const char* isolate_group_name =
       isolate_group == nullptr ? "(nil)" : isolate_group->source()->name;
   const char* isolate_name = isolate == nullptr ? "(nil)" : isolate->name();
+#if defined(PRODUCT)
+  const intptr_t thread_id = -1;
+#else
+  const intptr_t thread_id = OSThread::ThreadIdToIntPtr(os_thread->trace_id());
+#endif
 
   OS::PrintErr("version=%s\n", Version::String());
   OS::PrintErr("pid=%" Pd ", thread=%" Pd
                ", isolate_group=%s(%p), isolate=%s(%p)\n",
                static_cast<intptr_t>(OS::ProcessId()),
-               OSThread::ThreadIdToIntPtr(os_thread->trace_id()),
+               thread_id,
                isolate_group_name, isolate_group, isolate_name, isolate);
   OS::PrintErr("isolate_instructions=%" Px ", vm_instructions=%" Px "\n",
                source == nullptr
