@@ -467,8 +467,7 @@ void Profiler::DumpStackTrace(uword sp, uword fp, uword pc, bool for_crash) {
   OS::PrintErr("version=%s\n", Version::String());
   OS::PrintErr("pid=%" Pd ", thread=%" Pd
                ", isolate_group=%s(%p), isolate=%s(%p)\n",
-               static_cast<intptr_t>(OS::ProcessId()),
-               thread_id,
+               static_cast<intptr_t>(OS::ProcessId()), thread_id,
                isolate_group_name, isolate_group, isolate_name, isolate);
   OS::PrintErr("isolate_instructions=%" Px ", vm_instructions=%" Px "\n",
                source == nullptr
