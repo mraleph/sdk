@@ -157,7 +157,6 @@ class ProfilerStackWalker : public ValueObject {
   intptr_t total_frames_;
 };
 
-
 // The layout of C stack frames.
 #if defined(HOST_ARCH_IA32) || defined(HOST_ARCH_X64) ||                       \
     defined(HOST_ARCH_ARM) || defined(HOST_ARCH_ARM64)

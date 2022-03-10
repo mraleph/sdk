@@ -721,8 +721,6 @@ DART_FORCE_INLINE D bit_copy(const S& source) {
 // Undefine math.h definition which clashes with our condition names.
 #undef OVERFLOW
 
-
-
 // Include IL printer and disassembler functionality into non-PRODUCT builds,
 // in all AOT compiler builds or when forced.
 #if !defined(PRODUCT) || defined(DART_PRECOMPILER) ||                          \
