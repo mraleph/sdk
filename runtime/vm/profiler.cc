@@ -1069,11 +1069,12 @@ class ProfilerDartStackWalker : public ProfilerStackWalker {
     sample_->set_exit_frame_sample(has_exit_frame);
 
 #if defined(TARGET_ARCH_IA32) || defined(TARGET_ARCH_X64)
-    if (!has_exit_frame && (CallerPC() == EntryMarker())) {
+    const bool is_entry_frame = (CallerPC() == EntryMarker());
 #else
-    if (!has_exit_frame &&
-        (StubCode::InInvocationStub(reinterpret_cast<uword>(lr_)))) {
+    const bool is_entry_frame =
+        (StubCode::InInvocationStub(reinterpret_cast<uword>(lr_)));
 #endif
+    if (!has_exit_frame && is_entry_frame) {
       // During the prologue of a function, CallerPC will return the caller's
       // caller. For most frames, the missing PC will be added during profile
       // processing. However, during this stack walk, it can cause us to fail
