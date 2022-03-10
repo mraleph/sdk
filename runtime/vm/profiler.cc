@@ -1155,7 +1155,7 @@ class ProfilerDartStackWalker : public ProfilerStackWalker {
   uword* pc_;
   uword* fp_;
   uword* lr_;
-};
+}
 
 static void CopyStackBuffer(Sample* sample, uword sp_addr) {
   ASSERT(sample != NULL);
