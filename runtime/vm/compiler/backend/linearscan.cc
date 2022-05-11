@@ -3274,7 +3274,9 @@ void FlowGraphAllocator::RemoveFrameIfNotNeeded() {
 }
 
 void FlowGraphAllocator::ScheduleParallelMoves() {
-  ParallelMoveResolver resolver;
+  auto entry = block_order_[0]->AsGraphEntry();
+
+  ParallelMoveResolver resolver(intrinsic_mode_, entry->spill_slot_count());
 
   for (auto block : flow_graph_.reverse_postorder()) {
     if (block->HasParallelMove()) {
@@ -3284,6 +3286,14 @@ void FlowGraphAllocator::ScheduleParallelMoves() {
       if (auto move = instruction->AsParallelMove()) {
         resolver.Resolve(move);
       }
+    }
+  }
+
+  if (resolver.additional_spill_slots_required() != 0) {
+    entry->set_spill_slot_count(entry->spill_slot_count() +
+                                resolver.additional_spill_slots_required());
+    if (!entry->NeedsFrame()) {
+      UNREACHABLE();  // Need to properly allocate
     }
   }
 }

@@ -683,8 +683,8 @@ void Assembler::LoadDImmediate(VRegister vd, double immd) {
     intptr_t offset = target::ObjectPool::element_offset(index);
     LoadDFromOffset(vd, PP, offset);
   } else {
-    LoadImmediate(TMP, imm64);
-    fmovdr(vd, TMP);
+    LoadImmediate(TMP2, imm64);
+    fmovdr(vd, TMP2);
   }
 }
 

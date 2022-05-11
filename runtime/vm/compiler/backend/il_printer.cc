@@ -9,6 +9,7 @@
 #include "vm/compiler/api/print_filter.h"
 #include "vm/compiler/backend/il.h"
 #include "vm/compiler/backend/linearscan.h"
+#include "vm/compiler/backend/parallel_move_resolver.h"
 #include "vm/compiler/backend/range_analysis.h"
 #include "vm/compiler/ffi/native_calling_convention.h"
 #include "vm/os.h"
@@ -1410,11 +1411,19 @@ void BranchInstr::PrintTo(BaseTextBuffer* f) const {
 
 void ParallelMoveInstr::PrintTo(BaseTextBuffer* f) const {
   f->Printf("%s ", DebugName());
-  for (intptr_t i = 0; i < moves_.length(); i++) {
-    if (i != 0) f->AddString(", ");
-    moves_[i]->dest().PrintTo(f);
+  bool comma = false;
+  for (const auto& move : moves_) {
+    if (move->IsRedundant()) continue;
+
+    if (comma) f->AddString(", ");
+    move->dest().PrintTo(f);
     f->AddString(" <- ");
-    moves_[i]->src().PrintTo(f);
+    move->src().PrintTo(f);
+    comma = true;
+  }
+  if (move_schedule_ != nullptr) {
+    f->Printf("; schedule ");
+    ParallelMoveResolver::PrintScheduleTo(*move_schedule_, f);
   }
 }
 

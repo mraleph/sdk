@@ -6825,8 +6825,7 @@ void EnterHandleScopeInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
 
   Location arg_loc = FirstArgumentLocation();
   __ EnterCFrame(arg_loc.IsRegister() ? 0 : compiler::target::kWordSize);
-  NoTemporaryAllocator no_temp;
-  compiler->EmitMove(arg_loc, Location::RegisterLocation(THR), &no_temp);
+  compiler->EmitMove(arg_loc, Location::RegisterLocation(THR));
   __ CallCFunction(
       compiler::Address(THR, compiler::target::Thread::OffsetFromThread(
                                  &kEnterHandleScopeRuntimeEntry)));
@@ -6847,8 +6846,7 @@ void ExitHandleScopeInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
 
   Location arg_loc = FirstArgumentLocation();
   __ EnterCFrame(arg_loc.IsRegister() ? 0 : compiler::target::kWordSize);
-  NoTemporaryAllocator no_temp;
-  compiler->EmitMove(arg_loc, Location::RegisterLocation(THR), &no_temp);
+  compiler->EmitMove(arg_loc, Location::RegisterLocation(THR));
   __ CallCFunction(
       compiler::Address(THR, compiler::target::Thread::OffsetFromThread(
                                  &kExitHandleScopeRuntimeEntry)));
@@ -6887,8 +6885,7 @@ void AllocateHandleInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   Location arg_loc = FirstArgumentLocation();
   __ EnterCFrame(arg_loc.IsRegister() ? 0 : compiler::target::kWordSize);
   if (arg_loc.IsStackSlot()) {
-    NoTemporaryAllocator no_temp;
-    compiler->EmitMove(arg_loc, locs()->in(kScope), &no_temp);
+    compiler->EmitMove(arg_loc, locs()->in(kScope));
   }
   __ CallCFunction(
       compiler::Address(THR, compiler::target::Thread::OffsetFromThread(
