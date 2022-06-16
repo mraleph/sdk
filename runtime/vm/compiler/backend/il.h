@@ -1527,21 +1527,6 @@ class BlockEntryInstr : public Instruction {
   Instruction* last_instruction() const { return last_instruction_; }
   void set_last_instruction(Instruction* instr) { last_instruction_ = instr; }
 
-  ParallelMoveInstr* parallel_move() const { return parallel_move_; }
-
-  bool HasParallelMove() const { return parallel_move_ != NULL; }
-
-  bool HasNonRedundantParallelMove() const {
-    return HasParallelMove() && !parallel_move()->IsRedundant();
-  }
-
-  ParallelMoveInstr* GetParallelMove() {
-    if (parallel_move_ == NULL) {
-      parallel_move_ = new ParallelMoveInstr();
-    }
-    return parallel_move_;
-  }
-
   // Discover basic-block structure of the current block.  Must be called
   // on all graph blocks in preorder to yield valid results.  As a side effect,
   // the block entry instructions in the graph are assigned preorder numbers.
@@ -1664,10 +1649,6 @@ class BlockEntryInstr : public Instruction {
   // TODO(fschneider): Optimize the case of one child to save space.
   GrowableArray<BlockEntryInstr*> dominated_blocks_;
   Instruction* last_instruction_ = nullptr;
-
-  // Parallel move that will be used by linear scan register allocator to
-  // connect live ranges at the start of the block.
-  ParallelMoveInstr* parallel_move_ = nullptr;
 
   // Closest enveloping loop in loop hierarchy (nullptr at nesting depth 0).
   LoopInfo* loop_info_ = nullptr;
@@ -3224,8 +3205,7 @@ class GotoInstr : public TemplateInstruction<0, NoThrow> {
       : TemplateInstruction(deopt_id),
         block_(NULL),
         successor_(entry),
-        edge_weight_(0.0),
-        parallel_move_(NULL) {}
+        edge_weight_(0.0) {}
 
   DECLARE_INSTRUCTION(Goto)
 
@@ -3254,21 +3234,6 @@ class GotoInstr : public TemplateInstruction<0, NoThrow> {
 
   virtual bool HasUnknownSideEffects() const { return false; }
 
-  ParallelMoveInstr* parallel_move() const { return parallel_move_; }
-
-  bool HasParallelMove() const { return parallel_move_ != NULL; }
-
-  bool HasNonRedundantParallelMove() const {
-    return HasParallelMove() && !parallel_move()->IsRedundant();
-  }
-
-  ParallelMoveInstr* GetParallelMove() {
-    if (parallel_move_ == NULL) {
-      parallel_move_ = new ParallelMoveInstr();
-    }
-    return parallel_move_;
-  }
-
   virtual TokenPosition token_pos() const {
     return TokenPosition::kControlFlow;
   }
@@ -3279,10 +3244,6 @@ class GotoInstr : public TemplateInstruction<0, NoThrow> {
   BlockEntryInstr* block_;
   JoinEntryInstr* successor_;
   double edge_weight_;
-
-  // Parallel move that will be used by linear scan register allocator to
-  // connect live ranges at the end of the block and resolve phis.
-  ParallelMoveInstr* parallel_move_;
 };
 
 // IndirectGotoInstr represents a dynamically computed jump. Only

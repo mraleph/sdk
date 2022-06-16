@@ -2866,9 +2866,6 @@ void CatchBlockEntryInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
                                      InstructionSource());
     }
   }
-  if (HasParallelMove()) {
-    compiler->parallel_move_resolver()->EmitNativeCode(parallel_move());
-  }
 
   // Restore ESP from EBP as we are coming from a throw and the code for
   // popping arguments has not been run.
@@ -6458,9 +6455,6 @@ void GotoInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     // may be inserted before this instruction.
     compiler->AddCurrentDescriptor(UntaggedPcDescriptors::kDeopt, GetDeoptId(),
                                    InstructionSource());
-  }
-  if (HasParallelMove()) {
-    compiler->parallel_move_resolver()->EmitNativeCode(parallel_move());
   }
 
   // We can fall through if the successor is the next block in the list.

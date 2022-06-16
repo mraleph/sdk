@@ -1249,9 +1249,9 @@ void FlowGraph::PopulateEnvironmentFromFunctionEntry(
         defn = constant_dead();
       } else {
         defn = (*inlining_parameters)[0];
+        AllocateSSAIndexes(defn);
+        AddToInitialDefinitions(function_entry, defn);
       }
-      AllocateSSAIndexes(defn);
-      AddToInitialDefinitions(function_entry, defn);
       (*env)[RawTypeArgumentEnvIndex()] = defn;
     }
 

@@ -375,18 +375,6 @@ Location Location::Copy() const {
   }
 }
 
-Location LocationArgumentsDescriptorLocation() {
-  return Location::RegisterLocation(ARGS_DESC_REG);
-}
-
-Location LocationExceptionLocation() {
-  return Location::RegisterLocation(kExceptionObjectReg);
-}
-
-Location LocationStackTraceLocation() {
-  return Location::RegisterLocation(kStackTraceObjectReg);
-}
-
 Location LocationRemapForSlowPath(Location loc,
                                   Definition* def,
                                   intptr_t* cpu_reg_slots,

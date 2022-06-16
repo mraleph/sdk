@@ -210,7 +210,7 @@ void FlowGraphPrinter::PrintGraph(const char* phase, FlowGraph* flow_graph) {
     IlTestPrinter::PrintGraph(phase, flow_graph);
   } else {
     THR_Print("*** BEGIN CFG\n%s\n", phase);
-    FlowGraphPrinter printer(*flow_graph);
+    FlowGraphPrinter printer(*flow_graph, true);
     printer.PrintBlocks();
     THR_Print("*** END CFG\n");
   }
@@ -1073,10 +1073,6 @@ void JoinEntryInstr::PrintTo(BaseTextBuffer* f) const {
     }
     f->AddString("\n}");
   }
-  if (HasParallelMove()) {
-    f->AddString(" ");
-    parallel_move()->PrintTo(f);
-  }
 }
 
 void IndirectEntryInstr::PrintTo(BaseTextBuffer* f) const {
@@ -1098,10 +1094,6 @@ void IndirectEntryInstr::PrintTo(BaseTextBuffer* f) const {
       (*phis_)[i]->PrintTo(f);
     }
     f->AddString("\n}");
-  }
-  if (HasParallelMove()) {
-    f->AddString(" ");
-    parallel_move()->PrintTo(f);
   }
 }
 
@@ -1218,37 +1210,21 @@ void TargetEntryInstr::PrintTo(BaseTextBuffer* f) const {
   } else {
     f->Printf("B%" Pd "[target]:%" Pd, block_id(), GetDeoptId());
   }
-  if (HasParallelMove()) {
-    f->AddString(" ");
-    parallel_move()->PrintTo(f);
-  }
 }
 
 void OsrEntryInstr::PrintTo(BaseTextBuffer* f) const {
   f->Printf("B%" Pd "[osr entry]:%" Pd " stack_depth=%" Pd, block_id(),
             GetDeoptId(), stack_depth());
-  if (HasParallelMove()) {
-    f->AddString("\n");
-    parallel_move()->PrintTo(f);
-  }
   BlockEntryWithInitialDefs::PrintInitialDefinitionsTo(f);
 }
 
 void FunctionEntryInstr::PrintTo(BaseTextBuffer* f) const {
   f->Printf("B%" Pd "[function entry]:%" Pd, block_id(), GetDeoptId());
-  if (HasParallelMove()) {
-    f->AddString("\n");
-    parallel_move()->PrintTo(f);
-  }
   BlockEntryWithInitialDefs::PrintInitialDefinitionsTo(f);
 }
 
 void NativeEntryInstr::PrintTo(BaseTextBuffer* f) const {
   f->Printf("B%" Pd "[native function entry]:%" Pd, block_id(), GetDeoptId());
-  if (HasParallelMove()) {
-    f->AddString("\n");
-    parallel_move()->PrintTo(f);
-  }
   BlockEntryWithInitialDefs::PrintInitialDefinitionsTo(f);
 }
 
@@ -1320,11 +1296,6 @@ void NativeParameterInstr::PrintOperandsTo(BaseTextBuffer* f) const {
 void CatchBlockEntryInstr::PrintTo(BaseTextBuffer* f) const {
   f->Printf("B%" Pd "[target catch try_idx %" Pd " catch_try_idx %" Pd "]",
             block_id(), try_index(), catch_try_index());
-  if (HasParallelMove()) {
-    f->AddString("\n");
-    parallel_move()->PrintTo(f);
-  }
-
   BlockEntryWithInitialDefs::PrintInitialDefinitionsTo(f);
 }
 
@@ -1399,10 +1370,6 @@ void PushArgumentInstr::PrintOperandsTo(BaseTextBuffer* f) const {
 }
 
 void GotoInstr::PrintTo(BaseTextBuffer* f) const {
-  if (HasParallelMove()) {
-    parallel_move()->PrintTo(f);
-    f->AddString(" ");
-  }
   if (GetDeoptId() != DeoptId::kNone) {
     f->Printf("goto:%" Pd " B%" Pd "", GetDeoptId(), successor()->block_id());
   } else {

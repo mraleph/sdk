@@ -134,7 +134,7 @@ precisely based on their source position (which is included in their name).
 
     // Now produce the report table.
     const numLargerSymbolsToReport = 30;
-    const numSmallerSymbolsToReport = 10;
+    const numSmallerSymbolsToReport = 70;
     printHistogram(diff, histogram,
         sizeHeader: 'Diff (Bytes)',
         prefix: histogram.bySize

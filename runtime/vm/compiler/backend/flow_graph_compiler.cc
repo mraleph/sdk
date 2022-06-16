@@ -297,9 +297,11 @@ bool FlowGraphCompiler::IsEmptyBlock(BlockEntryInstr* block) const {
   // prologue emitted which should not be included in any block they jump to.
   return !block->IsGraphEntry() && !block->IsFunctionEntry() &&
          !block->IsCatchBlockEntry() && !block->IsOsrEntry() &&
-         !block->IsIndirectEntry() && !block->HasNonRedundantParallelMove() &&
-         block->next()->IsGoto() &&
-         !block->next()->AsGoto()->HasNonRedundantParallelMove();
+         !block->IsIndirectEntry() &&
+         (block->next()->IsGoto() ||
+          (block->next()->IsParallelMove() &&
+           block->next()->AsParallelMove()->IsRedundant() &&
+           block->next()->next()->IsGoto()));
 }
 
 void FlowGraphCompiler::CompactBlock(BlockEntryInstr* block) {
@@ -314,7 +316,7 @@ void FlowGraphCompiler::CompactBlock(BlockEntryInstr* block) {
   if (IsEmptyBlock(block)) {
     // For empty blocks, record a corresponding nonempty target as their
     // jump label.
-    BlockEntryInstr* target = block->next()->AsGoto()->successor();
+    BlockEntryInstr* target = block->last_instruction()->AsGoto()->successor();
     CompactBlock(target);
     block_info->set_jump_label(GetJumpLabel(target));
   }

@@ -1663,14 +1663,12 @@ void ConstantPropagator::Transform() {
 
       if (!reachable_->Contains(if_true->preorder_number())) {
         ASSERT(reachable_->Contains(if_false->preorder_number()));
-        ASSERT(if_false->parallel_move() == NULL);
         join = new (Z) JoinEntryInstr(if_false->block_id(),
                                       if_false->try_index(), DeoptId::kNone);
         graph_->CopyDeoptTarget(join, if_false);
         if_false->UnuseAllInputs();
         next = if_false->next();
       } else if (!reachable_->Contains(if_false->preorder_number())) {
-        ASSERT(if_true->parallel_move() == NULL);
         join = new (Z) JoinEntryInstr(if_true->block_id(), if_true->try_index(),
                                       DeoptId::kNone);
         graph_->CopyDeoptTarget(join, if_true);

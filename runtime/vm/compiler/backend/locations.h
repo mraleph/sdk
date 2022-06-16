@@ -471,9 +471,6 @@ class Location : public ValueObject {
   uword value_;
 };
 
-Location LocationArgumentsDescriptorLocation();
-Location LocationExceptionLocation();
-Location LocationStackTraceLocation();
 // Constants.
 Location LocationRegisterOrConstant(Value* value);
 Location LocationRegisterOrSmiConstant(Value* value);

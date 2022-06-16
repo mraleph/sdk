@@ -51,11 +51,6 @@ static void EmitCodeFor(FlowGraphCompiler* compiler, FlowGraph* graph) {
     BlockEntryInstr* block = graph->reverse_postorder()[i];
     if (block->IsGraphEntry()) continue;  // No code for graph entry needed.
 
-    if (block->HasParallelMove()) {
-      compiler->parallel_move_resolver()->EmitNativeCode(
-          block->parallel_move());
-    }
-
     for (ForwardInstructionIterator it(block); !it.Done(); it.Advance()) {
       Instruction* instr = it.Current();
       if (FLAG_code_comments) compiler->EmitComment(instr);

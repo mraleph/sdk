@@ -3926,9 +3926,6 @@ void JoinEntryInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     compiler->AddCurrentDescriptor(UntaggedPcDescriptors::kDeopt, GetDeoptId(),
                                    InstructionSource());
   }
-  if (HasParallelMove()) {
-    compiler->parallel_move_resolver()->EmitNativeCode(parallel_move());
-  }
 }
 
 LocationSummary* TargetEntryInstr::MakeLocationSummary(Zone* zone,
@@ -3952,12 +3949,6 @@ void TargetEntryInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     // matches backwards from the end of the pattern.
     compiler->AddCurrentDescriptor(UntaggedPcDescriptors::kDeopt, GetDeoptId(),
                                    InstructionSource());
-  }
-  if (HasParallelMove()) {
-    if (compiler::Assembler::EmittingComments()) {
-      compiler->EmitComment(parallel_move());
-    }
-    compiler->parallel_move_resolver()->EmitNativeCode(parallel_move());
   }
 }
 
@@ -4026,12 +4017,6 @@ void FunctionEntryInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
     // matches backwards from the end of the pattern.
     compiler->AddCurrentDescriptor(UntaggedPcDescriptors::kDeopt, GetDeoptId(),
                                    InstructionSource());
-  }
-  if (HasParallelMove()) {
-    if (compiler::Assembler::EmittingComments()) {
-      compiler->EmitComment(parallel_move());
-    }
-    compiler->parallel_move_resolver()->EmitNativeCode(parallel_move());
   }
 }
 
@@ -4119,13 +4104,6 @@ void OsrEntryInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
 #if defined(TARGET_USES_OBJECT_POOL)
   ASSERT(__ constant_pool_allowed());
 #endif
-
-  if (HasParallelMove()) {
-    if (compiler::Assembler::EmittingComments()) {
-      compiler->EmitComment(parallel_move());
-    }
-    compiler->parallel_move_resolver()->EmitNativeCode(parallel_move());
-  }
 }
 
 void IndirectGotoInstr::ComputeOffsetTable(FlowGraphCompiler* compiler) {
