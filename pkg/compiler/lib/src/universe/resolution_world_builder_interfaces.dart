@@ -29,6 +29,8 @@ abstract class ResolutionWorldBuilderForEnqueuer {
 
   void registerIsCheck(covariant DartType type);
 
+  void registerTypeDI(covariant DartType type);
+
   void registerNamedTypeVariableNewRti(TypeVariableType type);
 
   void registerClosurizedMember(MemberEntity element);

@@ -39,6 +39,8 @@ class WorldImpact {
 
   Iterable<ConstantUse> get constantUses => const [];
 
+  Iterable<TypeUse> get typeDI => const [];
+
   void _forEach<U>(
           Iterable<U> uses, void Function(MemberEntity?, U) visitUse) =>
       uses.forEach((use) => visitUse(member, use));
@@ -51,6 +53,8 @@ class WorldImpact {
       _forEach(typeUses, visitUse);
   void forEachConstantUse(void Function(MemberEntity?, ConstantUse) visitUse) =>
       _forEach(constantUses, visitUse);
+  void forEachTypeDI(void Function(MemberEntity?, TypeUse) visitUse) =>
+      _forEach(typeDI, visitUse);
 
   bool get isEmpty => true;
 
@@ -77,6 +81,7 @@ class WorldImpact {
     add('static uses', worldImpact.staticUses);
     add('type uses', worldImpact.typeUses);
     add('constant uses', worldImpact.constantUses);
+    add('type DI', worldImpact.typeDI);
   }
 }
 
@@ -85,6 +90,7 @@ abstract class WorldImpactBuilder extends WorldImpact {
   void registerTypeUse(TypeUse typeUse);
   void registerStaticUse(StaticUse staticUse);
   void registerConstantUse(ConstantUse constantUse);
+  void registerTypeDI(TypeUse typeUse);
 }
 
 class WorldImpactBuilderImpl extends WorldImpactBuilder {
@@ -98,11 +104,12 @@ class WorldImpactBuilderImpl extends WorldImpactBuilder {
   Set<StaticUse>? _staticUses;
   Set<TypeUse>? _typeUses;
   Set<ConstantUse>? _constantUses;
+  Set<TypeUse>? _typeDI;
 
   WorldImpactBuilderImpl([this.member]);
 
   WorldImpactBuilderImpl.internal(
-      this._dynamicUses, this._staticUses, this._typeUses, this._constantUses,
+      this._dynamicUses, this._staticUses, this._typeUses, this._constantUses, this._typeDI,
       {this.member});
 
   @override
@@ -110,7 +117,8 @@ class WorldImpactBuilderImpl extends WorldImpactBuilder {
       _dynamicUses == null &&
       _staticUses == null &&
       _typeUses == null &&
-      _constantUses == null;
+      _constantUses == null &&
+      _typeDI == null;
 
   /// Copy uses in [impact] to this impact builder.
   void addImpact(WorldImpact impact) {
@@ -119,6 +127,7 @@ class WorldImpactBuilderImpl extends WorldImpactBuilder {
     impact.staticUses.forEach(registerStaticUse);
     impact.typeUses.forEach(registerTypeUse);
     impact.constantUses.forEach(registerConstantUse);
+    impact.typeDI.forEach(registerTypeDI);
   }
 
   @override
@@ -141,6 +150,18 @@ class WorldImpactBuilderImpl extends WorldImpactBuilder {
   @override
   Iterable<TypeUse> get typeUses {
     return _typeUses ?? const [];
+  }
+
+  @override
+  void registerTypeDI(TypeUse typeUse) {
+    assert((typeUse as dynamic) != null); // TODO(48820): Remove when sound.
+    (_typeDI ??= Setlet()).add(typeUse);
+  }
+
+
+  @override
+  Iterable<TypeUse> get typeDI {
+    return _typeDI ?? const [];
   }
 
   @override
@@ -175,6 +196,7 @@ class TransformedWorldImpact extends WorldImpactBuilder {
   Setlet<TypeUse>? _typeUses;
   Setlet<DynamicUse>? _dynamicUses;
   Setlet<ConstantUse>? _constantUses;
+  Setlet<TypeUse>? _typeDI;
 
   TransformedWorldImpact(this.worldImpact);
 
@@ -187,7 +209,8 @@ class TransformedWorldImpact extends WorldImpactBuilder {
         _staticUses == null &&
         _typeUses == null &&
         _dynamicUses == null &&
-        _constantUses == null;
+        _constantUses == null &&
+        _typeDI == null;
   }
 
   @override
@@ -210,6 +233,17 @@ class TransformedWorldImpact extends WorldImpactBuilder {
   @override
   Iterable<TypeUse> get typeUses {
     return _typeUses ?? worldImpact.typeUses;
+  }
+
+  @override
+  void registerTypeDI(TypeUse typeUse) {
+    _typeDI ??= Setlet.of(worldImpact.typeDI);
+    _typeDI!.add(typeUse);
+  }
+
+  @override
+  Iterable<TypeUse> get typeDI {
+    return _typeDI ?? worldImpact.typeDI;
   }
 
   @override

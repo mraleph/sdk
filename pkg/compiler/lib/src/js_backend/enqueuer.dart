@@ -166,6 +166,11 @@ class CodegenEnqueuer extends Enqueuer {
   }
 
   @override
+  void processTypeDI(DartType type) {
+    _registerTypeDI(type);
+  }
+
+  @override
   void processTypeUse(MemberEntity? member, TypeUse typeUse) {
     DartType type = typeUse.type;
     switch (typeUse.kind) {
@@ -229,6 +234,10 @@ class CodegenEnqueuer extends Enqueuer {
 
   void _registerIsCheck(DartType type) {
     worldBuilder.registerIsCheck(type);
+  }
+
+  void _registerTypeDI(DartType type) {
+    worldBuilder.registerTypeDI(type);
   }
 
   void _registerNamedTypeVariableNewRti(TypeVariableType type) {

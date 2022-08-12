@@ -30,11 +30,48 @@ class Selector {
   int get hashCode => name.hashCode ^ setter.hashCode;
 
   @override
-  bool operator ==(Object other) =>
-      other is Selector &&
-      this.name == other.name &&
-      this.setter == other.setter;
+  bool operator ==(Object other) {
+    if (other is! Selector) {
+      return false;
+    }
+
+/*
+    if (!identical(this.name.text, other.name.text)) {
+      if (this.name.text == other.name.text)
+        throw 'Something is wrong with canonicalization: ${this.name.text} vs ${other.name.text}';
+    }
+
+    if (!identical(this.name.library, other.name.library)) {
+      if ((this.name.library == other.name.library))
+        throw 'Something is wrong with canonicalization';
+    }
+*/
+
+    return identical(this.name.text, other.name.text) &&
+        identical(this.name.library, other.name.library) &&
+        this.setter == other.setter;
+  }
 }
+
+class Invocation {
+  final Member interfaceTarget;
+  final List arguments;
+
+  Invocation(this.interfaceTarget, this.arguments);
+}
+
+class Summary {
+  final List<Invocation> invocations;
+
+  Summary(this.invocations);
+}
+
+// class CallersInfo {
+//  final Member interfaceTarget;
+//  final List
+//
+//  CallersInfo({required this.interfaceTarget});
+//}
 
 class ClassInfo extends TFClass {
   final ClassInfo? superclass;
@@ -52,6 +89,10 @@ class ClassInfo extends TFClass {
       _initDispatchTargets(true);
   late final Map<Name, Member> _dispatchTargetsNonSetters =
       _initDispatchTargets(false);
+
+  late final Map<Name, Member> _allProcedures = {
+    for (var p in classNode.procedures) p.name: p
+  };
 
   ClassInfo(int id, Class classNode, this.superclass, this.supertypes,
       this.calledDynamicSelectors, this.calledVirtualSelectors)
@@ -163,6 +204,21 @@ class _ClassHierarchyCache {
     }
   }
 
+  void forEachPossibleTarget(Member interfaceTarget, void Function(Member) cb) {
+    final cl = interfaceTarget.enclosingClass!;
+    final selector = Selector(interfaceTarget.name, false);
+
+    final ClassInfo classInfo = getClassInfo(cl);
+    for (var sub in classInfo.subclasses) {
+      if (sub.isAllocated) {
+        final member = sub.getDispatchTarget(selector);
+        if (member != null) {
+          cb(member);
+        }
+      }
+    }
+  }
+
   void addVirtualCall(Selector selector, Class cl, RapidTypeAnalysis rta) {
     final ClassInfo classInfo = getClassInfo(cl);
     for (var sub in classInfo.subclasses) {
@@ -176,17 +232,81 @@ class _ClassHierarchyCache {
   }
 }
 
+class Unknown {
+  const Unknown();
+}
+
+class Forward {
+  const Forward();
+}
+
+class CallerInfo {
+  var arg0;
+  Member? unknownSource;
+  Set<Member>? callers;
+
+  void addCallFrom(Member caller, Object arg0) {
+    if (identical(this.arg0, const Unknown())) {
+      return;
+    }
+
+    if (identical(arg0, const Unknown())) {
+      // Bad incomming argument.
+      this.arg0 = const Unknown();
+      this.unknownSource = caller;
+      callers = null;
+      return;
+    }
+
+    if (identical(arg0, const Forward())) {
+      callers ??= {};
+      callers!.add(caller);
+      return;
+    }
+
+    if (identical(this.arg0, null)) {
+      this.arg0 = arg0;
+      return;
+    } else {
+      var s = this.arg0;
+      if (s is! Set<Constant>) {
+        s = Set<Constant>()..add(s);
+        this.arg0 = s;
+      }
+      s.add(arg0 as Constant);
+    }
+  }
+}
+
 class RapidTypeAnalysis {
   final CoreTypes coreTypes;
   final ClassHierarchy hierarchy;
+  final LibraryIndex libraryIndex;
   final _ClassHierarchyCache hierarchyCache = _ClassHierarchyCache();
   final ProtobufHandler? protobufHandler;
 
   final Set<Member> visited = {};
   final List<Member> workList = [];
 
+  final Map<Member, Summary> summaries = {};
+
+  final Map<Member, CallerInfo> callerInfo = {};
+
+  static const injectorLibraryUri =
+      'package:third_party.dart_src.angular.angular/src/di/injector.dart';
+
+  late final tokenToProvider = libraryIndex.getMember(
+      injectorLibraryUri, 'GeneratedInjector', 'tokenToProvider');
+  late final Map_addAll = libraryIndex.getMember('dart:core', 'Map', 'addAll');
+
+  late final injectorGet =
+      libraryIndex.getMember(injectorLibraryUri, 'Injector', 'get');
+
+  late final injectorProvideType =
+      libraryIndex.getMember(injectorLibraryUri, 'Injector', 'provideType');
+
   RapidTypeAnalysis(Component component, this.coreTypes, Target target,
-      this.hierarchy, LibraryIndex libraryIndex, this.protobufHandler) {
+      this.hierarchy, this.libraryIndex, this.protobufHandler) {
     Procedure? main = component.mainMethod;
     if (main != null) {
       addMember(main);
@@ -217,29 +337,281 @@ class RapidTypeAnalysis {
     }
   }
 
+  Member? currentMember;
+
+  late final Class classInject = libraryIndex.getClass(
+      'package:third_party.dart_src.angular.angular/src/meta/di_arguments.dart',
+      'Inject');
+
+  late final Reference Inject_token = libraryIndex
+      .getField(
+          'package:third_party.dart_src.angular.angular/src/meta/di_arguments.dart',
+          'Inject',
+          'token')
+      .fieldReference;
+
+  late final Class classOptional = libraryIndex.getClass(
+      'package:third_party.dart_src.angular.angular/src/meta/di_arguments.dart',
+      'Optional');
+
+  late final Class classSkipSelf = libraryIndex.getClass(
+      'package:third_party.dart_src.angular.angular/src/meta/di_arguments.dart',
+      'SkipSelf');
+
+  late final Class classSelf = libraryIndex.getClass(
+      'package:third_party.dart_src.angular.angular/src/meta/di_arguments.dart',
+      'Self');
+
+  late final Class classHost = libraryIndex.getClass(
+      'package:third_party.dart_src.angular.angular/src/meta/di_arguments.dart',
+      'Host');
+
+  late final Member Reflector_registerDependencies = libraryIndex.getMember(
+      'package:third_party.dart_src.angular.angular/src/reflector.dart',
+      '::',
+      'registerDependencies');
+
+  late final Member RuntimeInjector_resolveArg = libraryIndex.getMember(
+      'package:third_party.dart_src.angular.angular/src/di/injector/runtime.dart',
+      '_RuntimeInjector',
+      '_resolveArg');
+  late final Member RuntimeInjector_resolveArgs = libraryIndex.getMember(
+      'package:third_party.dart_src.angular.angular/src/di/injector/runtime.dart',
+      '_RuntimeInjector',
+      '_resolveArgs');
+
+  late final Member RuntimeInjector_resolveMeta = libraryIndex.getMember(
+      'package:third_party.dart_src.angular.angular/src/di/injector/runtime.dart',
+      '_RuntimeInjector',
+      '_resolveMeta');
+
+  late final Member Provider_buildAtRuntime = libraryIndex.getMember(
+      'package:third_party.dart_src.angular.angular/src/meta/di_providers.dart',
+      'Provider',
+      '_buildAtRuntime');
+
+  void addLiveToken(Constant token) {
+    if (!injectedTokens.contains(token)) {
+      liveTokens.add(token);
+      print('marking token $token live');
+    }
+  }
+
   void addCall(Class? currentClass, Member? interfaceTarget, Name name,
-      bool isVirtual, bool isSetter) {
+      bool isVirtual, bool isSetter,
+      {Object arg0 = const Unknown()}) {
     final Class cl = isVirtual
         ? currentClass!
         : (interfaceTarget != null
             ? interfaceTarget.enclosingClass!
             : coreTypes.objectClass);
     final Selector selector = Selector(name, isSetter);
+
     if (isVirtual) {
       hierarchyCache.addVirtualCall(selector, cl, this);
     } else {
       hierarchyCache.addDynamicCall(selector, cl, this);
     }
-  }
 
-  void run() {
-    final memberVisitor = _MemberVisitor(this);
-    while (workList.isNotEmpty || invalidateProtobufFields()) {
-      final member = workList.removeLast();
-      protobufHandler?.beforeSummaryCreation(member);
-      member.accept(memberVisitor);
+    if (interfaceTarget != null && currentMember != null) {
+      var info = callerInfo[interfaceTarget];
+      if (info == null) {
+        info = CallerInfo();
+        callerInfo[interfaceTarget] = info;
+      }
+      if (identical(const Unknown(), arg0)) {
+        if (interfaceTarget == injectorGet) {
+          throw 'Bad call in ${currentMember!} ${currentMember!.enclosingClass} ${currentMember!.enclosingLibrary} passing $arg0';
+        } else if (interfaceTarget == RuntimeInjector_resolveArg) {
+          if (currentMember == RuntimeInjector_resolveArgs) {
+            return; // Ignore for now.
+          }
+        } else if (currentMember == RuntimeInjector_resolveMeta) {
+          return;
+        } else if (currentMember == Provider_buildAtRuntime) {
+          return;
+        } else if (currentMember == runAction) {
+          return;
+        }
+      }
+      info.addCallFrom(currentMember!, arg0);
     }
   }
+
+  final Set<Constant> injectedTokens = {};
+
+  final Set<Constant> liveTokens = {};
+
+  void run() {
+    //incomingState[injectorGet] = initialState(injectorGet);
+
+    final memberVisitor = _MemberVisitor(this);
+
+    do {
+      while (workList.isNotEmpty || invalidateProtobufFields()) {
+        final member = workList.removeLast();
+        protobufHandler?.beforeSummaryCreation(member);
+        member.accept(memberVisitor);
+      }
+      print('total members live ${visited.length}');
+
+      final Map<Member, Set<Member>> cache = {};
+      Set<Member> possibleTargets(Member target) {
+        return cache.putIfAbsent(target, () {
+          final result = <Member>{};
+          if (target.enclosingClass == null) {
+            result.add(target);
+            return result; // Static call.
+          }
+
+          final cls = hierarchyCache.getClassInfo(target.enclosingClass!);
+
+          for (var t in cls.supertypes) {
+            final p = t._allProcedures[target.name];
+            if (p != null) {
+              result.add(p);
+            }
+          }
+
+          for (var t in cls.subclasses) {
+            final p = t._allProcedures[target.name];
+            if (p != null && p.isAbstract) {
+              result.add(p);
+            }
+          }
+          return result;
+        });
+      }
+
+      final tokensWorklist = Set<Constant>();
+
+      for (var token in liveTokens) {
+        if (injectedTokens.add(token)) {
+          tokensWorklist.add(token);
+        }
+      }
+      liveTokens.clear();
+
+      bool unknown = false;
+      final Set<Member> toAnalyze = {};
+      toAnalyze.add(injectorGet);
+      workList.add(injectorGet);
+      while (workList.isNotEmpty) {
+        final member = workList.removeLast();
+        for (var target in possibleTargets(member)) {
+          final callers = callerInfo[target];
+          if (callers == null) continue;
+
+          if (identical(callers.arg0, const Unknown())) {
+            print(
+                'Hit UKNOWN at $target originating from ${callers.unknownSource} ${callers.unknownSource!.enclosingClass} - ${callers.unknownSource!.enclosingLibrary}');
+            unknown = true;
+            continue;
+          }
+
+          if (callers.arg0 != null) {
+            if (callers.arg0 is Set) {
+              for (var c in callers.arg0 as Set<Constant>) {
+                if (injectedTokens.add(c)) {
+                  tokensWorklist.add(c);
+                }
+              }
+            } else {
+              final c = callers.arg0 as Constant;
+              if (injectedTokens.add(c)) {
+                tokensWorklist.add(c);
+              }
+            }
+          }
+
+          if (callers.callers != null) {
+            for (var caller in callers.callers!) {
+              if (toAnalyze.add(caller)) {
+                workList.add(caller);
+              }
+            }
+          }
+        }
+      }
+
+      if (unknown) {
+        throw 'Can not continue due to UNKNOWN input to Injector';
+      }
+
+      print('discovered new tokens: ${tokensWorklist.length}');
+
+      final toExpand = tokensWorklist.toList();
+      while (toExpand.isNotEmpty) {
+        final tok = toExpand.removeLast();
+        final deps = _dependencies[tok];
+        if (deps != null) {
+          for (var arg in deps.entries) {
+            late Constant token;
+            if (arg is ListConstant) {
+              for (var meta in arg.entries) {
+                if (meta is InstanceConstant) {
+                  if (meta.classNode == classInject) {
+                    token = meta.fieldValues[Inject_token]!;
+                  } else if (meta.classNode == classOptional ||
+                      meta.classNode == classSelf ||
+                      meta.classNode == classSkipSelf ||
+                      meta.classNode == classHost) {
+                    continue;
+                  } else {
+                    throw 'Unknown meta: ${meta}';
+                  }
+                } else {
+                  token = meta;
+                }
+              }
+            } else {
+              token = arg;
+            }
+            if (injectedTokens.add(token)) {
+              tokensWorklist.add(token);
+              toExpand.add(token);
+            }
+          }
+        }
+      }
+
+      print('after expanding dependencies: ${tokensWorklist.length}');
+
+      for (var map in tokenToProviderMaps) {
+        TreeNode member = map;
+        while (member is! Member) {
+          member = member.parent!;
+        }
+
+        for (var entry in map.entries) {
+          if (tokensWorklist
+              .contains((entry.key as ConstantExpression).constant)) {
+            // print('visiting ${entry.key} -> ${entry.value}');
+            memberVisitor.inContext(member, entry.value);
+          }
+        }
+      }
+
+      print('have ${workList.length} new members to visit');
+    } while (workList.isNotEmpty);
+  }
+
+/*
+  void propagateArguments() {
+    while (workList.isNotEmpty) {
+      final member = workList.removeLast();
+      for (var target in possibleTargets(member)) {
+        final callers = callerInfo[target];
+        if (callers == null) continue;
+        for (var caller in callers.callers) {
+          if (toAnalyze.add(caller)) {
+            workList.add(caller);
+          }
+        }
+      }
+    }
+
+  }*/
 
   bool invalidateProtobufFields() {
     final protobufHandler = this.protobufHandler;
@@ -261,26 +633,53 @@ class RapidTypeAnalysis {
     }
     return invalidated;
   }
+
+  final List<MapLiteral> tokenToProviderMaps = [];
+
+  void addTokenToProviderMap(MapLiteral map) {
+    print('... registered map with ${map.entries.length} entries');
+    tokenToProviderMaps.add(map);
+  }
+
+  final _dependencies = Map<Constant, ListConstant>.identity();
+
+  void registerDependencies(Constant token, ListConstant deps) {
+    if (token is TypeLiteralConstant) {
+      if (_dependencies.containsKey(token)) {
+        throw 'Duplicated dependencies for $token';
+      }
+      _dependencies[token] = deps;
+    }
+  }
 }
 
 class _MemberVisitor extends RecursiveVisitor {
   final RapidTypeAnalysis rta;
   final _ConstantVisitor _constantVisitor;
 
+  Member? _currentMember;
+  Map<VariableDeclaration, int>? _currentParams;
   Class? _currentClass;
   ClassInfo? _superclassInfo;
+  List<Invocation> _invocations = [];
 
   _MemberVisitor(this.rta) : _constantVisitor = _ConstantVisitor(rta);
 
   ClassInfo get superclassInfo => _superclassInfo ??=
       rta.hierarchyCache.getClassInfo(_currentClass!.superclass!);
 
-  @override
-  void defaultMember(Member node) {
+  void inContext(Member member, Node node) {
     _superclassInfo = null;
-    _currentClass = node.enclosingClass;
+    _currentMember = rta.currentMember = member;
+    _currentClass = member.enclosingClass;
+    _currentParams = <VariableDeclaration, int>{};
+    if (member is Procedure) {
+      for (int i = 0; i < member.function.positionalParameters.length; i++) {
+        _currentParams![member.function.positionalParameters[i]] = i;
+      }
+    }
     node.visitChildren(this);
-    if (node is Constructor) {
+    if (member is Constructor) {
       // Make sure instance field initializers are visited.
       for (var f in _currentClass!.members) {
         if (f is Field && !f.isStatic) {
@@ -288,8 +687,15 @@ class _MemberVisitor extends RecursiveVisitor {
         }
       }
     }
+    _currentParams = null;
     _superclassInfo = null;
+    _currentMember = rta.currentMember = null;
     _currentClass = null;
+  }
+
+  @override
+  void defaultMember(Member node) {
+    inContext(node, node);
   }
 
   @override
@@ -301,8 +707,34 @@ class _MemberVisitor extends RecursiveVisitor {
 
   @override
   void visitInstanceInvocation(InstanceInvocation node) {
+    final arg0 = node.arguments.positional.length > 0
+        ? node.arguments.positional.first
+        : null;
+    Object arg0Info = const Unknown();
+    if (arg0 is ConstantExpression) {
+      arg0Info = arg0.constant;
+    } else if (arg0 is VariableGet && _currentParams![arg0.variable] == 0) {
+      arg0Info = const Forward(); // Direct forward of the argument
+    }
+
     rta.addCall(_currentClass, node.interfaceTarget, node.name,
-        node.receiver is ThisExpression, false);
+        node.receiver is ThisExpression, false,
+        arg0: arg0Info);
+
+    if (node.interfaceTarget == rta.Map_addAll) {
+      final receiver = node.receiver;
+      if (receiver is InstanceGet &&
+          receiver.receiver is ThisExpression &&
+          receiver.interfaceTarget.name.text == 'tokenToProvider' &&
+          node.arguments.positional.first is MapLiteral) {
+        print(
+            'Found tokenToProvider call in ${_currentMember} ${_currentClass} ${_currentClass?.enclosingLibrary}');
+        rta.addTokenToProviderMap(
+            node.arguments.positional.first as MapLiteral);
+        return;
+      }
+    }
+
     node.visitChildren(this);
   }
 
@@ -387,6 +819,21 @@ class _MemberVisitor extends RecursiveVisitor {
 
   @override
   void visitStaticInvocation(StaticInvocation node) {
+    if (node.target == rta.shell_fromMap) {
+      final arg0 = node.arguments.positional.first as StaticGet;
+      final fieldInit = (arg0.target as Field).initializer as MapLiteral;
+      for (var e in fieldInit.entries) {
+        final token =
+            (e.value as ConstantExpression).constant as TypeLiteralConstant;
+        rta.addLiveToken(token);
+      }
+    } else if (node.target == rta.Reflector_registerDependencies) {
+      final token =
+          (node.arguments.positional[0] as ConstantExpression).constant;
+      final deps = (node.arguments.positional[1] as ConstantExpression).constant
+          as ListConstant;
+      rta.registerDependencies(token, deps);
+    }
     rta.addMember(node.target);
     node.visitChildren(this);
   }

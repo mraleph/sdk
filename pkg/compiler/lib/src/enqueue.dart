@@ -90,10 +90,13 @@ abstract class Enqueuer {
   /// Apply the [worldImpact] to this enqueuer.
   void applyImpact(WorldImpact worldImpact) {
     if (worldImpact.isEmpty) return;
+    if (worldImpact.typeDI.isNotEmpty)
+      print('apply $worldImpact');
     worldImpact.forEachStaticUse(processStaticUse);
     worldImpact.forEachDynamicUse((_, use) => processDynamicUse(use));
     worldImpact.forEachTypeUse(processTypeUse);
     worldImpact.forEachConstantUse((_, use) => processConstantUse(use));
+    worldImpact.forEachTypeDI((_, use) => processTypeDI(use.type));
   }
 
   bool checkNoEnqueuedInvokedInstanceMethods(
@@ -111,6 +114,7 @@ abstract class Enqueuer {
   void checkClass(ClassEntity cls);
   void processStaticUse(MemberEntity? member, StaticUse staticUse);
   void processTypeUse(MemberEntity? member, TypeUse typeUse);
+  void processTypeDI(DartType type);
   void processDynamicUse(DynamicUse dynamicUse);
   void processConstantUse(ConstantUse constantUse);
   EnqueuerListener get listener;

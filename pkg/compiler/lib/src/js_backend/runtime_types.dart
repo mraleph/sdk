@@ -81,6 +81,7 @@ class TrivialRuntimeTypesChecksBuilder implements RuntimeTypesChecksBuilder {
   @override
   RuntimeTypesChecks computeRequiredChecks(
       CodegenWorld codegenWorld, CompilerOptions options) {
+    print('HERE ${this.runtimeType}');
     rtiChecksBuilderClosed = true;
 
     Map<ClassEntity, ClassUse> classUseMap = {};
@@ -531,6 +532,8 @@ class RuntimeTypesImpl
   @override
   RuntimeTypesChecks computeRequiredChecks(
       CodegenWorld codegenWorld, CompilerOptions options) {
+    print('HERE ${this.runtimeType}');
+
     TypeVariableTests typeVariableTests = TypeVariableTests(_elementEnvironment,
         _commonElements, codegenWorld, _genericInstantiations,
         forRtiNeeds: false);
@@ -692,8 +695,11 @@ class RuntimeTypesImpl
       liveTypeVisitor.visitType(type, TypeVisitorState.covariantTypeArgument);
     });
     codegenWorld.constTypeLiterals.forEach((DartType type) {
+      print('---> $type');
       liveTypeVisitor.visitType(type, TypeVisitorState.typeLiteral);
     });
+
+    print('$typeLiterals');
 
     bool isFunctionChecked = false;
 

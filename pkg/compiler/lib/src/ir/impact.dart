@@ -86,6 +86,8 @@ abstract class ImpactRegistry {
 
   void registerTypeLiteral(ir.DartType type, ir.LibraryDependency? import);
 
+  void registerTypeDI(ir.DartType type);
+
   void registerFieldInitialization(ir.Field node);
 
   void registerFieldConstantInitialization(

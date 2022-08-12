@@ -94,6 +94,7 @@ class _CodegenImpact extends WorldImpactBuilderImpl implements CodegenImpact {
       Set<DynamicUse> dynamicUses,
       Set<StaticUse> staticUses,
       Set<TypeUse> typeUses,
+      Set<TypeUse> typeDI,
       Set<ConstantUse> constantUses,
       this._typeVariableBoundsSubtypeChecks,
       this._constSymbols,
@@ -104,7 +105,7 @@ class _CodegenImpact extends WorldImpactBuilderImpl implements CodegenImpact {
       this._nativeBehaviors,
       this._nativeMethods,
       this._oneShotInterceptors)
-      : super.internal(dynamicUses, staticUses, typeUses, constantUses);
+      : super.internal(dynamicUses, staticUses, typeUses, constantUses, typeDI);
 
   factory _CodegenImpact.readFromDataSource(DataSourceReader source) {
     source.begin(tag);
@@ -116,6 +117,9 @@ class _CodegenImpact extends WorldImpactBuilderImpl implements CodegenImpact {
         .readListOrNull(() => StaticUse.readFromDataSource(source))
         ?.toSet();
     Set<TypeUse> typeUses = source
+        .readListOrNull(() => TypeUse.readFromDataSource(source))
+        ?.toSet();
+    Set<TypeUse> typeDI = source
         .readListOrNull(() => TypeUse.readFromDataSource(source))
         ?.toSet();
     Set<ConstantUse> constantUses = source
@@ -150,6 +154,7 @@ class _CodegenImpact extends WorldImpactBuilderImpl implements CodegenImpact {
         dynamicUses,
         staticUses,
         typeUses,
+        typeDI,
         constantUses,
         typeVariableBoundsSubtypeChecks,
         constSymbols,
@@ -172,6 +177,7 @@ class _CodegenImpact extends WorldImpactBuilderImpl implements CodegenImpact {
         allowNull: true);
     sink.writeList(typeUses, (TypeUse use) => use.writeToDataSink(sink),
         allowNull: true);
+    sink.writeList(typeDI, (TypeUse use) => use.writeToDataSink(sink), allowNull: true);
     sink.writeList(constantUses, (ConstantUse use) => use.writeToDataSink(sink),
         allowNull: true);
     sink.writeList<Pair<DartType, DartType>>(_typeVariableBoundsSubtypeChecks,

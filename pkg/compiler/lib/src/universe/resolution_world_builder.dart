@@ -242,6 +242,7 @@ class ResolutionWorldBuilder extends WorldBuilder
   final Set<FieldEntity> _fieldSetters = {};
 
   final Set<DartType> _isChecks = {};
+  final Set<DartType> _typeDI = {};
   final Set<TypeVariableType> _namedTypeVariablesNewRti = {};
 
   /// Set of all closures in the program. Used by the mirror tracking system
@@ -525,6 +526,13 @@ class ResolutionWorldBuilder extends WorldBuilder
   void registerIsCheck(covariant DartType type) {
     _isChecks.add(type);
   }
+
+  /// Registers that [type] is checked in this world builder.
+  @override
+  void registerTypeDI(covariant DartType type) {
+    _typeDI.add(type);
+  }
+
 
   @override
   void registerNamedTypeVariableNewRti(TypeVariableType type) {
@@ -983,6 +991,8 @@ class ResolutionWorldBuilder extends WorldBuilder
       }
     });
 
+    print('KClosedWorld(typeDI = $_typeDI)');
+
     KClosedWorld closedWorld = KClosedWorld(_elementMap,
         options: _options,
         elementEnvironment: _elementEnvironment,
@@ -1004,6 +1014,7 @@ class ResolutionWorldBuilder extends WorldBuilder
         classHierarchy: _classHierarchyBuilder.close(),
         annotationsData: _annotationsDataBuilder.close(_options),
         isChecks: _isChecks,
+        typeDI: _typeDI,
         staticTypeArgumentDependencies: staticTypeArgumentDependencies,
         dynamicTypeArgumentDependencies: dynamicTypeArgumentDependencies,
         typeVariableTypeLiterals: typeVariableTypeLiterals,

@@ -770,7 +770,14 @@ class KernelImpactConverter implements ImpactRegistry {
   }
 
   @override
+  void registerTypeDI(ir.DartType irType) {
+    print('--- ---> (DI) $irType');
+    impactBuilder.registerTypeDI(TypeUse.typeLiteral(elementMap.getDartType(irType), null));
+  }
+
+  @override
   void registerTypeLiteral(ir.DartType irType, ir.LibraryDependency import) {
+    print('--- ---> $irType');
     ImportEntity deferredImport = elementMap.getImport(import);
     DartType type = elementMap.getDartType(irType);
     impactBuilder.registerTypeUse(TypeUse.typeLiteral(type, deferredImport));

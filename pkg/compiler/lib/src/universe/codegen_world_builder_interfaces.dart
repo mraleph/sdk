@@ -32,5 +32,7 @@ abstract class CodegenWorldBuilderImplForEnqueuer {
 
   void registerIsCheck(covariant DartType type);
 
+  void registerTypeDI(covariant DartType type);
+
   void registerNamedTypeVariableNewRti(TypeVariableType type);
 }

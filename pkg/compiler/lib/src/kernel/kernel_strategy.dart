@@ -380,6 +380,7 @@ class KernelWorkItem implements WorkItem {
   @override
   WorldImpact run() {
     return _compilerTask.measure(() {
+      print('---> $element');
       ir.Member node = _elementMap.getMemberNode(element);
       _nativeMemberResolver.resolveNativeMember(node, _irAnnotationData);
 

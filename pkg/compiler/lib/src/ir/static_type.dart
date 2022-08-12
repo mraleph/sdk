@@ -794,6 +794,37 @@ abstract class StaticTypeVisitor extends StaticTypeBase {
     }
   }
 
+  ir.Reference? refPragma;
+  ir.Reference? refOptions;
+
+  bool isDIGet(ir.Member m) => hasPragma(m, 'x:di');
+  bool isDIPrune(ir.Member m) => hasPragma(m, 'x:di:prune');
+
+  bool hasPragma(ir.Member m, String value) {
+    for (var a in m.annotations) {
+      if (a is ir.ConstantExpression) {
+        final c = a.constant;
+        if (c is ir.InstanceConstant) {
+          if (c.classNode.name == 'pragma') {
+            if (refPragma == null) {
+              refPragma = c.classNode.fields[0].fieldReference;
+              refOptions = c.classNode.fields[1].fieldReference;
+            }
+            final name = c.fieldValues[refPragma]!;
+            if (name is ir.StringConstant) {
+              if (name.value == value) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  void handleDIGet(ir.DartType type) {}
+
   @override
   ir.DartType visitInstanceInvocation(ir.InstanceInvocation node) {
     ArgumentTypes argumentTypes = _visitArguments(node.arguments);
@@ -820,6 +851,9 @@ abstract class StaticTypeVisitor extends StaticTypeBase {
     handleInstanceInvocation(
         node, receiverType, interfaceTarget, argumentTypes);
     _staticTypeCache._expressionTypes[node] = returnType;
+    if (isDIGet(interfaceTarget)) {
+      handleDIGet(node.arguments.types[0]);
+    }
     return returnType;
   }
 
@@ -1053,6 +1087,22 @@ abstract class StaticTypeVisitor extends StaticTypeBase {
 
   @override
   ir.DartType visitStaticInvocation(ir.StaticInvocation node) {
+    if (isDIPrune(node.target)) {
+      final expr = node.arguments.positional[0] as ir.ConstantExpression;
+      final map = (expr).constant as ir.MapConstant;
+      for (var e in map.entries) {
+        final key = e.key;
+        if (key is! ir.TypeLiteralConstant) {
+          handleConstantValue(expr, key);
+          handleConstantValue(expr, e.value);
+          continue;
+        }
+      }
+
+      _staticTypeCache._expressionTypes[node] = node.target.function.returnType;
+      return;
+    }
+
     ArgumentTypes argumentTypes = _visitArguments(node.arguments);
     ir.DartType returnType = ir.Substitution.fromPairs(
             node.target.function.typeParameters, node.arguments.types)
@@ -1779,6 +1829,9 @@ abstract class StaticTypeVisitor extends StaticTypeBase {
     handleVariableDeclaration(node);
     return const ir.VoidType();
   }
+
+
+  void handleConstantValue(ir.ConstantExpression node, ir.Constant constant) {}
 
   void handleConstantExpression(ir.ConstantExpression node) {}
 

@@ -154,6 +154,8 @@ class CodegenWorldBuilderImpl extends WorldBuilder
 
   final Set<DartType> _isChecks = {};
 
+  final Set<DartType> _typeDI = {};
+
   final SelectorConstraintsStrategy _selectorConstraintsStrategy;
 
   final Set<ConstantValue> _constantValues = {};
@@ -328,6 +330,12 @@ class CodegenWorldBuilderImpl extends WorldBuilder
   void registerIsCheck(covariant DartType type) {
     _isChecks.add(type);
   }
+
+  @override
+  void registerTypeDI(covariant DartType type) {
+    _typeDI.add(type);
+  }
+
 
   @override
   void registerNamedTypeVariableNewRti(TypeVariableType type) {
@@ -604,6 +612,7 @@ class CodegenWorldBuilderImpl extends WorldBuilder
         typeVariableTypeLiterals: typeVariableTypeLiterals,
         instantiatedClasses: instantiatedClasses,
         isChecks: _isChecks,
+        typeDI: _typeDI,
         namedTypeVariablesNewRti: _namedTypeVariablesNewRti,
         instantiatedTypes: _instantiatedTypes,
         liveTypeArguments: _liveTypeArguments,
@@ -641,6 +650,9 @@ class CodegenWorldImpl implements CodegenWorld {
   final Iterable<DartType> isChecks;
 
   @override
+  final Iterable<DartType> typeDI;
+
+  @override
   final Set<TypeVariableType> namedTypeVariablesNewRti;
 
   @override
@@ -671,6 +683,7 @@ class CodegenWorldImpl implements CodegenWorld {
       this.typeVariableTypeLiterals,
       this.instantiatedClasses,
       this.isChecks,
+      this.typeDI,
       this.namedTypeVariablesNewRti,
       this.instantiatedTypes,
       this.liveTypeArguments,

@@ -270,6 +270,7 @@ class ImpactBuilder extends StaticTypeVisitor implements ImpactRegistry {
 
   @override
   void handleTypeLiteral(ir.TypeLiteral node) {
+    print('handleTypeLiteral($node)');
     registerTypeLiteral(node.type, getDeferredImport(node));
   }
 
@@ -407,6 +408,11 @@ class ImpactBuilder extends StaticTypeVisitor implements ImpactRegistry {
           typeArguments, getDeferredImport(node));
     }
     registerStaticInvocationNode(node);
+  }
+
+  @override
+  void handleDIGet(ir.DartType type) {
+    registerTypeDI(type);
   }
 
   @override
@@ -569,6 +575,13 @@ class ImpactBuilder extends StaticTypeVisitor implements ImpactRegistry {
       }
     }
     registerRuntimeTypeUse(kind, receiverType, argumentType);
+  }
+
+  @override
+  void handleConstantValue(ir.ConstantExpression node, ir.Constant constant) {
+    ir.LibraryDependency? import = getDeferredImport(node);
+    ConstantImpactVisitor(this, import, node, staticTypeContext)
+        .visitConstant(constant);
   }
 
   @override
@@ -775,6 +788,11 @@ class ImpactBuilder extends StaticTypeVisitor implements ImpactRegistry {
     (_data._fieldConstantInitializers ??= {})
         .putIfAbsent(node, () => [])
         .add(constant);
+  }
+
+  @override
+  void registerTypeDI(ir.DartType type) {
+    (_data._typeDI ??= []).add(_TypeLiteral(type, null));
   }
 
   @override
@@ -1010,6 +1028,7 @@ class ImpactData {
   List<ir.Field>? _fieldInitializers;
   Map<ir.Field, List<ConstantReference>>? _fieldConstantInitializers;
   List<_TypeLiteral>? _typeLiterals;
+  List<_TypeLiteral>? _typeDI;
   List<ir.TreeNode>? _localFunctions;
   List<_GenericInstantiation>? _genericInstantiations;
   List<_StaticAccess>? _staticSets;
@@ -1072,6 +1091,8 @@ class ImpactData {
     _fieldConstantInitializers =
         source.readMemberNodeMapOrNull(source.readTreeNodes);
     _typeLiterals =
+        source.readListOrNull(() => _TypeLiteral.fromDataSource(source));
+    _typeDI =
         source.readListOrNull(() => _TypeLiteral.fromDataSource(source));
     _localFunctions = source.readTreeNodesOrNull();
     _genericInstantiations = source
@@ -1157,6 +1178,7 @@ class ImpactData {
         allowNull: true);
     sink.writeList(_typeLiterals, (_TypeLiteral o) => o.toDataSink(sink),
         allowNull: true);
+    sink.writeList(_typeDI, (_TypeLiteral o) => o.toDataSink(sink), allowNull: true);
     sink.writeTreeNodes(_localFunctions, allowNull: true);
     sink.writeList(
         _genericInstantiations, (_GenericInstantiation o) => o.toDataSink(sink),
@@ -1408,6 +1430,11 @@ class ImpactData {
     if (_typeLiterals != null) {
       for (_TypeLiteral data in _typeLiterals!) {
         registry.registerTypeLiteral(data.type, data.import);
+      }
+    }
+    if (_typeDI != null) {
+      for (_TypeLiteral data in _typeDI!) {
+        registry.registerTypeDI(data.type);
       }
     }
     if (_localFunctions != null) {
