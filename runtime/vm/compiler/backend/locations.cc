@@ -349,12 +349,14 @@ void Location::PrintTo(BaseTextBuffer* f) const {
   if (!FLAG_support_il_printer) {
     return;
   }
-  if (kind() == kStackSlot) {
-    f->Printf("S%+" Pd "", stack_index());
-  } else if (kind() == kDoubleStackSlot) {
-    f->Printf("DS%+" Pd "", stack_index());
-  } else if (kind() == kQuadStackSlot) {
-    f->Printf("QS%+" Pd "", stack_index());
+  if (kind() == kStackSlot || kind() == kDoubleStackSlot || kind() == kQuadStackSlot) {
+    const char* type_prefix = "";
+    if (kind() == kDoubleStackSlot) {
+      type_prefix = "f64@";
+    } else if (kind() == kQuadStackSlot) {
+      type_prefix = "f128@";
+    }
+    f->Printf("%s%s[%+" Pd "]", type_prefix, base_reg() == FPREG ? "fp" : "sp", stack_index());
   } else if (IsPairLocation()) {
     f->AddString("(");
     AsPairLocation()->At(0).PrintTo(f);

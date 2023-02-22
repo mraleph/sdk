@@ -2061,16 +2061,17 @@ void FlowGraphAllocator::AllocateSpillSlotFor(LiveRange* range) {
   // For phi ranges try to coalesce spill splot used by the phi with
   // spill slots used by its inputs.
   if (auto phi = range->phi()) {
+    const intptr_t vreg_component = phi->vreg(0) == range->vreg() ? 0 : 1;
     for (auto input : phi->inputs()) {
-      auto incomming = GetLiveRange(input->ssa_temp_index());
-      if (!incomming->spill_slot().IsInvalid() &&
-          !incomming->spill_slot().IsConstant()) {
+      auto incomming = GetLiveRange(input->vreg(vreg_component));
+      if (incomming->spill_slot().IsStackSlot()) {
         const auto vindex =
             -compiler::target::frame_layout.VariableIndexForFrameSlot(
                 incomming->spill_slot().stack_index());
         if (vindex < 0) {
           continue;
         }
+
         intptr_t candidate;
         if (register_kind_ == Location::kRegister) {
           candidate = vindex;
@@ -2078,6 +2079,10 @@ void FlowGraphAllocator::AllocateSpillSlotFor(LiveRange* range) {
           candidate =
               (vindex - cpu_spill_slot_count_ - (kDoubleSpillFactor - 1)) /
               kDoubleSpillFactor;
+          if (candidate < 0) {
+            //OS::PrintErr("%s <- %s | %s: %" Pd ", %" Pd ", %" Pd "\n", phi->ToCString(), input->ToCString(), incomming->spill_slot().ToCString(), vindex, cpu_spill_slot_count_, candidate);
+            RELEASE_ASSERT(false);
+          }
         }
 
         // Input can't have a different representation from the phi itself.
@@ -2348,11 +2353,12 @@ bool FlowGraphAllocator::AllocateFreeRegister(LiveRange* unallocated) {
   Location hint = unallocated->finger()->FirstHint();
   if (!hint.IsMachineRegister()) {
     if (auto phi = unallocated->phi()) {
+      const intptr_t vreg_component = phi->vreg(0) == unallocated->vreg() ? 0 : 1;
       // Try coalsecing phi with an incomming value by using the location
       // of the incomming value as a hint.
       for (intptr_t i = 0; i < phi->InputCount(); i++) {
         const auto input = phi->InputAt(i)->definition();
-        const auto input_range = GetLiveRange(input->ssa_temp_index());
+        const auto input_range = GetLiveRange(input->vreg(vreg_component));
 
         // -3 to hit instruction position before the GotoInstr at the end
         // of the block.
