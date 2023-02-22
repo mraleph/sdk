@@ -951,7 +951,7 @@ static intptr_t MinInputPos(PhiInstr* phi) {
     intptr_t pos = FlowGraphAllocator::GetLifetimePosition(input);
     if (auto input_phi = input->AsPhi()) {
       pos = FlowGraphAllocator::GetLifetimePosition(input_phi->GetBlock());
-    } else if (input->AsConstant()) {
+    } else if (input->IsConstant()) {
       pos = kMaxPosition;
     }
     m = Utils::Minimum(m, pos);
@@ -1196,7 +1196,7 @@ void FlowGraphAllocator::ProcessOneInput(BlockEntryInstr* block,
     }
     MoveOperands* move = AddMoveAt(pos - 1, *in_ref, Location::Any());
     ASSERT(!in_ref->IsRegister() ||
-           ((1 << in_ref->reg()) & kDartAvailableCpuRegs) != 0);
+           ((1 bd in_ref->reg()) & kDartAvailableCpuRegs) != 0);
     BlockLocation(*in_ref, pos - 1, pos + 1);
     range->AddUseInterval(block->start_pos(), pos - 1);
     range->AddHintedUse(pos - 1, move->src_slot(), in_ref);
@@ -1677,7 +1677,7 @@ void FlowGraphAllocator::NumberInstructions() {
       // better allocation results because we get a better chance of
       // coalescing phi location and its input location, especially for
       // non-loop phis.
-      join->phis()->Sort([](PhiInstr* const *a, PhiInstr* const *b) -> int {
+      join->phis()->Sort([](PhiInstr* const* a, PhiInstr* const* b) -> int {
         const intptr_t min_a = MinInputPos(*a);
         const intptr_t min_b = MinInputPos(*b);
         if (min_a == min_b) {
@@ -2063,8 +2063,11 @@ void FlowGraphAllocator::AllocateSpillSlotFor(LiveRange* range) {
   if (auto phi = range->phi()) {
     for (auto input : phi->inputs()) {
       auto incomming = GetLiveRange(input->ssa_temp_index());
-      if (!incomming->spill_slot().IsInvalid() && !incomming->spill_slot().IsConstant()) {
-        const auto vindex = -compiler::target::frame_layout.VariableIndexForFrameSlot(incomming->spill_slot().stack_index());
+      if (!incomming->spill_slot().IsInvalid() &&
+          !incomming->spill_slot().IsConstant()) {
+        const auto vindex =
+            -compiler::target::frame_layout.VariableIndexForFrameSlot(
+                incomming->spill_slot().stack_index());
         if (vindex < 0) {
           continue;
         }
@@ -2072,13 +2075,15 @@ void FlowGraphAllocator::AllocateSpillSlotFor(LiveRange* range) {
         if (register_kind_ == Location::kRegister) {
           candidate = vindex;
         } else {
-          candidate = (vindex - cpu_spill_slot_count_ - (kDoubleSpillFactor - 1)) / kDoubleSpillFactor;
+          candidate =
+              (vindex - cpu_spill_slot_count_ - (kDoubleSpillFactor - 1)) /
+              kDoubleSpillFactor;
         }
 
         // Input can't have a different representation from the phi itself.
         // This means attributes of the spill slot must match.
         ASSERT((need_quad == quad_spill_slots_[candidate]) &&
-            (need_untagged == untagged_spill_slots_[candidate]));
+               (need_untagged == untagged_spill_slots_[candidate]));
 
         // Check if the candidate spill slot is available for us.
         if (spill_slots_[candidate] <= start) {
@@ -2096,8 +2101,8 @@ void FlowGraphAllocator::AllocateSpillSlotFor(LiveRange* range) {
   // account.
   if (idx == -1) {
     idx = register_kind_ == Location::kRegister
-                      ? flow_graph_.graph_entry()->fixed_slot_count()
-                      : 0;
+              ? flow_graph_.graph_entry()->fixed_slot_count()
+              : 0;
     for (; idx < spill_slots_.length(); idx++) {
       if ((need_quad == quad_spill_slots_[idx]) &&
           (need_untagged == untagged_spill_slots_[idx]) &&
@@ -2333,7 +2338,6 @@ static LiveRange* FindCover(LiveRange* parent, intptr_t pos) {
   ASSERT(result != nullptr);
   return result;
 }
-
 
 bool FlowGraphAllocator::AllocateFreeRegister(LiveRange* unallocated) {
   intptr_t candidate = kNoRegister;
