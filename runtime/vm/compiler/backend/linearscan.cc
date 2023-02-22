@@ -1196,7 +1196,7 @@ void FlowGraphAllocator::ProcessOneInput(BlockEntryInstr* block,
     }
     MoveOperands* move = AddMoveAt(pos - 1, *in_ref, Location::Any());
     ASSERT(!in_ref->IsRegister() ||
-           ((1 bd in_ref->reg()) & kDartAvailableCpuRegs) != 0);
+           ((1 << in_ref->reg()) & kDartAvailableCpuRegs) != 0);
     BlockLocation(*in_ref, pos - 1, pos + 1);
     range->AddUseInterval(block->start_pos(), pos - 1);
     range->AddHintedUse(pos - 1, move->src_slot(), in_ref);
