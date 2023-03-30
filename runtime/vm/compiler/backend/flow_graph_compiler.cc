@@ -95,17 +95,25 @@ compiler::LRState ComputeInnerLRState(const FlowGraph& flow_graph) {
 }
 #endif
 
-// Assign locations to outgoing arguments. Note that MoveArgument
-// can only occur in the innermost environment because we insert
-// them immediately before the call instruction and right before
-// register allocation.
 void CompilerDeoptInfo::AllocateOutgoingArguments(Environment* env) {
   if (env == nullptr) return;
+
+  const intptr_t total_spill_slot_count =
+      flow_graph_.graph_entry()->spill_slot_count();
+
   for (Environment::ShallowIterator it(env); !it.Done(); it.Advance()) {
-    if (it.CurrentLocation().IsInvalid()) {
-      if (auto move_arg = it.CurrentValue()->definition()->AsMoveArgument()) {
-        it.SetCurrentLocation(move_arg->locs()->out(0));
-      }
+    const auto loc = it.CurrentLocation();
+    if ((loc.IsStackSlot() || loc.IsDoubleStackSlot()) &&
+        loc.base_reg() == SPREG) {
+      // Deoptimization information is written in terms of FP.
+      const intptr_t spill_index =
+          (total_spill_slot_count - 1) - loc.stack_index();
+      const intptr_t slot_index =
+          compiler::target::frame_layout.FrameSlotForVariableIndex(
+              -spill_index);
+      it.SetCurrentLocation(loc.IsStackSlot()
+                                ? Location::StackSlot(slot_index, FPREG)
+                                : Location::DoubleStackSlot(slot_index, SPREG));
     }
   }
 }
@@ -985,10 +993,10 @@ CompilerDeoptInfo* FlowGraphCompiler::AddDeoptIndexAtCall(intptr_t deopt_id,
   if (env != nullptr) {
     env = env->GetLazyDeoptEnv(zone());
   }
-  CompilerDeoptInfo* info =
-      new (zone()) CompilerDeoptInfo(deopt_id, ICData::kDeoptAtCall,
-                                     0,  // No flags.
-                                     env);
+  CompilerDeoptInfo* info = new (zone())
+      CompilerDeoptInfo(flow_graph(), deopt_id, ICData::kDeoptAtCall,
+                        0,  // No flags.
+                        env);
   info->set_pc_offset(assembler()->CodeSize());
   deopt_infos_.Add(info);
   return info;
@@ -998,8 +1006,8 @@ CompilerDeoptInfo* FlowGraphCompiler::AddSlowPathDeoptInfo(intptr_t deopt_id,
                                                            Environment* env) {
   ASSERT(deopt_id != DeoptId::kNone);
   deopt_id = DeoptId::ToDeoptAfter(deopt_id);
-  CompilerDeoptInfo* info =
-      new (zone()) CompilerDeoptInfo(deopt_id, ICData::kDeoptUnknown, 0, env);
+  CompilerDeoptInfo* info = new (zone())
+      CompilerDeoptInfo(flow_graph(), deopt_id, ICData::kDeoptUnknown, 0, env);
   info->set_pc_offset(assembler()->CodeSize());
   deopt_infos_.Add(info);
   return info;
@@ -1031,26 +1039,31 @@ void FlowGraphCompiler::RecordSafepoint(LocationSummary* locs,
     bitmap.SetLength(spill_area_size);
 
     auto instr = current_instruction();
-    const intptr_t args_count = instr->ArgumentCount();
-    RELEASE_ASSERT(args_count == 0 || is_optimizing());
 
-    for (intptr_t i = 0; i < args_count; i++) {
-      const auto move_arg =
-          instr->ArgumentValueAt(i)->instruction()->AsMoveArgument();
-      const auto rep = move_arg->representation();
+    if (instr->ArgumentCount() > 0) {
+      RELEASE_ASSERT(is_optimizing());
+      for (intptr_t i = 0; i < instr->InputCount(); i++) {
+        const auto loc = locs->in(i);
+        if (!loc.IsStackSlot()) {
+          continue;
+        }
 
-      ASSERT(rep == kTagged || rep == kUnboxedInt64 || rep == kUnboxedDouble);
-      static_assert(compiler::target::kIntSpillFactor ==
-                        compiler::target::kDoubleSpillFactor,
-                    "int and double are of the same size");
-      const bool is_tagged = move_arg->representation() == kTagged;
-      const intptr_t num_bits =
-          is_tagged ? 1 : compiler::target::kIntSpillFactor;
+        RELEASE_ASSERT(loc.base_reg() == SPREG);
 
-      // Note: bits are reversed so higher bit corresponds to lower word.
-      const intptr_t last_arg_bit =
-          (spill_area_size - 1) - move_arg->sp_relative_index();
-      bitmap.SetRange(last_arg_bit - (num_bits - 1), last_arg_bit, is_tagged);
+        const auto rep = instr->RequiredInputRepresentation(i);
+
+        ASSERT(rep == kTagged || rep == kUnboxedInt64 || rep == kUnboxedDouble);
+        static_assert(compiler::target::kIntSpillFactor ==
+                          compiler::target::kDoubleSpillFactor,
+                      "int and double are of the same size");
+        const bool is_tagged = rep == kTagged;
+        const intptr_t num_bits =
+            is_tagged ? 1 : compiler::target::kIntSpillFactor;
+
+        // Note: bits are reversed so higher bit corresponds to lower word.
+        const intptr_t last_arg_bit = (spill_area_size - 1) - loc.stack_index();
+        bitmap.SetRange(last_arg_bit - (num_bits - 1), last_arg_bit, is_tagged);
+      }
     }
     ASSERT(slow_path_argument_count == 0 || !using_shared_stub);
     RELEASE_ASSERT(bitmap.Length() == spill_area_size);
@@ -1157,7 +1170,7 @@ Environment* FlowGraphCompiler::SlowPathEnvironmentFor(
       env->DeepCopy(zone(), env->Length() - env->LazyDeoptPruneCount());
   // 1. Iterate the registers in the order they will be spilled to compute
   //    the slots they will be spilled to.
-  intptr_t next_slot = StackSize() + slow_path_env->CountArgsPushed();
+  intptr_t next_slot = StackSize();
   if (using_shared_stub) {
     // The PC from the call to the shared stub is pushed here.
     next_slot++;
@@ -1233,7 +1246,7 @@ compiler::Label* FlowGraphCompiler::AddDeoptStub(intptr_t deopt_id,
     flags |= ICData::kHoisted;
   }
   CompilerDeoptInfoWithStub* stub = new (zone()) CompilerDeoptInfoWithStub(
-      deopt_id, reason, flags, pending_deoptimization_env_);
+      flow_graph(), deopt_id, reason, flags, pending_deoptimization_env_);
   deopt_infos_.Add(stub);
   return stub->entry_label();
 }
@@ -1726,7 +1739,6 @@ void FlowGraphCompiler::AllocateRegistersLocally(Instruction* instr) {
   }
 
   // Allocate all unallocated input locations.
-  ASSERT(!instr->IsMoveArgument());
   Register fpu_unboxing_temp = kNoRegister;
   for (intptr_t i = locs->input_count() - 1; i >= 0; i--) {
     Location loc = locs->in(i);

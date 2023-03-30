@@ -1473,21 +1473,6 @@ void Instruction::UnuseAllInputs() {
   }
 }
 
-void Instruction::RepairArgumentUsesInEnvironment() const {
-  // Some calls (e.g. closure calls) have more inputs than actual arguments.
-  // Those extra inputs will be consumed from the stack before the call.
-  const intptr_t after_args_input_count = env()->LazyDeoptPruneCount();
-  MoveArgumentsArray* move_arguments = GetMoveArguments();
-  ASSERT(move_arguments != nullptr);
-  const intptr_t arg_count = ArgumentCount();
-  ASSERT((arg_count + after_args_input_count) <= env()->Length());
-  const intptr_t env_base =
-      env()->Length() - arg_count - after_args_input_count;
-  for (intptr_t i = 0; i < arg_count; ++i) {
-    env()->ValueAt(env_base + i)->BindToEnvironment(move_arguments->At(i));
-  }
-}
-
 void Instruction::InheritDeoptTargetAfter(FlowGraph* flow_graph,
                                           Definition* call,
                                           Definition* result) {
@@ -5160,17 +5145,16 @@ DispatchTableCallInstr* DispatchTableCallInstr::FromCall(
 
 LocationSummary* DispatchTableCallInstr::MakeLocationSummary(Zone* zone,
                                                              bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* summary = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kCall);
+  LocationSummary* summary = MakeCallSummary(zone, this);
   summary->set_in(
-      0, Location::RegisterLocation(DispatchTableNullErrorABI::kClassIdReg));
-  return MakeCallSummary(zone, this, summary);
+      InputCount() - 1,
+      Location::RegisterLocation(DispatchTableNullErrorABI::kClassIdReg));
+  return summary;
 }
 
 void DispatchTableCallInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  ASSERT(locs()->in(0).reg() == DispatchTableNullErrorABI::kClassIdReg);
+  ASSERT(locs()->in(InputCount() - 1).reg() ==
+         DispatchTableNullErrorABI::kClassIdReg);
   Array& arguments_descriptor = Array::ZoneHandle();
   if (selector()->requires_args_descriptor) {
     ArgumentsInfo args_info(type_args_len(), ArgumentCount(), ArgumentsSize(),

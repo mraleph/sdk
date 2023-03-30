@@ -67,11 +67,13 @@ class NoTemporaryAllocator : public TemporaryRegisterAllocator {
 // For deoptimization before instruction use class CompilerDeoptInfoWithStub.
 class CompilerDeoptInfo : public ZoneAllocated {
  public:
-  CompilerDeoptInfo(intptr_t deopt_id,
+  CompilerDeoptInfo(const FlowGraph& flow_graph,
+                    intptr_t deopt_id,
                     ICData::DeoptReasonId reason,
                     uint32_t flags,
                     Environment* deopt_env)
-      : pc_offset_(-1),
+      : flow_graph_(flow_graph),
+        pc_offset_(-1),
         deopt_id_(deopt_id),
         reason_(reason),
         flags_(flags),
@@ -100,6 +102,7 @@ class CompilerDeoptInfo : public ZoneAllocated {
 
   void AllocateOutgoingArguments(Environment* env);
 
+  const FlowGraph& flow_graph_;
   intptr_t pc_offset_;
   const intptr_t deopt_id_;
   const ICData::DeoptReasonId reason_;
@@ -111,11 +114,13 @@ class CompilerDeoptInfo : public ZoneAllocated {
 
 class CompilerDeoptInfoWithStub : public CompilerDeoptInfo {
  public:
-  CompilerDeoptInfoWithStub(intptr_t deopt_id,
+  CompilerDeoptInfoWithStub(const FlowGraph& flow_graph,
+                            intptr_t deopt_id,
                             ICData::DeoptReasonId reason,
                             uint32_t flags,
                             Environment* deopt_env)
-      : CompilerDeoptInfo(deopt_id, reason, flags, deopt_env), entry_label_() {
+      : CompilerDeoptInfo(flow_graph, deopt_id, reason, flags, deopt_env),
+        entry_label_() {
     ASSERT(reason != ICData::kDeoptAtCall);
   }
 

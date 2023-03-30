@@ -249,11 +249,7 @@ static void TestAliasingViaRedefinition(
   //   v0 <- AllocateObject(class K)
   //   v1 <- LoadField(v0, K.field)
   //   v2 <- make_redefinition(v0)
-  //   MoveArgument(v1)
-  // #if make_it_escape
-  //   MoveArgument(v2)
-  // #endif
-  //   v3 <- StaticCall(blackhole, v1, v2)
+  //   v3 <- StaticCall(blackhole, v1, make_it_escape ? v2 : nullptr)
   //   v4 <- LoadField(v2, K.field)
   //   Return v4
 
@@ -418,15 +414,12 @@ static void TestAliasingViaStore(
   // #endif
   //   v1 <- LoadField(v0, K.field)
   //   v2 <- REDEFINITION(v5)
-  //   MoveArgument(v1)
   // #if make_it_escape
   //   v6 <- LoadField(v2, K.field)
-  //   MoveArgument(v6)
   // #elif make_host_escape
   //   StoreField(v2 . K.field = v0)
-  //   MoveArgument(v5)
   // #endif
-  //   v3 <- StaticCall(blackhole, v1, v6)
+  //   v3 <- StaticCall(blackhole, v1, v6 | v5 | nullptr)
   //   v4 <- LoadField(v0, K.field)
   //   Return v4
 
@@ -1213,7 +1206,6 @@ main() {
  48:     v335 <- Box(v15) T{_Double}
  49:     ParallelMove rdx <- rcx, rax <- rax
  50:     StoreIndexed(v17, v39, v335)
- 52:     MoveArgument(v17)
  54:     v40 <- StaticCall:44( _interpolate@0150898<0> v17,
             recognized_kind = StringBaseInterpolate) T{String?}
  56:     Return:48(v40)
@@ -1256,7 +1248,6 @@ main() {
       kMatchAndMoveStoreIndexed,
       kMatchAndMoveBox,
       kMatchAndMoveStoreIndexed,
-      kMatchAndMoveMoveArgument,
       {kMatchAndMoveStaticCall, &string_interpolate},
       kMatchReturn,
   }));
@@ -1329,7 +1320,6 @@ main() {
  28:     StoreIndexed(v11, v28, v29, NoStoreBarrier)
  29:     ParallelMove rcx <- S-3
  30:     StoreIndexed(v11, v30, v9, NoStoreBarrier)
- 32:     MoveArgument(v11)
  34:     v31 <- StaticCall:20( _interpolate@0150898<0> v11, recognized_kind = StringBaseInterpolate) T{String}
  35:     ParallelMove rax <- rax
  36:     Return:24(v31)
@@ -1353,7 +1343,6 @@ main() {
       kMatchAndMoveStoreIndexed,
       kMatchAndMoveStoreIndexed,
       kMatchAndMoveStoreIndexed,
-      kMatchAndMoveMoveArgument,
       kMatchAndMoveStaticCall,
       kMatchReturn,
   }));

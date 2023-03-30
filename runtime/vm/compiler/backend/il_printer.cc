@@ -154,14 +154,6 @@ class IlTestPrinter : public AllStatic {
           writer->PrintValue(instr->InputAt(i)->definition()->ssa_temp_index());
         }
         writer->CloseArray();
-      } else if (instr->ArgumentCount() != 0 &&
-                 instr->GetMoveArguments() != nullptr) {
-        writer->OpenArray("i");
-        for (intptr_t i = 0; i < instr->ArgumentCount(); i++) {
-          writer->PrintValue(
-              instr->ArgumentValueAt(i)->definition()->ssa_temp_index());
-        }
-        writer->CloseArray();
       }
       AttributesSerializer serializer(writer);
       instr->Accept(&serializer);
@@ -1431,11 +1423,6 @@ void SuspendInstr::PrintOperandsTo(BaseTextBuffer* f) const {
   f->AddString(")");
 }
 
-void MoveArgumentInstr::PrintOperandsTo(BaseTextBuffer* f) const {
-  value()->PrintTo(f);
-  f->Printf(", SP+%" Pd "", sp_relative_index());
-}
-
 void GotoInstr::PrintTo(BaseTextBuffer* f) const {
   if (HasParallelMove()) {
     parallel_move()->PrintTo(f);
@@ -1484,14 +1471,9 @@ void Utf8ScanInstr::PrintTo(BaseTextBuffer* f) const {
 
 void Environment::PrintTo(BaseTextBuffer* f) const {
   f->AddString(" env={ ");
-  int arg_count = 0;
   for (intptr_t i = 0; i < values_.length(); ++i) {
     if (i > 0) f->AddString(", ");
-    if (values_[i]->definition()->IsMoveArgument()) {
-      f->Printf("a%d", arg_count++);
-    } else {
-      values_[i]->PrintTo(f);
-    }
+    values_[i]->PrintTo(f);
     if ((locations_ != nullptr) && !locations_[i].IsInvalid()) {
       f->AddString(" [");
       locations_[i].PrintTo(f);

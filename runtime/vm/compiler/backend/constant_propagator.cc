@@ -432,10 +432,6 @@ void ConstantPropagator::VisitNativeParameter(NativeParameterInstr* instr) {
   SetValue(instr, non_constant_);
 }
 
-void ConstantPropagator::VisitMoveArgument(MoveArgumentInstr* instr) {
-  UNREACHABLE();  // Inserted right before register allocation.
-}
-
 void ConstantPropagator::VisitAssertAssignable(AssertAssignableInstr* instr) {
   const auto& value = instr->value()->definition()->constant_value();
   const auto& dst_type = instr->dst_type()->definition()->constant_value();
@@ -1767,9 +1763,6 @@ bool ConstantPropagator::TransformDefinition(Definition* defn) {
         !constant_value_.IsCanonical()) {
       constant_value_ = Instance::Cast(constant_value_).Canonicalize(T);
       ASSERT(!constant_value_.IsNull());
-    }
-    if (auto call = defn->AsStaticCall()) {
-      ASSERT(!call->HasMoveArguments());
     }
     Definition* replacement =
         graph_->TryCreateConstantReplacementFor(defn, constant_value_);

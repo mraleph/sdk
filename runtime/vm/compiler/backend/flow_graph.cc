@@ -158,9 +158,6 @@ void FlowGraph::ReplaceCurrentInstruction(ForwardInstructionIterator* iterator,
       THR_Print("Removing v%" Pd ".\n", current_defn->ssa_temp_index());
     }
   }
-  if (current->ArgumentCount() != 0) {
-    ASSERT(!current->HasMoveArguments());
-  }
   iterator->RemoveCurrentFromGraph();
 }
 
@@ -1575,10 +1572,6 @@ void FlowGraph::RenameRecursive(
         break;
       }
 
-      case Instruction::kMoveArgument:
-        UNREACHABLE();
-        break;
-
       case Instruction::kCheckStackOverflow:
         // Assert environment integrity at checkpoints.
         ASSERT((variable_count() +
@@ -1645,7 +1638,6 @@ void FlowGraph::RenameRecursive(
           // Rename input operand.
           Definition* input = (*env)[i];
           ASSERT(input != nullptr);
-          ASSERT(!input->IsMoveArgument());
           Value* use = new (zone()) Value(input);
           phi->SetInputAt(pred_index, use);
         }
@@ -2436,7 +2428,6 @@ void FlowGraph::WidenSmiToInt32() {
         if (use_defn == nullptr) {
           // We assume that tagging before returning or pushing argument costs
           // very little compared to the cost of the return/call itself.
-          ASSERT(!instr->IsMoveArgument());
           if (!instr->IsReturn() &&
               (use->use_index() >= instr->ArgumentCount())) {
             gain--;
@@ -3022,28 +3013,38 @@ PhiInstr* FlowGraph::AddPhi(JoinEntryInstr* join,
   return phi;
 }
 
-void FlowGraph::InsertMoveArguments() {
+static void RepairOutgoingArgumentsInEnvironment(Instruction* instr) {
+  auto env = instr->env();
+  if (env == nullptr) {
+    return;
+  }
+
+  // Some calls (e.g. closure calls) have more inputs than actual arguments.
+  // Those extra inputs will be consumed from the stack before the call.
+  const intptr_t after_args_input_count = env->LazyDeoptPruneCount();
+  const intptr_t arg_count = instr->ArgumentCount();
+  ASSERT((arg_count + after_args_input_count) <= env->Length());
+  const intptr_t env_base =
+      env->Length() - arg_count - after_args_input_count;
+  for (intptr_t i = 0; i < arg_count; ++i) {
+    env->ValueAt(env_base + i)->BindToEnvironment(instr->InputAt(i)->definition());
+  }
+}
+
+void FlowGraph::ComputeMaxArgumentSlotCount() {
   intptr_t max_argument_slot_count = 0;
-  for (BlockIterator block_it = reverse_postorder_iterator(); !block_it.Done();
-       block_it.Advance()) {
+  for (auto block : reverse_postorder()) {
     thread()->CheckForSafepoint();
-    for (ForwardInstructionIterator instr_it(block_it.Current());
-         !instr_it.Done(); instr_it.Advance()) {
-      Instruction* instruction = instr_it.Current();
+    for (auto instruction : block->instructions()) {
       const intptr_t arg_count = instruction->ArgumentCount();
       if (arg_count == 0) {
         continue;
       }
-      MoveArgumentsArray* arguments =
-          new (Z) MoveArgumentsArray(zone(), arg_count);
-      arguments->EnsureLength(arg_count, nullptr);
+      RepairOutgoingArgumentsInEnvironment(instruction);
 
       intptr_t sp_relative_index = 0;
       for (intptr_t i = arg_count - 1; i >= 0; --i) {
-        Value* arg = instruction->ArgumentValueAt(i);
         const auto rep = instruction->RequiredInputRepresentation(i);
-        (*arguments)[i] = new (Z)
-            MoveArgumentInstr(arg->CopyWithType(Z), rep, sp_relative_index);
 
         static_assert(compiler::target::kIntSpillFactor ==
                           compiler::target::kDoubleSpillFactor,
@@ -3055,17 +3056,6 @@ void FlowGraph::InsertMoveArguments() {
       }
       max_argument_slot_count =
           Utils::Maximum(max_argument_slot_count, sp_relative_index);
-
-      for (auto move_arg : *arguments) {
-        // Insert all MoveArgument instructions immediately before call.
-        // MoveArgumentInstr::EmitNativeCode may generate more efficient
-        // code for subsequent MoveArgument instructions (ARM, ARM64).
-        InsertBefore(instruction, move_arg, /*env=*/nullptr, kEffect);
-      }
-      instruction->ReplaceInputsWithMoveArguments(arguments);
-      if (instruction->env() != nullptr) {
-        instruction->RepairArgumentUsesInEnvironment();
-      }
     }
   }
   set_max_argument_slot_count(max_argument_slot_count);

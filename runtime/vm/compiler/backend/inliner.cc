@@ -197,15 +197,14 @@ class GraphInfoCollector : public ValueObject {
           continue;
         }
         ++instruction_count_;
-        // Count inputs of certain instructions as if separate MoveArgument
+        // Count inputs of certain instructions as if separate
         // instructions are used for inputs. This is done in order to
         // preserve inlining behavior and avoid code size growth after
-        // MoveArgument insertion was moved to the end of the
-        // compilation pipeline.
+        // we started to handle arguments in parallel moves in register
+        // allocation.
         if (current->IsAllocateObject()) {
           instruction_count_ += current->InputCount();
         } else if (current->ArgumentCount() > 0) {
-          ASSERT(!current->HasMoveArguments());
           instruction_count_ += current->ArgumentCount();
         }
         if (current->IsInstanceCall() || current->IsStaticCall() ||
@@ -464,9 +463,6 @@ class CallSites : public ValueObject {
         for (auto input : defn->inputs()) {
           add_to_worklist(input);
         }
-        // For instructions with arguments we don't expect push arguments to
-        // be inserted yet.
-        ASSERT(defn->ArgumentCount() == 0 || !defn->HasMoveArguments());
       }
     };
 
@@ -1741,8 +1737,6 @@ class CallSiteInliner : public ValueObject {
     exit_collector->PrepareGraphs(callee_graph);
     ReplaceParameterStubs(zone(), caller_graph_, call_data, nullptr);
     exit_collector->ReplaceCall(callee_function_entry);
-
-    ASSERT(!call_data->call->HasMoveArguments());
   }
 
   static intptr_t CountConstants(const GrowableArray<Value*>& arguments) {
@@ -2421,8 +2415,6 @@ TargetEntryInstr* PolymorphicInliner::BuildDecisionGraph() {
       }
     }
   }
-
-  ASSERT(!call_->HasMoveArguments());
 
   // Handle any non-inlined variants.
   if (!non_inlined_variants_->is_empty()) {
@@ -3644,8 +3636,6 @@ bool FlowGraphInliner::TryReplaceInstanceCallWithInline(
       flow_graph->AddExactnessGuard(call, receiver_cid);
     }
 
-    ASSERT(!call->HasMoveArguments());
-
     // Replace all uses of this definition with the result.
     if (call->HasUses()) {
       ASSERT(result != nullptr && result->HasSSATemp());
@@ -3694,7 +3684,6 @@ bool FlowGraphInliner::TryReplaceStaticCallWithInline(
     ASSERT((last != nullptr && result != nullptr) ||
            (call->function().recognized_kind() ==
             MethodRecognizer::kObjectConstructor));
-    ASSERT(!call->HasMoveArguments());
     // Replace all uses of this definition with the result.
     if (call->HasUses()) {
       ASSERT(result->HasSSATemp());

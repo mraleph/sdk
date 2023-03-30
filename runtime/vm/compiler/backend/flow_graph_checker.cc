@@ -140,31 +140,22 @@ static void AssertArgumentsInEnv(FlowGraph* flow_graph, Definition* call) {
     ASSERT1((arg_count + after_args_input_count) <= env_count, call);
     const intptr_t env_base = env_count - arg_count - after_args_input_count;
     for (intptr_t i = 0; i < arg_count; i++) {
-      if (call->HasMoveArguments()) {
-        ASSERT1(call->ArgumentAt(i) == env->ValueAt(env_base + i)
-                                           ->definition()
-                                           ->AsMoveArgument()
-                                           ->value()
-                                           ->definition(),
-                call);
-      } else {
-        // Redefinition instructions and boxing/unboxing are inserted
-        // without updating environment uses (FlowGraph::RenameDominatedUses,
-        // FlowGraph::InsertConversionsFor).
-        // Also, constants may belong to different blocks (e.g. function entry
-        // and graph entry).
-        Definition* arg_def =
-            call->ArgumentAt(i)->OriginalDefinitionIgnoreBoxingAndConstraints();
-        Definition* env_def =
-            env->ValueAt(env_base + i)
-                ->definition()
-                ->OriginalDefinitionIgnoreBoxingAndConstraints();
-        ASSERT2((arg_def == env_def) ||
-                    (arg_def->IsConstant() && env_def->IsConstant() &&
-                     arg_def->AsConstant()->value().ptr() ==
-                         env_def->AsConstant()->value().ptr()),
-                arg_def, env_def);
-      }
+      // Redefinition instructions and boxing/unboxing are inserted
+      // without updating environment uses (FlowGraph::RenameDominatedUses,
+      // FlowGraph::InsertConversionsFor).
+      // Also, constants may belong to different blocks (e.g. function entry
+      // and graph entry).
+      Definition* arg_def =
+          call->ArgumentAt(i)->OriginalDefinitionIgnoreBoxingAndConstraints();
+      Definition* env_def =
+          env->ValueAt(env_base + i)
+              ->definition()
+              ->OriginalDefinitionIgnoreBoxingAndConstraints();
+      ASSERT2((arg_def == env_def) ||
+                  (arg_def->IsConstant() && env_def->IsConstant() &&
+                    arg_def->AsConstant()->value().ptr() ==
+                        env_def->AsConstant()->value().ptr()),
+              arg_def, env_def);
     }
   }
 }

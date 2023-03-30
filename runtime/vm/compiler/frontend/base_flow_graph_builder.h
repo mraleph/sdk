@@ -421,7 +421,6 @@ class BaseFlowGraphBuilder {
   // Builds closure call with given number of arguments. Target closure
   // (in bare instructions mode) or closure function (otherwise) is taken from
   // top of the stack.
-  // MoveArgument instructions should be already added for arguments.
   Fragment ClosureCall(TokenPosition position,
                        intptr_t type_args_len,
                        intptr_t argument_count,

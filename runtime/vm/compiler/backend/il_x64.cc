@@ -336,39 +336,6 @@ void MemoryCopyInstr::EmitComputeStartPointer(FlowGraphCompiler* compiler,
   __ leaq(array_reg, compiler::Address(array_reg, start_reg, scale, offset));
 }
 
-LocationSummary* MoveArgumentInstr::MakeLocationSummary(Zone* zone,
-                                                        bool opt) const {
-  const intptr_t kNumInputs = 1;
-  const intptr_t kNumTemps = 0;
-  LocationSummary* locs = new (zone)
-      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
-  if (representation() == kUnboxedDouble) {
-    locs->set_in(0, Location::RequiresFpuRegister());
-  } else if (representation() == kUnboxedInt64) {
-    locs->set_in(0, Location::RequiresRegister());
-  } else {
-    locs->set_in(0, LocationAnyOrConstant(value()));
-  }
-  return locs;
-}
-
-void MoveArgumentInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  ASSERT(compiler->is_optimizing());
-
-  const Location value = locs()->in(0);
-  const compiler::Address dst(RSP, sp_relative_index() * kWordSize);
-  if (value.IsRegister()) {
-    __ movq(dst, value.reg());
-  } else if (value.IsConstant()) {
-    __ StoreObject(dst, value.constant());
-  } else if (value.IsFpuRegister()) {
-    __ movsd(dst, value.fpu_reg());
-  } else {
-    ASSERT(value.IsStackSlot());
-    __ MoveMemoryToMemory(dst, LocationToStackSlotAddress(value));
-  }
-}
-
 LocationSummary* ReturnInstr::MakeLocationSummary(Zone* zone, bool opt) const {
   const intptr_t kNumInputs = 1;
   const intptr_t kNumTemps = 0;

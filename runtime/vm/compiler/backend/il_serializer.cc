@@ -555,18 +555,7 @@ template <>
 void FlowGraphSerializer::WriteRefTrait<Definition*>::WriteRef(
     FlowGraphSerializer* s,
     Definition* x) {
-  if (!x->HasSSATemp()) {
-    if (auto* move_arg = x->AsMoveArgument()) {
-      // Environments of the calls can reference MoveArgument instructions
-      // and they don't have SSA temps.
-      // Write a reference to the original definition.
-      // When reading it is restored using RepairArgumentUsesInEnvironment.
-      x = move_arg->value()->definition();
-    } else {
-      UNREACHABLE();
-    }
-  }
-  ASSERT(x->HasSSATemp());
+  RELEASE_ASSERT(x->HasSSATemp());
   ASSERT(s->can_write_refs());
   s->Write<intptr_t>(x->ssa_temp_index());
 }
@@ -2346,46 +2335,11 @@ void SpecialParameterInstr::ReadExtra(FlowGraphDeserializer* d) {
 template <intptr_t kExtraInputs>
 void TemplateDartCall<kExtraInputs>::WriteExtra(FlowGraphSerializer* s) {
   VariadicDefinition::WriteExtra(s);
-  if (move_arguments_ == nullptr) {
-    s->Write<intptr_t>(-1);
-  } else {
-    s->Write<intptr_t>(move_arguments_->length());
-#if defined(DEBUG)
-    // Verify that MoveArgument instructions are inserted immediately
-    // before this instruction. ReadExtra below relies on
-    // that when restoring move_arguments_.
-    Instruction* instr = this;
-    for (intptr_t i = move_arguments_->length() - 1; i >= 0; --i) {
-      do {
-        instr = instr->previous();
-        ASSERT(instr != nullptr);
-      } while (!instr->IsMoveArgument());
-      ASSERT(instr == (*move_arguments_)[i]);
-    }
-#endif
-  }
 }
 
 template <intptr_t kExtraInputs>
 void TemplateDartCall<kExtraInputs>::ReadExtra(FlowGraphDeserializer* d) {
   VariadicDefinition::ReadExtra(d);
-  const intptr_t num_move_args = d->Read<intptr_t>();
-  if (num_move_args >= 0) {
-    move_arguments_ =
-        new (d->zone()) MoveArgumentsArray(d->zone(), num_move_args);
-    move_arguments_->EnsureLength(num_move_args, nullptr);
-    Instruction* instr = this;
-    for (int i = num_move_args - 1; i >= 0; --i) {
-      do {
-        instr = instr->previous();
-        ASSERT(instr != nullptr);
-      } while (!instr->IsMoveArgument());
-      (*move_arguments_)[i] = instr->AsMoveArgument();
-    }
-    if (env() != nullptr) {
-      RepairArgumentUsesInEnvironment();
-    }
-  }
 }
 
 // Explicit template instantiations, needed for the methods above.
