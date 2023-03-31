@@ -38,7 +38,6 @@ class JoinEntryInstr;
 class LocalVariable;
 class LocationSummary;
 class MoveOperands;
-class MoveSchedule;
 class NonStreamingWriteStream;
 class OsrEntryInstr;
 class ParsedFunction;
@@ -51,6 +50,7 @@ class TargetEntryInstr;
 class TokenPosition;
 
 namespace compiler {
+class MoveSchedule;
 struct TableSelector;
 
 namespace ffi {
@@ -101,7 +101,7 @@ class NativeCallingConvention;
   V(const LocalVariable&)                                                      \
   V(LocationSummary*)                                                          \
   V(MoveOperands*)                                                             \
-  V(const MoveSchedule*)                                                       \
+  V(const compiler::MoveSchedule*)                                             \
   V(const compiler::ffi::NativeCallingConvention&)                             \
   V(const Object&)                                                             \
   V(ParallelMoveInstr*)                                                        \

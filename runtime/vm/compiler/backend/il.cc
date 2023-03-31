@@ -16,7 +16,7 @@
 #include "vm/compiler/backend/locations.h"
 #include "vm/compiler/backend/locations_helpers.h"
 #include "vm/compiler/backend/loops.h"
-#include "vm/compiler/backend/parallel_move_resolver.h"
+#include "vm/compiler/backend/parallel_move_emitter.h"
 #include "vm/compiler/backend/range_analysis.h"
 #include "vm/compiler/ffi/frame_rebase.h"
 #include "vm/compiler/ffi/marshaller.h"
@@ -4667,7 +4667,7 @@ LocationSummary* ParallelMoveInstr::MakeLocationSummary(Zone* zone,
 }
 
 void ParallelMoveInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
-  ParallelMoveEmitter(compiler, this).EmitNativeCode();
+  compiler::ParallelMoveEmitter(compiler, this).EmitNativeCode();
 }
 
 LocationSummary* ConstraintInstr::MakeLocationSummary(Zone* zone,

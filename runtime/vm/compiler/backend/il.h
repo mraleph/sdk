@@ -59,7 +59,6 @@ class Instruction;
 class InstructionVisitor;
 class LocalVariable;
 class LoopInfo;
-class MoveSchedule;
 class ParsedFunction;
 class Range;
 class RangeAnalysis;
@@ -69,6 +68,7 @@ class UnboxIntegerInstr;
 
 namespace compiler {
 class BlockBuilder;
+class MoveSchedule;
 struct TableSelector;
 }  // namespace compiler
 
@@ -1551,12 +1551,12 @@ class ParallelMoveInstr : public TemplateInstruction<0, NoThrow> {
     return TokenPosition::kParallelMove;
   }
 
-  const MoveSchedule& move_schedule() const {
+  const compiler::MoveSchedule& move_schedule() const {
     ASSERT(move_schedule_ != nullptr);
     return *move_schedule_;
   }
 
-  void set_move_schedule(const MoveSchedule& schedule) {
+  void set_move_schedule(const compiler::MoveSchedule& schedule) {
     move_schedule_ = &schedule;
   }
 
@@ -1566,7 +1566,7 @@ class ParallelMoveInstr : public TemplateInstruction<0, NoThrow> {
 
  private:
   GrowableArray<MoveOperands*> moves_;  // Elements cannot be null.
-  const MoveSchedule* move_schedule_ = nullptr;
+  const compiler::MoveSchedule* move_schedule_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(ParallelMoveInstr);
 };

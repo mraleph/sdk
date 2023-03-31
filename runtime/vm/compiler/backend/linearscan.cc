@@ -3350,7 +3350,7 @@ void FlowGraphAllocator::AllocateOutgoingArguments() {
 }
 
 void FlowGraphAllocator::ScheduleParallelMoves() {
-  ParallelMoveResolver resolver;
+  compiler::ParallelMoveResolver resolver;
 
   for (auto block : flow_graph_.reverse_postorder()) {
     if (block->HasParallelMove()) {

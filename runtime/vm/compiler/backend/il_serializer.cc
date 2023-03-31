@@ -2076,13 +2076,13 @@ OsrEntryInstr::OsrEntryInstr(FlowGraphDeserializer* d)
 void ParallelMoveInstr::WriteExtra(FlowGraphSerializer* s) {
   Instruction::WriteExtra(s);
   s->Write<GrowableArray<MoveOperands*>>(moves_);
-  s->Write<const MoveSchedule*>(move_schedule_);
+  s->Write<const compiler::MoveSchedule*>(move_schedule_);
 }
 
 void ParallelMoveInstr::ReadExtra(FlowGraphDeserializer* d) {
   Instruction::ReadExtra(d);
   moves_ = d->Read<GrowableArray<MoveOperands*>>();
-  move_schedule_ = d->Read<const MoveSchedule*>();
+  move_schedule_ = d->Read<const compiler::MoveSchedule*>();
 }
 
 void PhiInstr::WriteTo(FlowGraphSerializer* s) {

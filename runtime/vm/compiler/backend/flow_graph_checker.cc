@@ -153,8 +153,8 @@ static void AssertArgumentsInEnv(FlowGraph* flow_graph, Definition* call) {
               ->OriginalDefinitionIgnoreBoxingAndConstraints();
       ASSERT2((arg_def == env_def) ||
                   (arg_def->IsConstant() && env_def->IsConstant() &&
-                    arg_def->AsConstant()->value().ptr() ==
-                        env_def->AsConstant()->value().ptr()),
+                   arg_def->AsConstant()->value().ptr() ==
+                       env_def->AsConstant()->value().ptr()),
               arg_def, env_def);
     }
   }
