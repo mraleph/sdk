@@ -59,12 +59,10 @@ class FixedArray {
   DISALLOW_COPY_AND_ASSIGN(FixedArray);
 };
 
-
 struct MoveOp {
   enum class Kind : uint8_t {
     kNop,
     kMove,
-    kSwap,
   };
 
   Kind kind;
@@ -75,8 +73,7 @@ class MoveSchedule : public FixedArray<MoveSchedule, MoveOp> {
  public:
   // Converts the given list of |ParallelMoveResolver::Op| operations
   // into a |MoveSchedule| and filters out all |kNop| operations.
-  static const MoveSchedule& From(
-      const GrowableArray<MoveOp>& ops) {
+  static const MoveSchedule& From(const GrowableArray<MoveOp>& ops) {
     intptr_t count = 0;
     for (const auto& op : ops) {
       if (op.kind != MoveOp::Kind::kNop) count++;

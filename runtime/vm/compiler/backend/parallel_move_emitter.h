@@ -25,6 +25,8 @@ class ParallelMoveEmitter : public ValueObject {
 
   void EmitNativeCode();
 
+  static bool RequiresTemporary(Location dst, Location src);
+
  private:
   class ScratchFpuRegisterScope : public ValueObject {
    public:
@@ -91,6 +93,8 @@ class ParallelMoveEmitter : public ValueObject {
 
   // Helpers for non-trivial source-destination combinations that cannot
   // be handled by a single instruction.
+  void EmitMove(Location destination, Location source);
+
   void MoveMemoryToMemory(const compiler::Address& dst,
                           const compiler::Address& src);
   void Exchange(Register reg, const compiler::Address& mem);

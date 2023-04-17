@@ -307,14 +307,30 @@ const Object& Location::constant() const {
   return constant_instruction()->value();
 }
 
+// See |ParallelMoveResolver::CreateTemporary|.
+static bool IsTemporaryRegister(Location loc) {
+  return loc.register_code() >= kNumberOfCpuRegisters;
+}
+
+// See |ParallelMoveResolver::CreateTemporary|.
+static intptr_t ToTemporaryIndex(Location loc) {
+  return loc.register_code() - kNumberOfCpuRegisters;
+}
+
 const char* Location::Name() const {
   switch (kind()) {
     case kInvalid:
       return "?";
     case kRegister:
-      return RegisterNames::RegisterName(reg());
+      return !IsTemporaryRegister(*this)
+                 ? RegisterNames::RegisterName(reg())
+                 : OS::SCreate(Thread::Current()->zone(), "%%%" Pd "r",
+                               ToTemporaryIndex(*this));
     case kFpuRegister:
-      return RegisterNames::FpuRegisterName(fpu_reg());
+      return !IsTemporaryRegister(*this)
+                 ? RegisterNames::FpuRegisterName(fpu_reg())
+                 : OS::SCreate(Thread::Current()->zone(), "%%%" Pd "f",
+                               ToTemporaryIndex(*this));
     case kStackSlot:
       return "S";
     case kDoubleStackSlot:

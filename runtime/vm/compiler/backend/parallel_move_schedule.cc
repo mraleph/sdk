@@ -25,8 +25,7 @@ const MoveSchedule* FlowGraphDeserializer::ReadTrait<const MoveSchedule*>::Read(
   const intptr_t len = d->Read<intptr_t>();
   MoveSchedule& schedule = MoveSchedule::Allocate(len);
   for (intptr_t i = 0; i < len; ++i) {
-    schedule[i].kind =
-        static_cast<compiler::MoveOp::Kind>(d->Read<uint8_t>());
+    schedule[i].kind = static_cast<compiler::MoveOp::Kind>(d->Read<uint8_t>());
     schedule[i].operands = MoveOperands(d);
   }
   return &schedule;

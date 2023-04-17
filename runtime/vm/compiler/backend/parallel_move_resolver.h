@@ -23,11 +23,15 @@ namespace compiler {
 
 class ParallelMoveResolver : public ValueObject {
  public:
-  ParallelMoveResolver();
+  ParallelMoveResolver(bool is_intrinsic, intptr_t spill_slot_count);
 
   // Schedule moves specified by the given parallel move and store the
   // schedule on the parallel move itself.
   void Resolve(ParallelMoveInstr* parallel_move);
+
+  intptr_t additional_spill_slots_required() const {
+    return additional_spill_slots_required_;
+  }
 
  private:
   // Build the initial list of moves.
@@ -40,16 +44,27 @@ class ParallelMoveResolver : public ValueObject {
   // Schedule a move and remove it from the move graph.
   void AddMoveToSchedule(int index);
 
-  // Schedule a swap of two operands. The move from
-  // source to destination is removed from the move graph.
-  void AddSwapToSchedule(int index);
+  // Lower high-level moves into moves supported by the underlying
+  // platform.
+  void LegalizeMoves();
 
-  FlowGraphCompiler* compiler_;
+  Location CreateTemporary(Location::Kind kind);
+
+  void AllocateTemporaries();
+
+  const bool is_intrinsic_;
+
+  const intptr_t spill_slot_count_;
+  intptr_t additional_spill_slots_required_ = 0;
+
+  ParallelMoveInstr* parallel_move_ = nullptr;
 
   // List of moves not yet resolved.
   GrowableArray<MoveOperands> moves_;
+  GrowableArray<bool> is_pending_;
 
   GrowableArray<MoveOp> scheduled_ops_;
+  GrowableArray<Location> temporaries_;
 
   friend class MoveSchedule;
   friend class ParallelMoveEmitter;

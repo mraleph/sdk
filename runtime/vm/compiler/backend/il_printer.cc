@@ -9,6 +9,7 @@
 #include "vm/compiler/api/print_filter.h"
 #include "vm/compiler/backend/il.h"
 #include "vm/compiler/backend/linearscan.h"
+#include "vm/compiler/backend/parallel_move_schedule.h"
 #include "vm/compiler/backend/range_analysis.h"
 #include "vm/compiler/ffi/native_calling_convention.h"
 #include "vm/os.h"
@@ -1461,6 +1462,26 @@ void ParallelMoveInstr::PrintTo(BaseTextBuffer* f) const {
     moves_[i]->dest().PrintTo(f);
     f->AddString(" <- ");
     moves_[i]->src().PrintTo(f);
+  }
+
+  if (move_schedule_ != nullptr) {
+    bool comma = false;
+
+    f->Printf(" schedule=[");
+    for (auto& op : *move_schedule_) {
+      switch (op.kind) {
+        case compiler::MoveOp::Kind::kMove:
+          if (comma) f->AddString(", ");
+          op.operands.dest().PrintTo(f);
+          f->AddString(" <- ");
+          op.operands.src().PrintTo(f);
+          comma = true;
+          break;
+        case compiler::MoveOp::Kind::kNop:
+          break;
+      }
+    }
+    f->Printf("]");
   }
 }
 

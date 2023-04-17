@@ -14,6 +14,84 @@ namespace compiler {
 
 #define __ compiler_->assembler()->
 
+/*
+TODO: Opt move ZR and NULL_REG -> StackSlot, ZR to DoubleStackSlot.
+*/
+
+bool ParallelMoveEmitter::RequiresTemporary(Location dst, Location src) {
+  const bool is_memory_to_memory =
+      (src.IsStackSlot() || src.IsDoubleStackSlot() || src.IsQuadStackSlot()) &&
+      src.kind() == dst.kind();
+  const bool is_constant_to_memory =
+      (src.IsConstant() && (dst.IsStackSlot() || dst.IsDoubleStackSlot()));
+  return is_memory_to_memory || is_constant_to_memory;
+}
+
+void ParallelMoveEmitter::EmitMove(Location destination, Location source) {
+  if (destination.Equals(source)) return;
+
+  if (source.IsRegister()) {
+    if (destination.IsRegister()) {
+      __ mov(destination.reg(), source.reg());
+    } else {
+      ASSERT(destination.IsStackSlot());
+      const intptr_t dest_offset = destination.ToStackSlotOffset();
+      __ StoreToOffset(source.reg(), destination.base_reg(), dest_offset);
+    }
+  } else if (source.IsStackSlot()) {
+    if (destination.IsRegister()) {
+      const intptr_t source_offset = source.ToStackSlotOffset();
+      __ LoadFromOffset(destination.reg(), source.base_reg(), source_offset);
+    } else if (destination.IsFpuRegister()) {
+      const intptr_t src_offset = source.ToStackSlotOffset();
+      VRegister dst = destination.fpu_reg();
+      __ LoadDFromOffset(dst, source.base_reg(), src_offset);
+    } else {
+      UNREACHABLE();
+    }
+  } else if (source.IsFpuRegister()) {
+    if (destination.IsFpuRegister()) {
+      __ vmov(destination.fpu_reg(), source.fpu_reg());
+    } else {
+      if (destination.IsStackSlot() /*32-bit float*/ ||
+          destination.IsDoubleStackSlot()) {
+        const intptr_t dest_offset = destination.ToStackSlotOffset();
+        VRegister src = source.fpu_reg();
+        __ StoreDToOffset(src, destination.base_reg(), dest_offset);
+      } else {
+        ASSERT(destination.IsQuadStackSlot());
+        const intptr_t dest_offset = destination.ToStackSlotOffset();
+        __ StoreQToOffset(source.fpu_reg(), destination.base_reg(),
+                          dest_offset);
+      }
+    }
+  } else if (source.IsDoubleStackSlot()) {
+    if (destination.IsFpuRegister()) {
+      const intptr_t source_offset = source.ToStackSlotOffset();
+      const VRegister dst = destination.fpu_reg();
+      __ LoadDFromOffset(dst, source.base_reg(), source_offset);
+    } else {
+      UNREACHABLE();
+    }
+  } else if (source.IsQuadStackSlot()) {
+    if (destination.IsFpuRegister()) {
+      const intptr_t source_offset = source.ToStackSlotOffset();
+      __ LoadQFromOffset(destination.fpu_reg(), source.base_reg(),
+                         source_offset);
+    } else {
+      UNREACHABLE();
+    }
+  } else {
+    ASSERT(source.IsConstant());
+    if (!destination.IsStackSlot() && !destination.IsDoubleStackSlot()) {
+      source.constant_instruction()->EmitMoveToLocation(this->compiler_,
+                                                        destination);
+    } else {
+      UNREACHABLE();
+    }
+  }
+}
+
 void ParallelMoveEmitter::EmitSwap(const MoveOperands& move) {
   const Location source = move.src();
   const Location destination = move.dest();

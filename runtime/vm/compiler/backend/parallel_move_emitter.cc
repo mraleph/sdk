@@ -27,9 +27,6 @@ void ParallelMoveEmitter::EmitNativeCode() {
       case MoveOp::Kind::kMove:
         EmitMove(op.operands);
         break;
-      case MoveOp::Kind::kSwap:
-        EmitSwap(op.operands);
-        break;
     }
   }
 }
@@ -37,33 +34,21 @@ void ParallelMoveEmitter::EmitNativeCode() {
 void ParallelMoveEmitter::EmitMove(const MoveOperands& move) {
   const Location src = move.src();
   const Location dst = move.dest();
-  ParallelMoveEmitter::TemporaryAllocator temp(this, /*blocked=*/kNoRegister);
-  compiler_->EmitMove(dst, src, &temp);
-#if defined(DEBUG)
-  // Allocating a scratch register here may cause stack spilling. Neither the
-  // source nor destination register should be SP-relative in that case.
-  for (const Location& loc : {dst, src}) {
-    ASSERT(!temp.DidAllocateTemporary() || !loc.HasStackIndex() ||
-           loc.base_reg() != SPREG);
-  }
-#endif
+  EmitMove(dst, src);
 }
 
 bool ParallelMoveEmitter::IsScratchLocation(Location loc) {
   const auto& move_schedule = parallel_move_->move_schedule();
   for (intptr_t i = current_move_; i < move_schedule.length(); i++) {
     const auto& op = move_schedule[i];
-    if (op.operands.src().Equals(loc) ||
-        (op.kind == MoveOp::Kind::kSwap &&
-         op.operands.dest().Equals(loc))) {
+    if (op.operands.src().Equals(loc)) {
       return false;
     }
   }
 
   for (intptr_t i = current_move_ + 1; i < move_schedule.length(); i++) {
     const auto& op = move_schedule[i];
-    if (op.kind == MoveOp::Kind::kMove &&
-        op.operands.dest().Equals(loc)) {
+    if (op.kind == MoveOp::Kind::kMove && op.operands.dest().Equals(loc)) {
       return true;
     }
   }

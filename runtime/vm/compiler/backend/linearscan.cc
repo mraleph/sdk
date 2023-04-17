@@ -3350,8 +3350,11 @@ void FlowGraphAllocator::AllocateOutgoingArguments() {
 }
 
 void FlowGraphAllocator::ScheduleParallelMoves() {
-  compiler::ParallelMoveResolver resolver;
+  const intptr_t total_spill_slot_count =
+      flow_graph_.graph_entry()->spill_slot_count();
 
+  compiler::ParallelMoveResolver resolver(intrinsic_mode_,
+                                          total_spill_slot_count);
   for (auto block : flow_graph_.reverse_postorder()) {
     if (block->HasParallelMove()) {
       resolver.Resolve(block->parallel_move());
@@ -3367,6 +3370,7 @@ void FlowGraphAllocator::ScheduleParallelMoves() {
       }
     }
   }
+  RELEASE_ASSERT(resolver.additional_spill_slots_required() == 0);
 }
 
 void FlowGraphAllocator::AllocateRegisters() {

@@ -26,6 +26,10 @@ class FlowGraphSerializer;
 class PairLocation;
 class Value;
 
+namespace compiler {
+class ParallelMoveResolver;
+}
+
 // All unboxed integer representations.
 // Format: (representation name, is unsigned, value type)
 #define FOR_EACH_INTEGER_REPRESENTATION_KIND(M)                                \
@@ -445,6 +449,8 @@ class Location : public ValueObject {
   static Location Read(FlowGraphDeserializer* d);
 
  private:
+  friend class compiler::ParallelMoveResolver;
+
   explicit Location(uword value) : value_(value) {}
 
   void set_stack_index(intptr_t index) {
