@@ -84,7 +84,6 @@ class VMLibraryHooks {
   static late int Function() timerMillisecondClock;
 
   // Implementation of package root/map provision.
-  static String? packageRootString;
   static String? packageConfigString;
   static Future<Uri?> Function()? packageConfigUriFuture;
   static Future<Uri?> Function(Uri)? resolvePackageUriFuture;

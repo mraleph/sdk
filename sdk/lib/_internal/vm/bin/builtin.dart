@@ -41,8 +41,8 @@ late Uri _workingDirectory;
 // for the root library in the VM.
 Uri? _rootScript;
 
-// packagesConfig specified for the isolate.
-Uri? _packagesConfigUri;
+// packageConfig specified for the isolate.
+late Uri _packageConfigUri;
 
 // Packages are either resolved looking up in a map or resolved from within a
 // package root.
@@ -54,7 +54,6 @@ bool get _packagesReady => (_packageMap != null) || (_packageError != null);
 String? _packageError = null;
 
 // The map describing how certain package names are mapped to Uris.
-Uri? _packageConfig = null;
 Map<String, Uri>? _packageMap = null;
 
 // Special handling for Windows paths so that they are compatible with URI
@@ -101,7 +100,7 @@ _setPackagesConfig(String packagesParam) {
     // resolve it against the working directory.
     packagesUri = _workingDirectory.resolveUri(packagesUri);
   }
-  _packagesConfigUri = packagesUri;
+  _packageConfigUri = packagesUri;
 }
 
 // Given a uri with a 'package' scheme, return a Uri that is prefixed with
@@ -164,44 +163,18 @@ Uri _resolvePackageUri(Uri uri) {
   return resolvedUri;
 }
 
-void _requestPackagesMap(Uri? packageConfig) {
-  dynamic msg = null;
-  if (packageConfig != null) {
-    // Explicitly specified .packages path.
-    msg = _handlePackagesRequest(_traceLoading, -2, packageConfig);
-  } else {
-    // Search for .packages starting at the root script.
-    msg = _handlePackagesRequest(_traceLoading, -1, _rootScript!);
-  }
-  if (_traceLoading) {
-    _log("Requested packages map for '$_rootScript'.");
-  }
-  if (msg is String) {
-    if (_traceLoading) {
-      _log("Got failure response on package port: '$msg'");
-    }
-    // Remember the error message.
-    _packageError = msg;
-  } else if (msg is List) {
-    // First entry contains the location of the loaded .packages file.
-    assert((msg.length % 2) == 0);
-    assert(msg.length >= 2);
-    assert(msg[1] == null);
-    _packageConfig = Uri.parse(msg[0]);
-    final pmap = new Map<String, Uri>();
-    _packageMap = pmap;
-    for (var i = 2; i < msg.length; i += 2) {
-      // TODO(iposva): Complain about duplicate entries.
-      pmap[msg[i]] = Uri.parse(msg[i + 1]);
-    }
+void _requestPackagesMap() {
+  try {
+    _packageMap = _loadPackageConfig(_packageConfigUri);
     if (_traceLoading) {
       _log("Setup package map: $_packageMap");
     }
-  } else {
-    _packageError = "Bad type of packages reply: ${msg.runtimeType}";
+  } catch (e, st) {
     if (_traceLoading) {
-      _log(_packageError);
+      _log("Failed to load package config: $e at $st");
     }
+    // Remember the error message.
+    _packageError = e.toString();
   }
 }
 
@@ -228,58 +201,6 @@ bool _isValidPackageName(String packageName) {
   return true;
 }
 
-_parsePackagesFile(bool traceLoading, Uri packagesFile, String data) {
-  // The first entry contains the location of the identified .packages file
-  // instead of a mapping.
-  final List result = [packagesFile.toString(), null];
-
-  final lines = LineSplitter.split(data);
-  for (String line in lines) {
-    final hashIndex = line.indexOf('#');
-    if (hashIndex == 0) {
-      continue;
-    }
-    if (hashIndex > 0) {
-      line = line.substring(0, hashIndex);
-    }
-    line = line.trimRight();
-    if (line.isEmpty) {
-      continue;
-    }
-
-    final colonIndex = line.indexOf(':');
-    if (colonIndex <= 0) {
-      return 'Line in "$packagesFile" should be of the format '
-          '`<package-name>:<path>" but was: "$line"';
-    }
-    final packageName = line.substring(0, colonIndex);
-    if (!_isValidPackageName(packageName)) {
-      return 'Package name in $packagesFile contains disallowed characters ('
-          'was: "$packageName")';
-    }
-
-    String packageUri = line.substring(colonIndex + 1);
-    if (traceLoading) {
-      _log("packageName: $packageName");
-      _log("packageUri: $packageUri");
-    }
-    // Ensure the package uri ends with a /.
-    if (!packageUri.endsWith('/')) {
-      packageUri += '/';
-    }
-    final resolvedPackageUri = packagesFile.resolve(packageUri).toString();
-    if (traceLoading) {
-      _log("mapping: $packageName -> $resolvedPackageUri");
-    }
-    result.add(packageName);
-    result.add(resolvedPackageUri);
-  }
-  if (traceLoading) {
-    _log("Parsed packages file at $packagesFile. Sending:\n$result");
-  }
-  return result;
-}
-
 // The .dart_tool/package_config.json format is described in
 //
 // https://github.com/dart-lang/language/blob/master/accepted/future-releases/language-versioning/package-config-file-v2.md
@@ -291,15 +212,13 @@ _parsePackagesFile(bool traceLoading, Uri packagesFile, String data) {
 //    [n*2] Name of n-th package
 //    [n*2 + 1] Location of n-th package's sources (as a String)
 //
-List _parsePackageConfig(bool traceLoading, Uri packageConfig, String data) {
+Map<String, Uri> _parsePackageConfig(Uri packageConfig, String data) {
   final Map packageJson = json.decode(data);
   final version = packageJson['configVersion'];
   if (version != 2) {
     throw 'The package configuration file has an unsupported version.';
   }
-  // The first entry contains the location of the identified
-  // .dart_tool/package_config.json file instead of a mapping.
-  final result = <dynamic>[packageConfig.toString(), null];
+  final result = <String, Uri>{};
   final List packages = packageJson['packages'] ?? [];
   for (final Map package in packages) {
     String rootUri = package['rootUri'];
@@ -318,115 +237,12 @@ List _parsePackageConfig(bool traceLoading, Uri packageConfig, String data) {
       throw 'Package name in $packageConfig contains disallowed characters ('
           'was: "$packageName")';
     }
-    result.add(packageName);
-    result.add(resolvedPackageUri.toString());
-    if (traceLoading) {
+    result[packageName] = resolvedPackageUri;
+    if (_traceLoading) {
       _log('Resolved package "$packageName" to be at $resolvedPackageUri');
     }
   }
   return result;
-}
-
-_findPackagesConfiguration(bool traceLoading, Uri base) {
-  try {
-    // Walk up the directory hierarchy to check for the existence of either one
-    // of
-    //   - .packages (preferred)
-    //   - .dart_tool/package_config.json
-    var currentDir = new File.fromUri(base).parent;
-    while (true) {
-      final dirUri = currentDir.uri;
-
-      // We prefer using `.dart_tool/package_config.json` over `.packages`.
-      final packageConfig = dirUri.resolve(".dart_tool/package_config.json");
-      if (traceLoading) {
-        _log("Checking for $packageConfig file.");
-      }
-      File file = File.fromUri(packageConfig);
-      bool exists = file.existsSync();
-      if (traceLoading) {
-        _log("$packageConfig exists: $exists");
-      }
-      if (exists) {
-        final data = utf8.decode(file.readAsBytesSync());
-        if (traceLoading) {
-          _log("Loaded package config file from $packageConfig:$data\n");
-        }
-        return _parsePackageConfig(traceLoading, packageConfig, data);
-      }
-
-      // We fallback to using `.packages` if it exists.
-      final packagesFile = dirUri.resolve(".packages");
-      if (traceLoading) {
-        _log("Checking for $packagesFile file.");
-      }
-      file = File.fromUri(packagesFile);
-      exists = file.existsSync();
-      if (traceLoading) {
-        _log("$packagesFile exists: $exists");
-      }
-      if (exists) {
-        final String data = utf8.decode(file.readAsBytesSync());
-        if (traceLoading) {
-          _log("Loaded packages file from $packagesFile:\n$data");
-        }
-        return _parsePackagesFile(traceLoading, packagesFile, data);
-      }
-
-      final parentDir = currentDir.parent;
-      if (dirUri == parentDir.uri) break;
-      currentDir = parentDir;
-    }
-
-    if (traceLoading) {
-      _log("Could not resolve a package configuration from $base");
-    }
-    return "Could not resolve a package configuration for base at $base";
-  } catch (e, s) {
-    if (traceLoading) {
-      _log("Error loading packages: $e\n$s");
-    }
-    return "Uncaught error ($e) loading packages file.";
-  }
-}
-
-int _indexOfFirstNonWhitespaceCharacter(String data) {
-  // Whitespace characters ignored in JSON spec:
-  // https://tools.ietf.org/html/rfc7159
-  const tab = 0x09;
-  const lf = 0x0A;
-  const cr = 0x0D;
-  const space = 0x20;
-
-  int index = 0;
-  while (index < data.length) {
-    final int char = data.codeUnitAt(index);
-    if (char != lf && char != cr && char != space && char != tab) {
-      break;
-    }
-    index++;
-  }
-  return index;
-}
-
-bool _canBeValidJson(String data) {
-  const int openCurly = 0x7B;
-  final int index = _indexOfFirstNonWhitespaceCharacter(data);
-  return index < data.length && data.codeUnitAt(index) == openCurly;
-}
-
-_parsePackageConfiguration(bool traceLoading, Uri resource, Uint8List bytes) {
-  try {
-    final data = utf8.decode(bytes);
-    if (_canBeValidJson(data)) {
-      return _parsePackageConfig(traceLoading, resource, data);
-    } else {
-      return _parsePackagesFile(traceLoading, resource, data);
-    }
-  } catch (e) {
-    return "The resource '$resource' is neither a valid '.packages' file nor "
-        "a valid '.dart_tool/package_config.json' file.";
-  }
 }
 
 bool _isValidUtf8DataUrl(UriData data) {
@@ -441,45 +257,35 @@ bool _isValidUtf8DataUrl(UriData data) {
   return true;
 }
 
-_handlePackagesRequest(bool traceLoading, int tag, Uri resource) {
+Map<String, Uri> _loadPackageConfig(Uri packageConfig) {
+  if (_traceLoading) {
+    _log("Handling load of packages map: '$packageConfig'.");
+  }
+  late Uint8List bytes;
+  if (!packageConfig.hasScheme || packageConfig.isScheme('file')) {
+    final file = File.fromUri(packageConfig);
+    if (!file.existsSync()) {
+      throw "Packages file '$packageConfig' does not exit.";
+    }
+    bytes = file.readAsBytesSync();
+  } else if (packageConfig.isScheme('data')) {
+    final uriData = packageConfig.data!;
+    if (!_isValidUtf8DataUrl(uriData)) {
+      throw "The data resource '$packageConfig' must have a "
+          "'text/plain' mime type and a 'utf-8' or 'US-ASCII' charset.";
+    }
+    bytes = uriData.contentAsBytes();
+  } else {
+    throw "Unknown scheme (${packageConfig.scheme}) for package file at "
+        "'$packageConfig'.";
+  }
+
   try {
-    if (tag == -1) {
-      if (!resource.hasScheme || resource.isScheme('file')) {
-        return _findPackagesConfiguration(traceLoading, resource);
-      } else {
-        return "Unsupported scheme used to locate .packages file:'$resource'.";
-      }
-    } else if (tag == -2) {
-      if (traceLoading) {
-        _log("Handling load of packages map: '$resource'.");
-      }
-      late Uint8List bytes;
-      if (!resource.hasScheme || resource.isScheme('file')) {
-        final file = File.fromUri(resource);
-        if (!file.existsSync()) {
-          return "Packages file '$resource' does not exit.";
-        }
-        bytes = file.readAsBytesSync();
-      } else if (resource.isScheme('data')) {
-        final uriData = resource.data!;
-        if (!_isValidUtf8DataUrl(uriData)) {
-          return "The data resource '$resource' must have a 'text/plain' mime "
-              "type and a 'utf-8' or 'US-ASCII' charset.";
-        }
-        bytes = uriData.contentAsBytes();
-      } else {
-        return "Unknown scheme (${resource.scheme}) for package file at "
-            "'$resource'.";
-      }
-      return _parsePackageConfiguration(traceLoading, resource, bytes);
-    } else {
-      return "Unknown packages request tag: $tag for '$resource'.";
-    }
-  } catch (e, s) {
-    if (traceLoading) {
-      _log("Error handling packages request: $e\n$s");
-    }
-    return "Uncaught error ($e) handling packages request.";
+    final data = utf8.decode(bytes);
+    return _parsePackageConfig(packageConfig, data);
+  } catch (e) {
+    throw "The resource '$packageConfig' is not a valid "
+        "'.dart_tool/package_config.json' file.";
   }
 }
 
@@ -524,17 +330,15 @@ void _setWorkingDirectory(String cwd) {
 
 // Embedder Entrypoint:
 // The embedder calls this method with the value of the --packages command line
-// option. It can point to a ".packages" or a ".dart_tool/package_config.json"
-// file.
+// option. It has to point to ".dart_tool/package_config.json" file.
 @pragma("vm:entry-point")
 String _setPackagesMap(String packagesParam) {
   if (!_setupCompleted) {
     _setupHooks();
   }
+
   // First convert the packages parameter from the command line to a URI which
   // can be handled by the loader code.
-  // TODO(iposva): Consider refactoring the common code below which is almost
-  // shared with resolution of the root script.
   if (_traceLoading) {
     _log("Resolving packages map: $packagesParam");
   }
@@ -598,10 +402,10 @@ Future<Uri?> _getPackageConfigFuture() {
     _log("Request for package config from user code.");
   }
   if (!_packagesReady) {
-    _requestPackagesMap(_packagesConfigUri);
+    _requestPackagesMap();
   }
   // Respond with the packages config (if any) after package resolution.
-  return Future.value(_packageConfig);
+  return Future.value(_packageConfigUri);
 }
 
 Future<Uri?> _resolvePackageUriFuture(Uri packageUri) {
@@ -616,7 +420,7 @@ Future<Uri?> _resolvePackageUriFuture(Uri packageUri) {
     return Future.value(packageUri);
   }
   if (!_packagesReady) {
-    _requestPackagesMap(_packagesConfigUri);
+    _requestPackagesMap();
   }
   Uri? resolvedUri;
   try {
