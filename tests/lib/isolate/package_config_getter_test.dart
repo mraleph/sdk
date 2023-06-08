@@ -12,7 +12,7 @@ final executable = Platform.executable;
 
 main() async {
   // Make a folder structure that has both ".dart_tool/package_config.json" and
-  // ".packages" and ensure VM prefers to use ".packages".
+  // ".packages" and ensure VM does not use .packages.
   await withTempDir((String tempDir) async {
     // Setup bogus ".packages" with "foo -> ..." with invalid mapping.
     final dotPackagesPath = path.join(tempDir, '.packages');
@@ -36,7 +36,7 @@ main() async {
   final uri = await Isolate.packageConfig;
   final expectedUri = Uri.parse('${packageConfigJsonFile.uri}');
   if (uri != expectedUri) {
-    throw 'VM should use .packages file (but used \$uri).';
+    throw 'VM should use \$expectedUri file (but used \$uri).';
   }
 }
 ''');

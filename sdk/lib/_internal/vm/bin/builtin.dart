@@ -36,17 +36,8 @@ _getPrintClosure() => _print;
 // The current working directory when the embedder was launched.
 late Uri _workingDirectory;
 
-// The URI that the root script was loaded from. Remembered so that
-// package imports can be resolved relative to it. The root script is the basis
-// for the root library in the VM.
-Uri? _rootScript;
-
 // packageConfig specified for the isolate.
-late Uri _packageConfigUri;
-
-// Packages are either resolved looking up in a map or resolved from within a
-// package root.
-bool get _packagesReady => (_packageMap != null) || (_packageError != null);
+Uri? _packageConfigUri;
 
 // Error string set if there was an error resolving package configuration.
 // For example not finding a .packages file or packages/ directory, malformed
@@ -92,22 +83,14 @@ _sanitizeWindowsPath(path) {
   return fixedPath;
 }
 
-_setPackagesConfig(String packagesParam) {
-  var packagesName = _sanitizeWindowsPath(packagesParam);
-  var packagesUri = Uri.parse(packagesName);
-  if (!packagesUri.hasScheme) {
-    // Script does not have a scheme, assume that it is a path,
-    // resolve it against the working directory.
-    packagesUri = _workingDirectory.resolveUri(packagesUri);
-  }
-  _packageConfigUri = packagesUri;
-}
-
 // Given a uri with a 'package' scheme, return a Uri that is prefixed with
 // the package root or resolved relative to the package configuration.
-Uri _resolvePackageUri(Uri uri) {
+Uri? _resolvePackageUri(Uri uri) {
   assert(uri.isScheme("package"));
-  assert(_packagesReady);
+
+  if (_packageMap == null) {
+    return null;
+  }
 
   if (uri.host.isNotEmpty) {
     var path = '${uri.host}${uri.path}';
@@ -163,9 +146,15 @@ Uri _resolvePackageUri(Uri uri) {
   return resolvedUri;
 }
 
-void _requestPackagesMap() {
+void _ensurePackageMapIsLoaded() {
+  if (_packageConfigUri == null ||
+      _packageMap != null ||
+      _packageError != null) {
+    return;
+  }
+
   try {
-    _packageMap = _loadPackageConfig(_packageConfigUri);
+    _packageMap = _loadPackageConfig(_packageConfigUri!);
     if (_traceLoading) {
       _log("Setup package map: $_packageMap");
     }
@@ -292,23 +281,22 @@ Map<String, Uri> _loadPackageConfig(Uri packageConfig) {
 // Embedder Entrypoint:
 // The embedder calls this method to initial the package resolution state.
 @pragma("vm:entry-point")
-void _Init(
-    String? packagesConfig, String workingDirectory, String? rootScript) {
-  // Register callbacks and hooks with the rest of core libraries.
+void _setPackageConfig(String? packageConfig) {
   _setupHooks();
-
-  // _workingDirectory must be set first.
-  _workingDirectory = new Uri.directory(workingDirectory);
-
-  // setup _rootScript.
-  if (rootScript != null) {
-    _rootScript = Uri.parse(rootScript);
+  if (_traceLoading) {
+    _log('Setting package config: $packageConfig');
   }
-
   // If the --packages flag was passed, setup _packagesConfig.
-  if (packagesConfig != null) {
+  if (packageConfig != null) {
     _packageMap = null;
-    _setPackagesConfig(packagesConfig);
+    var packagesName = _sanitizeWindowsPath(packageConfig);
+    var packagesUri = Uri.parse(packagesName);
+    if (!packagesUri.hasScheme) {
+      // Script does not have a scheme, assume that it is a path,
+      // resolve it against the working directory.
+      packagesUri = _workingDirectory.resolveUri(packagesUri);
+    }
+    _packageConfigUri = packagesUri;
   }
 }
 
@@ -316,13 +304,11 @@ void _Init(
 // The embedder calls this method with the current working directory.
 @pragma("vm:entry-point")
 void _setWorkingDirectory(String cwd) {
-  if (!_setupCompleted) {
-    _setupHooks();
-  }
+  _setupHooks();
   if (_traceLoading) {
     _log('Setting working directory: $cwd');
   }
-  _workingDirectory = new Uri.directory(cwd);
+  _workingDirectory = Uri.directory(cwd);
   if (_traceLoading) {
     _log('Working directory URI: $_workingDirectory');
   }
@@ -341,9 +327,6 @@ String _setPackagesMap(String packagesParam) {
   // can be handled by the loader code.
   if (_traceLoading) {
     _log("Resolving packages map: $packagesParam");
-  }
-  if (_workingDirectory == null) {
-    throw 'No current working directory set.';
   }
   var packagesName = _sanitizeWindowsPath(packagesParam);
   var packagesUri = Uri.parse(packagesName);
@@ -367,9 +350,6 @@ String _resolveScriptUri(String scriptName) {
   if (_traceLoading) {
     _log("Resolving script: $scriptName");
   }
-  if (_workingDirectory == null) {
-    throw 'No current working directory set.';
-  }
   scriptName = _sanitizeWindowsPath(scriptName);
 
   var scriptUri = Uri.parse(scriptName);
@@ -379,33 +359,29 @@ String _resolveScriptUri(String scriptName) {
     scriptUri = _workingDirectory.resolveUri(scriptUri);
   }
 
-  // Remember the root script URI so that we can resolve packages based on
-  // this location.
-  _rootScript = scriptUri;
-
   if (_traceLoading) {
-    _log('Resolved entry point to: $_rootScript');
+    _log('Resolved entry point to: $scriptUri');
   }
+
   return scriptUri.toString();
 }
 
 // Register callbacks and hooks with the rest of the core libraries.
 @pragma("vm:entry-point")
 _setupHooks() {
-  _setupCompleted = true;
-  VMLibraryHooks.packageConfigUriFuture = _getPackageConfigFuture;
-  VMLibraryHooks.resolvePackageUriFuture = _resolvePackageUriFuture;
+  if (!_setupCompleted) {
+    _setupCompleted = true;
+    VMLibraryHooks.packageConfigUriFuture = _getPackageConfigFuture;
+    VMLibraryHooks.resolvePackageUriFuture = _resolvePackageUriFuture;
+  }
 }
 
 Future<Uri?> _getPackageConfigFuture() {
   if (_traceLoading) {
     _log("Request for package config from user code.");
   }
-  if (!_packagesReady) {
-    _requestPackagesMap();
-  }
-  // Respond with the packages config (if any) after package resolution.
-  return Future.value(_packageConfigUri);
+  _ensurePackageMapIsLoaded();
+  return Future.value(_packageMap != null ? _packageConfigUri : null);
 }
 
 Future<Uri?> _resolvePackageUriFuture(Uri packageUri) {
@@ -419,8 +395,10 @@ Future<Uri?> _resolvePackageUriFuture(Uri packageUri) {
     // Return the incoming parameter if not passed a package: URI.
     return Future.value(packageUri);
   }
-  if (!_packagesReady) {
-    _requestPackagesMap();
+  _ensurePackageMapIsLoaded();
+
+  if (_packageConfigUri == null) {
+    return Future.value(null);
   }
   Uri? resolvedUri;
   try {

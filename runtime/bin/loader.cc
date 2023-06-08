@@ -27,25 +27,18 @@ Dart_Handle Loader::InitForSnapshot(const char* snapshot_uri,
                                     IsolateData* isolate_data) {
   ASSERT(isolate_data != nullptr);
 
-  return Loader::Init(isolate_data->packages_file(),
-                      DartUtils::original_working_directory, snapshot_uri);
+  return Loader::Init(isolate_data->packages_file());
 }
 
 // Initialize package resolution state.
-Dart_Handle Loader::Init(const char* packages_file,
-                         const char* working_directory,
-                         const char* root_script_uri) {
-  const int kNumArgs = 3;
+Dart_Handle Loader::Init(const char* packages_file) {
+  const int kNumArgs = 1;
   Dart_Handle dart_args[kNumArgs];
   dart_args[0] = (packages_file == nullptr)
                      ? Dart_Null()
                      : Dart_NewStringFromCString(packages_file);
-  dart_args[1] = Dart_NewStringFromCString(working_directory);
-  dart_args[2] = (root_script_uri == nullptr)
-                     ? Dart_Null()
-                     : Dart_NewStringFromCString(root_script_uri);
   return Dart_Invoke(DartUtils::LookupBuiltinLib(),
-                     DartUtils::NewString("_Init"), kNumArgs, dart_args);
+                     DartUtils::NewString("_setPackageConfig"), kNumArgs, dart_args);
 }
 
 #if !defined(DART_PRECOMPILED_RUNTIME)

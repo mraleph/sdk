@@ -659,6 +659,7 @@ class ProcessedOptions {
   /// Note: this is a fork from `package:package_config`s discovery to make sure
   /// we use the expected error reporting etc.
   Future<PackageConfig> _findPackages(Uri scriptUri) async {
+    print('searching for packages for $scriptUri');
     Uri dir = scriptUri.resolve('.');
     if (!dir.isAbsolute) {
       reportWithoutLocation(

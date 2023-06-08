@@ -11,7 +11,7 @@ final executable = Platform.executable;
 
 main() async {
   // Run the Dart VM with or without:
-  //     --packages=<packages|package_config>
+  //     --packages=package_config
   final futures = <Future>[];
   for (final runWithPackagesArg in const [true, false]) {
     // Run the isolate with or without
