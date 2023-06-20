@@ -4127,14 +4127,6 @@ Breakpoint* Debugger::GetBreakpointByIdInTheList(intptr_t id,
   return nullptr;
 }
 
-void Debugger::MaybeAsyncStepInto(const Closure& async_op) {
-  if (FLAG_async_debugger && IsSingleStepping()) {
-    // We are single stepping, set a breakpoint on the closure activation
-    // and resume execution so we can hit the breakpoint.
-    AsyncStepInto(async_op);
-  }
-}
-
 void Debugger::AsyncStepInto(const Closure& awaiter) {
   Zone* zone = Thread::Current()->zone();
   CallerClosureFinder caller_closure_finder(zone);
