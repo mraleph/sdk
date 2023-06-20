@@ -709,3 +709,43 @@ Future runDDSTests(List<String> mainArgs, List<DDSTest> tests,
     );
   }
 }
+
+// This entry point can be used to update LINE_X = ... values in the tests.
+void main(List<String> args) {
+  if (args.length != 2 &&
+      args[0] != 'update-lines' &&
+      args[1].endsWith('.dart')) {
+    print(
+        'Usage: ${Platform.executable} ${Platform.script} update-lines <*_test.dart>');
+    exit(1);
+  }
+
+  final content = File(args[1]).readAsLinesSync();
+
+  final lineConstantPattern = RegExp(r'^const( int)? LINE_\w+ = \d+;$');
+  final prefix =
+      content.takeWhile((line) => !lineConstantPattern.hasMatch(line)).toList();
+  final suffix = content
+      .skip(prefix.length)
+      .skipWhile(lineConstantPattern.hasMatch)
+      .toList();
+
+  final lineCommentPattern =
+      RegExp(r' // (LINE_\w+)\.?$|/\*\s*(LINE_\w+)\s*\*/');
+  final mapping = <String, int>{};
+  for (var i = 0; i < suffix.length; i++) {
+    final line = suffix[i];
+    final m = lineCommentPattern.firstMatch(line);
+    if (m != null) {
+      mapping[(m[1] ?? m[2])!] = i;
+    }
+  }
+
+  File(args[1]).writeAsString([
+    ...prefix,
+    for (var entry in mapping.entries)
+      'const int ${entry.key} = ${1 + prefix.length + mapping.length + entry.value};',
+    ...suffix,
+  ].join('\n'));
+  print('Updated ${args[1]}');
+}
