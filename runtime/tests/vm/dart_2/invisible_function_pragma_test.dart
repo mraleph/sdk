@@ -4,7 +4,7 @@
 
 // @dart = 2.9
 
-import 'causal_stacks/utils.dart';
+import 'awaiter_stacks/utils.dart';
 
 main() async {
   StackTrace trace = StackTrace.empty;
