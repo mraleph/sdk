@@ -8,24 +8,35 @@ import 'dart:developer';
 import 'service_test_common.dart';
 import 'test_helper.dart';
 
-const LINE_A = 19;
-const LINE_B = 20;
-const LINE_C = 21;
-const LINE_D = 26;
-const LINE_E = 27;
-const LINE_F = 28;
+// LINE* values can be updated by running: test_helper.dart update-lines $path.
+const int LINE_A = 22;
+const int LINE_B = 23;
+const int LINE_C = 24;
+const int LINE_G = 29;
+const int LINE_D = 36;
+const int LINE_E = 37;
+const int LINE_F = 38;
+const int LINE_H = 39;
 
-helper() async {
+Future<int> helper() async {
   await null; // LINE_A.
-  print('helper'); // LINE_B.
-  print('foobar'); // LINE_C.
+  print('[helper] after await 1'); // LINE_B.
+  print('[helper] after await 2 at ${StackTrace.current}'); // LINE_C.
+  return 42;
 }
 
 testMain() async {
+  int handleValue(int v) /* LINE_G */ {
+    print('handleValue($v) at ${StackTrace.current}');
+    return v + 4200;
+  }
+
+  print('[testMain] before break');
   debugger();
-  print('mmmmm'); // LINE_D.
-  await helper(); // LINE_E.
-  print('z'); // LINE_F.
+  print('[testMain] after break, before await'); // LINE_D.
+  final v = await helper().then(handleValue); // LINE_E
+  final u = handleValue(v); // LINE_F.
+  print('[testMain] v=$v u=$u'); // LINE_H.
 }
 
 var tests = <IsolateTest>[
@@ -50,7 +61,15 @@ var tests = <IsolateTest>[
   stepOut, // out of helper to awaiter testMain.
 
   hasStoppedAtBreakpoint,
+  stoppedAtLine(LINE_G),
+  stepOut, // out of helper to awaiter testMain.
+
+  hasStoppedAtBreakpoint,
   stoppedAtLine(LINE_F),
+  stepOver,
+
+  hasStoppedAtBreakpoint,
+  stoppedAtLine(LINE_H),
 ];
 
 main(args) => runIsolateTests(args, tests,

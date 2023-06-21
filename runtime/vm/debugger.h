@@ -375,10 +375,10 @@ class ActivationFrame : public ZoneAllocated {
 
   void PrintToJSONObject(JSONObject* jsobj);
 
-  // Get Closure that await'ed this async frame.
-  ObjectPtr GetAsyncAwaiter(CallerClosureFinder* caller_closure_finder);
-
   bool HandlesException(const Instance& exc_obj);
+
+  bool has_catch_error() const { return has_catch_error_; }
+  void set_has_catch_error(bool value) { has_catch_error_ = value; }
 
  private:
   void PrintToJSONObjectRegular(JSONObject* jsobj);
@@ -446,6 +446,7 @@ class ActivationFrame : public ZoneAllocated {
   ZoneGrowableArray<intptr_t> desc_indices_;
   PcDescriptors& pc_desc_ = PcDescriptors::ZoneHandle();
 
+  bool has_catch_error_ = false;
 
   friend class Debugger;
   friend class DebuggerStackTrace;

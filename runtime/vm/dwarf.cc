@@ -415,6 +415,14 @@ InliningNode* Dwarf::ExpandInliningTree(const Code& code) {
       }
       case CodeSourceMapOps::kAdvancePC: {
         current_pc_offset += arg1;
+        if (arg1 == 0) {
+          // This happens at the start of the function where we emit a special
+          // kAdvancePC 0 instruction to record information about the function
+          // itself. We need to advance current_pc_offset a bit to prevent
+          // starting inlining interval directy at the start of the function
+          // itself.
+          current_pc_offset += 1;
+        }
         break;
       }
       case CodeSourceMapOps::kPushFunction: {
