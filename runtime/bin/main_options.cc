@@ -8,7 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if !defined(DART_PRECOMPILED_RUNTIME) && !defined(EXCLUDE_DARTDEV)
 #include "bin/dartdev_isolate.h"
+#endif
 #include "bin/error_exit.h"
 #include "bin/file_system_watcher.h"
 #include "bin/options.h"
@@ -535,7 +537,7 @@ bool Options::ParseArguments(int argc,
   bool run_script = false;
   // Get the script name.
   if (i < argc) {
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) && !defined(EXCLUDE_DARTDEV)
     // If the script name is a valid file or a URL, we'll run the script
     // directly. Otherwise, this might be a DartDev command and we need to try
     // to find the DartDev snapshot so we can forward the command and its
@@ -551,7 +553,7 @@ bool Options::ParseArguments(int argc,
       run_script = true;
       i++;
     }
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) && !defined(EXCLUDE_DARTDEV)
     else {  // NOLINT
       DartDevIsolate::set_should_run_dart_dev(true);
     }
@@ -566,7 +568,7 @@ bool Options::ParseArguments(int argc,
     }
 #endif  // !defined(DART_PRECOMPILED_RUNTIME)
   }
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) && !defined(EXCLUDE_DARTDEV)
   else if (!Options::disable_dart_dev()) {  // NOLINT
     // Handles following invocation arguments:
     //   - dart help
@@ -688,7 +690,7 @@ bool Options::ParseArguments(int argc,
           dart_options->AddArgument("--enable-service-port-fallback");
         }
       }
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) && !defined(EXCLUDE_DARTDEV)
       // Bring any --packages option into the dartdev command
       if (DartDevIsolate::should_run_dart_dev() &&
           packages_argument != nullptr) {

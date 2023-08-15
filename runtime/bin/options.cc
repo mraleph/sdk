@@ -4,6 +4,8 @@
 
 #include "bin/options.h"
 
+#include "platform/utils.h"
+
 namespace dart {
 namespace bin {
 

@@ -8,7 +8,6 @@
 #include "bin/eventhandler.h"
 #include "bin/file.h"
 #include "bin/io_buffer.h"
-#include "bin/isolate_data.h"
 #include "bin/lockers.h"
 #include "bin/process.h"
 #include "bin/thread.h"

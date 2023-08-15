@@ -5,7 +5,7 @@
 #include "bin/elf_loader.h"
 #include "bin/error_exit.h"
 #include "bin/file.h"
-
+#include "bin/isolate_data.h"
 #include "bin/options.h"
 #include "bin/platform.h"
 

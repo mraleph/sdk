@@ -5,6 +5,7 @@
 #ifndef RUNTIME_PLATFORM_PRIORITY_QUEUE_H_
 #define RUNTIME_PLATFORM_PRIORITY_QUEUE_H_
 
+#include "platform/allocation.h"
 #include "platform/assert.h"
 #include "platform/globals.h"
 #include "platform/hashmap.h"

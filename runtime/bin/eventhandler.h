@@ -7,13 +7,14 @@
 
 #include "bin/builtin.h"
 #include "bin/dartutils.h"
-#include "bin/isolate_data.h"
 
 #include "platform/hashmap.h"
 #include "platform/priority_queue.h"
 
 namespace dart {
 namespace bin {
+
+class EventHandler;
 
 // Flags used to provide information and actions to the eventhandler
 // when sending a message about a file descriptor. These flags should

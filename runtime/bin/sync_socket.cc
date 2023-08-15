@@ -6,7 +6,6 @@
 
 #include "bin/dartutils.h"
 #include "bin/io_buffer.h"
-#include "bin/isolate_data.h"
 #include "bin/lockers.h"
 #include "bin/thread.h"
 #include "bin/utils.h"

@@ -6,7 +6,9 @@
 #define RUNTIME_BIN_MAIN_OPTIONS_H_
 
 #include "bin/dartutils.h"
+#if !defined(DART_PRECOMPILED_RUNTIME)
 #include "bin/dfe.h"
+#endif
 #include "platform/globals.h"
 #include "platform/growable_array.h"
 #include "platform/hashmap.h"

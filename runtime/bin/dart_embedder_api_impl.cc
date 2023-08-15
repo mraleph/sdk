@@ -6,12 +6,16 @@
 
 #include "bin/dartutils.h"
 #include "bin/eventhandler.h"
+#if !defined(DART_PRECOMPILED_RUNTIME) || !defined(PRODUCT)
 #include "bin/isolate_data.h"
+#endif
 #include "bin/process.h"
 #include "bin/secure_socket_filter.h"
 #include "bin/thread.h"
 #include "bin/utils.h"
+#if !defined(PRODUCT)
 #include "bin/vmservice_impl.h"
+#endif
 
 namespace dart {
 namespace embedder {
@@ -57,6 +61,7 @@ void Cleanup() {
   bin::Process::Cleanup();
 }
 
+#if !defined(DART_PRECOMPILED_RUNTIME)
 Dart_Isolate CreateKernelServiceIsolate(const IsolateCreationData& data,
                                         const uint8_t* buffer,
                                         intptr_t buffer_size,
@@ -82,7 +87,9 @@ Dart_Isolate CreateKernelServiceIsolate(const IsolateCreationData& data,
   Dart_ExitIsolate();
   return kernel_isolate;
 }
+#endif
 
+#if !defined(PRODUCT)
 Dart_Isolate CreateVmServiceIsolate(const IsolateCreationData& data,
                                     const VmServiceConfiguration& config,
                                     const uint8_t* isolate_data,
@@ -118,7 +125,9 @@ Dart_Isolate CreateVmServiceIsolate(const IsolateCreationData& data,
   Dart_ExitIsolate();
   return service_isolate;
 }
+#endif
 
+#if !defined(PRODUCT) && !defined(DART_PRECOMPILED_RUNTIME)
 Dart_Isolate CreateVmServiceIsolateFromKernel(
     const IsolateCreationData& data,
     const VmServiceConfiguration& config,
@@ -155,6 +164,7 @@ Dart_Isolate CreateVmServiceIsolateFromKernel(
   Dart_ExitIsolate();
   return service_isolate;
 }
+#endif
 
 }  // namespace embedder
 }  // namespace dart

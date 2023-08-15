@@ -14,9 +14,13 @@
 #include "bin/builtin.h"
 #include "bin/console.h"
 #include "bin/crashpad.h"
+#if !defined(DART_PRECOMPILED_RUNTIME) && !defined(EXCLUDE_DARTDEV)
 #include "bin/dartdev_isolate.h"
+#endif
 #include "bin/dartutils.h"
+#if !defined(DART_PRECOMPILED_RUNTIME)
 #include "bin/dfe.h"
+#endif
 #include "bin/error_exit.h"
 #include "bin/eventhandler.h"
 #include "bin/file.h"
@@ -42,10 +46,11 @@
 #include "platform/utils.h"
 
 extern "C" {
-extern const uint8_t kDartVmSnapshotData[];
-extern const uint8_t kDartVmSnapshotInstructions[];
-extern const uint8_t kDartCoreIsolateSnapshotData[];
-extern const uint8_t kDartCoreIsolateSnapshotInstructions[];
+extern const uint8_t kDartVmSnapshotData[] __attribute__((weak));
+extern const uint8_t kDartVmSnapshotInstructions[] __attribute__((weak));
+extern const uint8_t kDartCoreIsolateSnapshotData[] __attribute__((weak));
+extern const uint8_t kDartCoreIsolateSnapshotInstructions[]
+    __attribute__((weak));
 }
 
 namespace dart {
@@ -375,7 +380,7 @@ static Dart_Isolate IsolateSetupHelper(Dart_Isolate isolate,
   const char* isolate_name = nullptr;
   result = Dart_StringToCString(Dart_DebugName(), &isolate_name);
   CHECK_RESULT(result);
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) && !defined(EXCLUDE_DARTDEV)
   if (strstr(isolate_name, DART_DEV_ISOLATE_NAME) != nullptr) {
     Dart_SetShouldPauseOnStart(false);
     Dart_SetShouldPauseOnExit(false);
@@ -395,7 +400,8 @@ static Dart_Isolate IsolateSetupHelper(Dart_Isolate isolate,
   return isolate;
 }
 
-#if !defined(EXCLUDE_CFE_AND_KERNEL_PLATFORM)
+#if !defined(EXCLUDE_CFE_AND_KERNEL_PLATFORM) &&                               \
+    !defined(DART_PRECOMPILED_RUNTIME)
 // Returns newly created Kernel Isolate on success, nullptr on failure.
 // For now we only support the kernel isolate coming up from an
 // application snapshot or from a .dill file.
@@ -581,7 +587,7 @@ static Dart_Isolate CreateAndSetupServiceIsolate(const char* script_uri,
 #endif  // !defined(PRODUCT)
 }
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) && !defined(EXCLUDE_DARTDEV)
 
 static Dart_Isolate CreateAndSetupDartDevIsolate(const char* script_uri,
                                                  const char* packages_config,
@@ -878,7 +884,7 @@ static Dart_Isolate CreateIsolateGroupAndSetup(const char* script_uri,
   }
 #endif  // !defined(EXCLUDE_CFE_AND_KERNEL_PLATFORM)
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) && !defined(EXCLUDE_DARTDEV)
   if (strcmp(script_uri, DART_DEV_ISOLATE_NAME) == 0) {
     return CreateAndSetupDartDevIsolate(script_uri, package_config, flags,
                                         error, &exit_code);
@@ -1383,7 +1389,7 @@ void main(int argc, char** argv) {
   bool ran_dart_dev = false;
   bool should_run_user_program = true;
   bool force_no_sound_null_safety = false;
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) && !defined(EXCLUDE_DARTDEV)
   if (DartDevIsolate::should_run_dart_dev() && !Options::disable_dart_dev() &&
       Options::gen_snapshot_kind() == SnapshotKind::kNone) {
     DartDevIsolate::DartDev_Result dartdev_result = DartDevIsolate::RunDartDev(

@@ -6,7 +6,10 @@
 
 #include "bin/builtin.h"
 #include "bin/dartutils.h"
+#if !defined(DART_PRECOMPILED_RUNTIME) &&                                      \
+    !defined(EXCLUDE_CFE_AND_KERNEL_PLATFORM)
 #include "bin/dfe.h"
+#endif
 #include "bin/error_exit.h"
 #include "bin/file.h"
 #include "bin/gzip.h"
@@ -19,7 +22,8 @@
 namespace dart {
 namespace bin {
 
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) &&                                      \
+    !defined(EXCLUDE_CFE_AND_KERNEL_PLATFORM)
 extern DFE dfe;
 #endif
 

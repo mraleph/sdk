@@ -7,7 +7,9 @@
 #include "bin/snapshot_utils.h"
 
 #include "bin/dartutils.h"
+#if !defined(DART_PRECOMPILED_RUNTIME)
 #include "bin/dfe.h"
+#endif
 #include "bin/elf_loader.h"
 #include "bin/error_exit.h"
 #include "bin/file.h"
@@ -719,7 +721,8 @@ void Snapshot::WriteAppSnapshot(const char* filename,
 void Snapshot::GenerateKernel(const char* snapshot_filename,
                               const char* script_name,
                               const char* package_config) {
-#if !defined(EXCLUDE_CFE_AND_KERNEL_PLATFORM) && !defined(TESTING)
+#if !defined(EXCLUDE_CFE_AND_KERNEL_PLATFORM) && !defined(TESTING) &&          \
+    !defined(DART_PRECOMPILED_RUNTIME)
   ASSERT(Dart_CurrentIsolate() == nullptr);
 
   uint8_t* kernel_buffer = nullptr;
