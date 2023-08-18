@@ -61,6 +61,12 @@ void Cleanup() {
   bin::Process::Cleanup();
 }
 
+Dart_Handle InitializeCoreLibraries() {
+  return bin::DartUtils::PrepareForScriptLoading(/*is_service_isolate=*/false,
+                                                   /*trace_loading=*/false);
+
+}
+
 #if !defined(DART_PRECOMPILED_RUNTIME)
 Dart_Isolate CreateKernelServiceIsolate(const IsolateCreationData& data,
                                         const uint8_t* buffer,

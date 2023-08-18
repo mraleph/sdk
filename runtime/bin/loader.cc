@@ -93,7 +93,7 @@ Dart_Handle Loader::LibraryTagHandler(Dart_LibraryTag tag,
     }
     return Dart_DefaultCanonicalizeUrl(library_url, url);
   }
-#if !defined(DART_PRECOMPILED_RUNTIME)
+#if !defined(DART_PRECOMPILED_RUNTIME) && !defined(EXCLUDE_CFE_AND_KERNEL_PLATFORM)
   if (tag == Dart_kKernelTag) {
     uint8_t* kernel_buffer = nullptr;
     intptr_t kernel_buffer_size = 0;

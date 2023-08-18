@@ -26,6 +26,8 @@ DART_WARN_UNUSED_RESULT bool InitOnce(char** error);
 // Dart VM.
 void Cleanup();
 
+DART_WARN_UNUSED_RESULT Dart_Handle InitializeCoreLibraries();
+
 // Common arguments that are passed to isolate creation callback and to
 // API methods that create isolates.
 struct IsolateCreationData {
