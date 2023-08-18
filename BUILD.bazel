@@ -1,0 +1,668 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+load(
+    "dart_sdk.bzl",
+    "DART_EMBEDDER_API_SOURCES",
+    "SDK_ROOT",
+    "aot_binary",
+    "dart_executable",
+    "dart_io",
+    "dart_target_configuration",
+    "libdart",
+    "prefix",
+    "target_defines",
+    "vm_library",
+    "with_target_defines",
+)
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["runtime/bin/builtin.cc"] + DART_EMBEDDER_API_SOURCES)
+
+vm_library(
+    compiler = "aot",
+)
+
+vm_library(
+    compiler = "aot",
+    runtime_mode = "product",
+)
+
+vm_library(
+    compiler = "jit",
+    runtime_mode = "product",
+)
+
+vm_library(
+    compiler = "precompiler",
+    runtime_mode = "product",
+)
+
+dart_executable(
+    name = "gen_snapshot",
+    srcs = prefix(
+        "runtime/bin",
+        [
+            "address_sanitizer.cc",
+            "builtin.cc",
+            "builtin.h",
+            "error_exit.cc",
+            "error_exit.h",
+            "elf_loader.h",
+            "elf_loader.cc",
+            "virtual_memory.h",
+            "virtual_memory_fuchsia.cc",
+            "virtual_memory_posix.cc",
+            "virtual_memory_win.cc",
+            "gzip.cc",
+            "gzip.h",
+            "isolate_data.h",
+            "isolate_data.cc",
+            "loader.cc",
+            "loader.h",
+            "snapshot_utils.cc",
+            "snapshot_utils.h",
+            "builtin_gen_snapshot.cc",
+            "dfe.cc",
+            "dfe.h",
+            "gen_snapshot.cc",
+            "options.cc",
+            "options.h",
+            "vmservice_impl.cc",
+            "vmservice_impl.h",
+        ],
+    ),
+    compiler = "precompiler",
+    no_main_sources = True,
+    runtime_mode = "product",
+    deps = [],
+)
+
+target_defines(
+    name = "target_defines",
+    build_setting_default = [],
+)
+
+dart_target_configuration(name = "target_configuration")
+
+[
+    with_target_defines(
+        name = "%s_%s/gen_snapshot" % (os, cpu),
+        binary = ":gen_snapshot",
+        target_cpu = cpu,
+        target_os = os,
+    )
+    for os in [
+        "linux",
+        "android",
+    ]
+    for cpu in [
+        "x86_64",
+        "arm32",
+        "arm64",
+    ]
+]
+
+dart_executable(
+    name = "dart",
+    srcs = prefix(
+        "runtime/bin",
+        [
+            "builtin.cc",
+            "dfe.cc",
+            "dfe.h",
+            "gzip.cc",
+            "gzip.h",
+            "loader.cc",
+            "loader.h",
+            "main.cc",
+            "main_impl.cc",
+            "main_impl.h",
+            "snapshot_empty.cc",
+        ],
+    ),
+    compiler = "jit",
+    runtime_mode = "product",
+    #
+    #  if (dart_runtime_mode == "release") {
+    #    extra_sources += [ "observatory_assets_empty.cc" ]
+    #  } else {
+    #    extra_deps += [ "../observatory:standalone_observatory_archive" ]
+    #  }
+    #
+    deps = [
+        # ":libdart_platform_precompiled_runtime",
+        # ":libdart_precompiled_runtime",
+        # ":elf_loader",
+    ],
+)
+
+dart_executable(
+    name = "dart_precompiled_runtime",
+    srcs = prefix(
+        "runtime/bin",
+        [
+            "builtin.cc",
+            "gzip.cc",
+            "gzip.h",
+            "loader.cc",
+            "loader.h",
+            "main.cc",
+            "main_impl.cc",
+            "main_impl.h",
+            "snapshot_empty.cc",
+        ],
+    ),
+    compiler = "aot",
+    #
+    #  if (dart_runtime_mode == "release") {
+    #    extra_sources += [ "observatory_assets_empty.cc" ]
+    #  } else {
+    #    extra_deps += [ "../observatory:standalone_observatory_archive" ]
+    #  }
+    #
+    deps = [
+        # ":libdart_platform_precompiled_runtime",
+        # ":libdart_precompiled_runtime",
+        # ":elf_loader",
+    ],
+)
+
+dart_io()
+
+dart_io(runtime_mode = "product")
+
+genrule(
+    name = "generate_version_cc_file",
+    srcs = [
+        "tools/utils.py",
+        "tools/VERSION",
+        "runtime/vm/version_in.cc",
+        ".git/logs/HEAD",
+    ],
+    outs = ["gen/runtime/version.cc"],
+    cmd = "./$(location tools/make_version.py) --quiet --output $(location gen/runtime/version.cc) --input $(location runtime/vm/version_in.cc) --no_sdk_hash",
+    tools = ["tools/make_version.py"],
+)
+
+# Producing Dart platform file
+
+[genrule(
+    name = "vm_platform_%s" % runtime_mode,
+    srcs = glob([
+        "sdk/**/*",
+        "pkg/front_end/**",
+        "pkg/_fe_analyzer_shared/**",
+        "pkg/kernel/**",
+        "pkg/vm/**",
+        "pkg/compiler/**",
+        "pkg/dart2wasm/**",
+        "pkg/build_integration/**",
+        "third_party/pkg/package_config/**",
+        "pkg/dev_compiler/**",
+        "pkg/_js_interop_checks/**",
+        "pkg/meta/**",
+        "third_party/pkg/collection/**",
+        "pkg/wasm_builder/**",
+    ]) + [".dart_tool/package_config.json"],
+    outs = [
+        "platform_%s.dill" % runtime_mode,
+        "outline_%s.dill" % runtime_mode,
+    ],
+    cmd = " ".join([
+        "$(location tools/sdks/dart-sdk/bin/dart)",
+        "--packages=$(location .dart_tool/package_config.json)",
+        "$(location pkg/front_end/tool/_fasta/compile_platform.dart)",
+        "dart:core",
+        "-Ddart.vm.product=%s" % (runtime_mode == "product"),
+        "-Ddart.isVM=true",
+        "--no-deps",
+        "--nnbd-agnostic",
+        "--exclude-source",
+        "--single-root-scheme=org-dartlang-sdk",
+        "--single-root-base=$(location sdk/lib/libraries.json)/../../..",
+        "org-dartlang-sdk:///sdk/lib/libraries.json",
+        "none",
+        "$(location platform_%s.dill)" % runtime_mode,
+        "$(location outline_%s.dill)" % runtime_mode,
+    ]),
+    tools = [
+        "tools/sdks/dart-sdk/bin/dart",
+    ],
+) for runtime_mode in ("release", "product")]
+
+aot_binary(
+    name = "gen_kernel",
+    srcs = glob([
+        "pkg/_fe_analyzer_shared/**",
+        "pkg/_js_interop_checks/**",
+        "pkg/build_integration/**",
+        "pkg/compiler/**",
+        "pkg/dart2wasm/**",
+        "pkg/dev_compiler/**",
+        "pkg/front_end/**",
+        "pkg/kernel/**",
+        "pkg/meta/**",
+        "pkg/vm/**",
+        "pkg/wasm_builder/**",
+        "third_party/pkg/args/**",
+        "third_party/pkg/collection/**",
+        "third_party/pkg/crypto/**",
+        "third_party/pkg/package_config/**",
+        "third_party/pkg/source_span/**",
+        "third_party/pkg/string_scanner/**",
+        "third_party/pkg/term_glyph/**",
+        "third_party/pkg/typed_data/**",
+        "third_party/pkg/path/**",
+        "third_party/pkg/yaml/**",
+    ]) + [".dart_tool/package_config.json"],
+    script = "pkg/vm/bin/gen_kernel.dart",
+)
+
+libdart(
+    compiler = "aot",
+    runtime_mode = "product",
+)
+
+# Dependencies
+
+[
+    config_setting(
+        name = "cpu_%s" % cpu,
+        values = {"cpu": cpu},
+    )
+    for cpu in [
+        "armeabi-v7a",
+        "arm64-v8a",
+        "arm",
+        "x86_64",
+        "x86_32",
+        "k8",
+    ]
+]
+
+selects.config_setting_group(
+    name = "any_x86_32",
+    match_any = [
+        ":cpu_x86_32",
+    ],
+)
+
+selects.config_setting_group(
+    name = "any_x86_64",
+    match_any = [
+        ":cpu_x86_64",
+        ":cpu_k8",
+    ],
+)
+
+selects.config_setting_group(
+    name = "any_arm32",
+    match_any = [
+        ":cpu_armeabi-v7a",
+        ":cpu_arm",
+    ],
+)
+
+selects.config_setting_group(
+    name = "any_arm64",
+    match_any = [
+        ":cpu_arm64-v8a",
+    ],
+)
+
+config_setting(
+    name = "android",
+    values = {
+        "crosstool_top": "@androidndk//:toolchain",
+    },
+)
+
+config_setting(
+    name = "macos",
+    constraint_values = [
+        "@platforms//os:macos",
+    ],
+)
+
+config_setting(
+    name = "linux",
+    values = {
+        "crosstool_top": "@bazel_tools//tools/cpp:toolchain",
+    },
+)
+
+[
+    selects.config_setting_group(
+        name = "%s_%s" % (os, cpu),
+        match_all = [
+            ":%s" % os,
+            ":any_%s" % cpu,
+        ],
+    )
+    for os in [
+        "linux",
+        "android",
+    ]
+    for cpu in [
+        "x86_64",
+        "arm32",
+        "arm64",
+    ]
+]
+
+config_setting(
+    name = "macos_arm64",
+    constraint_values = [
+        "@platforms//os:macos",
+        "@platforms//cpu:arm64",
+    ],
+)
+
+selects.config_setting_group(
+    name = "any_arm",
+    match_any = [
+        ":any_arm64",
+        ":any_arm32",
+    ],
+)
+
+selects.config_setting_group(
+    name = "any_x86",
+    match_any = [
+        ":any_x86_64",
+        ":any_x86_32",
+    ],
+)
+
+cc_library(
+    name = "zlib",
+    srcs = [
+        "third_party/zlib/adler32.c",
+        "third_party/zlib/chromeconf.h",
+        "third_party/zlib/compress.c",
+        "third_party/zlib/contrib/optimizations/insert_string.h",
+        "third_party/zlib/cpu_features.c",
+        "third_party/zlib/cpu_features.h",
+        "third_party/zlib/crc32.c",
+        "third_party/zlib/crc32.h",
+        "third_party/zlib/deflate.c",
+        "third_party/zlib/deflate.h",
+        "third_party/zlib/gzclose.c",
+        "third_party/zlib/gzguts.h",
+        "third_party/zlib/gzlib.c",
+        "third_party/zlib/gzread.c",
+        "third_party/zlib/gzwrite.c",
+        "third_party/zlib/infback.c",
+        "third_party/zlib/inffast.c",
+        "third_party/zlib/inffast.h",
+        "third_party/zlib/inffixed.h",
+        "third_party/zlib/inflate.h",
+        "third_party/zlib/inftrees.c",
+        "third_party/zlib/inftrees.h",
+        "third_party/zlib/trees.c",
+        "third_party/zlib/trees.h",
+        "third_party/zlib/uncompr.c",
+        "third_party/zlib/zconf.h",
+        "third_party/zlib/zlib.h",
+        "third_party/zlib/zutil.c",
+        "third_party/zlib/zutil.h",
+
+        # zlib_adler32_simd
+        "third_party/zlib/adler32_simd.c",
+        "third_party/zlib/adler32_simd.h",
+
+        # zlib_crc32_simd
+        "third_party/zlib/crc32_simd.c",
+        "third_party/zlib/crc32_simd.h",
+
+        # zlib_inflate_chunk_simd
+        "third_party/zlib/contrib/optimizations/chunkcopy.h",
+        "third_party/zlib/contrib/optimizations/inffast_chunk.c",
+        "third_party/zlib/contrib/optimizations/inffast_chunk.h",
+        "third_party/zlib/contrib/optimizations/inflate.c",
+
+        # zlib_slide_hash_simd
+        "third_party/zlib/slide_hash_simd.h",
+    ] + select({
+        ":any_x86": ["third_party/zlib/crc_folding.c"],
+        "//conditions:default": [],
+    }),
+    hdrs = [
+        "third_party/zlib/zconf.h",
+        "third_party/zlib/zlib.h",
+    ],
+    copts = [
+        "-I" + SDK_ROOT + "/third_party/zlib",
+        "-Iexternal/androidndk/sources/android/cpufeatures",
+    ] + select({
+        ":any_x86": [
+            "-msse2",
+            "-msse4.2",
+            "-mpclmul",
+            "-march=x86-64",
+        ],
+        ":any_arm": [
+        ],
+    }),
+    local_defines = [
+        "ZLIB_IMPLEMENTATION",
+    ] + select({
+        ":any_x86": [
+            "ADLER32_SIMD_SSSE3",
+            "INFLATE_CHUNK_SIMD_SSE2",
+            "INFLATE_CHUNK_READ_64LE",
+            "CRC32_SIMD_SSE42_PCLMUL",
+            "DEFLATE_SLIDE_HASH_SSE2",
+            "X86_NOT_WINDOWS",
+        ],
+        ":any_arm": [
+            "ADLER32_SIMD_NEON",
+            "INFLATE_CHUNK_SIMD_NEON",
+            "INFLATE_CHUNK_READ_64LE",
+            "DEFLATE_SLIDE_HASH_NEON",
+        ],
+    }) + selects.with_or({
+        (
+            ":any_arm64",
+            ":any_x86_64",
+        ): [
+            "INFLATE_CHUNK_READ_64LE",
+        ],
+        (
+            ":any_arm32",
+            ":any_x86_32",
+        ): [
+        ],
+    }) + select({
+        ":linux_arm64": ["ARMV8_OS_LINUX"],
+        ":android_arm64": ["ARMV8_OS_ANDROID"],
+        ":macos_arm64": ["ARMV8_OS_MACOS"],
+        "//conditions:default": [],
+    }),
+    deps = select({
+        ":android_arm64": ["@androidndk//:cpufeatures"],
+        "//conditions:default": [],
+    }),
+)
+
+cc_library(
+    name = "libdouble_conversion",
+    srcs = prefix(
+        "runtime/third_party/double-conversion/src",
+        [
+            "bignum.cc",
+            "bignum-dtoa.cc",
+            "cached-powers.cc",
+            "diy-fp.cc",
+            "double-conversion.cc",
+            "fast-dtoa.cc",
+            "fixed-dtoa.cc",
+            "strtod.cc",
+            "bignum.h",
+            "bignum-dtoa.h",
+            "cached-powers.h",
+            "diy-fp.h",
+            "fast-dtoa.h",
+            "fixed-dtoa.h",
+            "ieee.h",
+            "strtod.h",
+            "utils.h",
+        ],
+    ),
+    hdrs = prefix(
+        "runtime/third_party/double-conversion/src",
+        [
+            "double-conversion.h",
+        ],
+    ),
+    copts = [
+        "-Iexternal/dart-sdk/runtime/third_party/double-conversion/src",
+        "-Iexternal/dart-sdk/.",
+        "-Iexternal/dart-sdk/gen",
+        "-Iexternal/dart-sdk/runtime/include",
+    ],
+    local_defines = ["NDEBUG"],
+    deps = [],
+)
+
+# ICU
+
+filegroup(
+    name = "icudata",
+    srcs = prefix(
+        "third_party/icu",
+        ["common/icudtl.dat"],
+    ),
+)
+
+cc_library(
+    name = "icuuc",
+    srcs = glob(prefix(
+        "third_party/icu",
+        [
+            "source/common/**/*.h",
+            "source/common/**/*.cpp",
+        ],
+    )),
+    copts = select({
+        "@platforms//os:windows": [
+            "/wd4005",  # Macro redefinition.
+            "/wd4068",  # Unknown pragmas.
+            "/wd4267",  # Conversion from size_t on 64-bits.
+            "/utf-8",  # ICU source files are in UTF-8.
+        ],
+        "//conditions:default": [
+            "-Wno-unused-function",
+            "-Wno-parentheses",
+            "-Wno-unused-function",
+            "-Wno-unused-variable",
+            "-Wno-deprecated-declarations",
+        ],
+    }),
+    data = [":icudata"],
+    defines = [
+        "U_COMMON_IMPLEMENTATION",
+        "U_ICUDATAENTRY_IN_COMMON",
+        "HAVE_DLOPEN=0",
+        "UCONFIG_ONLY_HTML_CONVERSION=1",
+        "U_CHARSET_IS_UTF8=1",
+        "U_USING_ICU_NAMESPACE=0",
+        "U_ENABLE_DYLOAD=0",
+        "USE_CHROMIUM_ICU=1",
+        "U_ENABLE_TRACING=1",
+        "U_ENABLE_RESOURCE_TRACING=0",
+        "UNISTR_FROM_STRING_EXPLICIT=",
+        "UNISTR_FROM_CHAR_EXPLICIT=",
+    ] + select({
+        "@platforms//os:windows": [
+            "U_STATIC_IMPLEMENTATION",
+            "UNICODE",
+            "_UNICODE",
+        ],
+        "//conditions:default": [],
+    }),
+    includes = prefix(
+        "third_party/icu",
+        [
+            "source/common",
+            "source/i18n",
+        ],
+    ),
+    tags = ["requires-rtti"],
+    alwayslink = 1,
+)
+
+cc_library(
+    name = "icui18n",
+    srcs = glob(prefix(
+        "third_party/icu",
+        [
+            "source/i18n/**/*.h",
+            "source/i18n/**/*.cpp",
+        ],
+    )),
+    copts = select({
+        "@platforms//os:windows": [
+            "/wd4005",  # Macro redefinition.
+            "/wd4068",  # Unknown pragmas.
+            "/wd4267",  # Conversion from size_t on 64-bits.
+            "/utf-8",  # ICU source files are in UTF-8.
+        ],
+        "//conditions:default": [],
+    }),
+    defines = [
+        "U_I18N_IMPLEMENTATION",
+    ] + select({
+        "@platforms//os:windows": [
+            "U_STATIC_IMPLEMENTATION",
+            "UNICODE",
+            "_UNICODE",
+        ],
+        "//conditions:default": [],
+    }),
+    deps = [":icuuc"],
+    alwayslink = 1,
+)
+
+cc_library(
+    name = "icu",
+    srcs = prefix(
+        "third_party/icu",
+        [
+            "source/stubdata/stubdata.cpp",
+        ],
+    ),
+    hdrs = glob(prefix(
+        "third_party/icu",
+        [
+            "source/common/unicode/*.h",
+            "source/i18n/unicode/*.h",
+        ],
+    )),
+    copts = select({
+        "@platforms//os:windows": [
+            "/wd4005",  # Macro redefinition.
+            "/wd4068",  # Unknown pragmas.
+            "/wd4267",  # Conversion from size_t on 64-bits.
+            "/utf-8",  # ICU source files are in UTF-8.
+        ],
+        "//conditions:default": [],
+    }),
+    defines = [
+        "U_I18N_IMPLEMENTATION",
+    ] + select({
+        "@platforms//os:windows": [
+            "U_STATIC_IMPLEMENTATION",
+            "UNICODE",
+            "_UNICODE",
+        ],
+        "//conditions:default": [],
+    }),
+    # include_prefix = "third_party/icu",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":icui18n",
+        ":icuuc",
+    ],
+    alwayslink = 1,
+)
