@@ -5,6 +5,7 @@
 #include "platform/globals.h"
 #if defined(DART_HOST_OS_MACOS)
 
+#include "platform/allocation.h"
 #include "bin/platform.h"
 #include "bin/platform_macos.h"
 

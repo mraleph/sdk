@@ -118,7 +118,7 @@ int main(int argc, char* argv[]) {
       /*flags=*/&isolate_flags,
       /*isolate_group_data=*/nullptr,
       /*isolate_data=*/nullptr, &error);
-  if (error != nullptr) {
+  if (error != nullptr || isolate == nullptr) {
     dart::embedder::Cleanup();
     LOG_ERROR("Dart_CreateIsolateGroup failed: %s\n", error);
     free(error);

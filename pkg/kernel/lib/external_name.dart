@@ -7,6 +7,32 @@ library kernel.external_name;
 import 'ast.dart';
 import 'core_types.dart';
 
+String? getPragmaOptions(
+    CoreTypes coreTypes, Member procedure, String expectedPragmaName) {
+  for (final Expression annotation in procedure.annotations) {
+    if (annotation is ConstantExpression) {
+      final Constant constant = annotation.constant;
+      if (constant is InstanceConstant) {
+        if (_isPragma(constant.classNode)) {
+          final String pragmaName =
+              (constant.fieldValues[coreTypes.pragmaName.fieldReference]
+                      as StringConstant)
+                  .value;
+          final Constant? pragmaOptionsValue =
+              constant.fieldValues[coreTypes.pragmaOptions.fieldReference];
+          final String? pragmaOptions = pragmaOptionsValue is StringConstant
+              ? pragmaOptionsValue.value
+              : null;
+          if (pragmaName == expectedPragmaName) {
+            return pragmaOptions;
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
 /// Returns external (native) name of given [Member].
 String? getExternalName(CoreTypes coreTypes, Member procedure) {
   // Native procedures are marked as external and have an annotation,

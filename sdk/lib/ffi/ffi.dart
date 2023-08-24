@@ -993,6 +993,10 @@ final class Dart_CObject extends Opaque {}
 
 typedef Dart_NativeMessageHandler = Void Function(Int64, Pointer<Dart_CObject>);
 
+final class Export {
+  const Export();
+}
+
 /// Utilities for accessing the Dart VM API from Dart code or
 /// from C code via `dart_api_dl.h`.
 @Since('2.8')
@@ -1271,3 +1275,11 @@ external Pointer<NativeFunction<IntPtr Function(Handle, Handle, IntPtr)>>
 final _ffi_resolver = _get_ffi_native_resolver<
         NativeFunction<IntPtr Function(Handle, Handle, IntPtr)>>()
     .asFunction<int Function(Object, Object, int)>();
+
+int _allocateExports(List<Pointer<Void>> exports, Allocator allocator) {
+  final result = allocator.allocate<Pointer<Void>>(exports.length * sizeOf<Pointer<Void>>());
+  for (var i = 0; i < exports.length; i++) {
+    result.elementAt(i).value = exports[i];
+  }
+  return result.address;
+}

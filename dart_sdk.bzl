@@ -1,3 +1,5 @@
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
 SDK_ROOT = "external/dart-sdk"
 
 def prefix(dir, files):
@@ -963,6 +965,8 @@ RUNTIME_INLUDE_DIRS = [
 
 COMMON_COPTS = [
     "-Wno-comment",
+    "-Wno-unused-private-field",
+    "-Wno-deprecated-declarations",
     "-std=c++17",
 ] + RUNTIME_INLUDE_DIRS
 
@@ -1061,12 +1065,37 @@ def dart_io(runtime_mode = "release", deps = [], srcs = [], local_defines = []):
     local_defines = local_defines + ["DART_IO_ROOT_CERTS_DISABLED"]
     if runtime_mode == "product":
         local_defines.append("PRODUCT")
+
+    native.objc_library(
+        name = "platform_macos_cocoa_" + runtime_mode,
+        srcs = prefix("runtime/bin", [
+            "platform_macos_cocoa.mm",
+        ]) + hdrs_from(PLATFORM_SOURCES),
+        hdrs = ["runtime/bin/platform_macos_cocoa.h"],
+        copts = COMMON_COPTS + ["-D" + define for define in local_defines],
+    )
     native.cc_library(
         name = "io_" + runtime_mode,
-        deps = deps,
+        deps = deps + selects.with_or({
+            (":macos", ":ios"): [":platform_macos_cocoa_" + runtime_mode],
+            "//conditions:default": [],
+        }),
         srcs = srcs,
         hdrs = ["runtime/include/bin/dart_io_api.h"],
         copts = COMMON_COPTS,
+        linkopts = selects.with_or({
+            (":macos", ":ios"): [
+                "-framework CoreFoundation",
+                "-framework Security",
+                "-framework Foundation",
+            ],
+            "//conditions:default": [],
+        }) + selects.with_or({
+            (":macos"): [
+                "-framework CoreServices",
+            ],
+            "//conditions:default": [],
+        }),
         local_defines = local_defines,
     )
     # if (is_ios || is_mac) {
@@ -1084,23 +1113,36 @@ def dart_io(runtime_mode = "release", deps = [], srcs = [], local_defines = []):
     #  }
     # }
 
-def aot_snapshot(name, script, srcs = [], format = "assembly"):
+def aot_snapshot(name, script, srcs = [], format = "assembly", sources = []):
+    run_from_source = True  # name == "gen_kernel"
+    sources = sources + ["package:ffi/ffi.dart"]
     if script not in srcs:
         srcs = srcs + [script]
     gen_kernel_tools = []
     gen_kernel_cmd = []
-    gen_kernel_srcs = srcs + ["@dart-sdk//:platform_product.dill"]
-    if name == "gen_kernel":
+    gen_kernel_srcs = srcs + [
+        "@dart-sdk//:platform_product.dill",
+        "@dart-sdk//:.dart_tool/package_config.json",
+    ]
+    if run_from_source:
+        gen_kernel_srcs = gen_kernel_srcs + ["@dart-sdk//:gen_kernel_sources"]
         gen_kernel_cmd += [
             "$(location @dart-sdk//:tools/sdks/dart-sdk/bin/dart)",
             "--packages=$(location @dart-sdk//:.dart_tool/package_config.json)",
             "$(location @dart-sdk//:pkg/vm/bin/gen_kernel.dart)",
-            "--packages=$(location @dart-sdk//:.dart_tool/package_config.json)",
         ]
         gen_kernel_tools.append("@dart-sdk//:tools/sdks/dart-sdk/bin/dart")
+        gen_kernel_tools.append("@dart-sdk//:pkg/vm/bin/gen_kernel.dart")
     else:
         gen_kernel_cmd.append("$(location @dart-sdk//:gen_kernel)")
         gen_kernel_tools.append("@dart-sdk//:gen_kernel")
+
+    if len(sources) > 0:
+        for source in sources:
+            gen_kernel_cmd += [
+                "--source",
+                source,
+            ]
 
     native.genrule(
         name = name + "_dill",
@@ -1109,15 +1151,42 @@ def aot_snapshot(name, script, srcs = [], format = "assembly"):
             name + ".dill",
         ],
         cmd = " ".join(gen_kernel_cmd + [
+            "--packages=$(location @dart-sdk//:.dart_tool/package_config.json)",
             "--platform",
             "$(location @dart-sdk//:platform_product.dill)",
             "--aot",
             "-Ddart.vm.product=true",
+            "--sound-null-safety",
             "-o",
             "$(location %s.dill)" % (name),
             "$(location %s)" % (script),
         ]),
         tools = gen_kernel_tools,
+    )
+
+    native.genrule(
+        name = name + "_exports_to_c",
+        srcs = [
+            "@dart-sdk//:.dart_tool/package_config.json",
+            "@dart-sdk//:gen_kernel_sources",
+            name + ".dill",
+        ],
+        outs = [
+            name + ".h",
+            name + ".cc",
+        ],
+        cmd = " ".join([
+            "$(location @dart-sdk//:tools/sdks/dart-sdk/bin/dart)",
+            "--packages=$(location @dart-sdk//:.dart_tool/package_config.json)",
+            "$(location @dart-sdk//:pkg/vm/bin/dump_exports.dart)",
+            "$(location " + name + ".dill)",
+            name,
+            "$(RULEDIR)/" + name + "",
+        ]),
+        tools = [
+            "@dart-sdk//:tools/sdks/dart-sdk/bin/dart",
+            "@dart-sdk//:pkg/vm/bin/dump_exports.dart",
+        ],
     )
 
     native.genrule(
@@ -1129,6 +1198,8 @@ def aot_snapshot(name, script, srcs = [], format = "assembly"):
             "@dart-sdk//:android_arm32": "$(location @dart-sdk//:android_arm32/gen_snapshot)",
             "@dart-sdk//:android_arm64": "$(location @dart-sdk//:android_arm64/gen_snapshot)",
             "@dart-sdk//:android_x86_64": "$(location @dart-sdk//:android_x86_64/gen_snapshot)",
+            "@dart-sdk//:macos_arm64": "$(location @dart-sdk//:macos_arm64/gen_snapshot)",
+            "@dart-sdk//:ios_arm64": "$(location @dart-sdk//:ios_arm64/gen_snapshot)",
         }) + " " + " ".join([
             "--snapshot-kind=app-aot-assembly",
             "--assembly=$@",
@@ -1139,7 +1210,26 @@ def aot_snapshot(name, script, srcs = [], format = "assembly"):
             "@dart-sdk//:android_arm32": ["@dart-sdk//:android_arm32/gen_snapshot"],
             "@dart-sdk//:android_arm64": ["@dart-sdk//:android_arm64/gen_snapshot"],
             "@dart-sdk//:android_x86_64": ["@dart-sdk//:android_x86_64/gen_snapshot"],
+            "@dart-sdk//:macos_arm64": ["@dart-sdk//:macos_arm64/gen_snapshot"],
+            "@dart-sdk//:ios_arm64": ["@dart-sdk//:ios_arm64/gen_snapshot"],
         }),
+    )
+
+    native.cc_library(
+        name = name + "_clib",
+        srcs = [
+            name + ".cc",
+            name + ".S",
+            "@dart-sdk//:runtime/bin/simple_aot_embedder.cc",
+            "@dart-sdk//:runtime/bin/simple_aot_embedder.h",
+        ],
+        hdrs = [
+            name + ".h",
+        ],
+        tags = ["swift_module=" + name.capitalize() + "CLib"],
+        deps = [
+            "@dart-sdk//:libdart_product_aot",
+        ],
     )
 
 def aot_binary(name, script, srcs = []):
@@ -1200,8 +1290,6 @@ target_defines = rule(
 )
 
 def _dart_target_configuration_implementation(ctx):
-    print(ctx.attr.name)
-    print(ctx.attr._target_defines[CcInfo].compilation_context.defines)
     return [ctx.attr._target_defines[CcInfo]]
 
 dart_target_configuration = rule(
@@ -1217,11 +1305,19 @@ _ARCH_MAPPING = {
 }
 
 def _add_target_defines_impl(settings, attr):
-    print("target %s: %s %s" % (attr.name, attr.target_cpu, attr.target_os))
-    return {"//:target_defines": [
-        "DART_TARGET_OS_" + attr.target_os.upper(),
+    defines = [
         "TARGET_ARCH_" + _ARCH_MAPPING[attr.target_cpu].upper(),
-    ]}
+    ]
+    if attr.target_os == "ios":
+        defines += [
+            "DART_TARGET_OS_MACOS_IOS",
+            "DART_TARGET_OS_MACOS",
+        ]
+    else:
+        defines.append(
+            "DART_TARGET_OS_" + attr.target_os.upper(),
+        )
+    return {"//:target_defines": defines}
 
 _add_target_defines = transition(
     implementation = _add_target_defines_impl,

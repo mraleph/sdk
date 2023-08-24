@@ -16,7 +16,10 @@ load(
 
 package(default_visibility = ["//visibility:public"])
 
-exports_files(["runtime/bin/builtin.cc"] + DART_EMBEDDER_API_SOURCES)
+exports_files(["runtime/bin/builtin.cc"] + DART_EMBEDDER_API_SOURCES + [
+    "runtime/bin/simple_aot_embedder.cc",
+    "runtime/bin/simple_aot_embedder.h",
+])
 
 vm_library(
     compiler = "aot",
@@ -98,6 +101,22 @@ dart_target_configuration(name = "target_configuration")
     for cpu in [
         "x86_64",
         "arm32",
+        "arm64",
+    ]
+]
+
+[
+    with_target_defines(
+        name = "%s_%s/gen_snapshot" % (os, cpu),
+        binary = ":gen_snapshot",
+        target_cpu = cpu,
+        target_os = os,
+    )
+    for os in [
+        "macos",
+        "ios",
+    ]
+    for cpu in [
         "arm64",
     ]
 ]
@@ -230,8 +249,8 @@ genrule(
     ],
 ) for runtime_mode in ("release", "product")]
 
-aot_binary(
-    name = "gen_kernel",
+filegroup(
+    name = "gen_kernel_sources",
     srcs = glob([
         "pkg/_fe_analyzer_shared/**",
         "pkg/_js_interop_checks/**",
@@ -247,6 +266,7 @@ aot_binary(
         "third_party/pkg/args/**",
         "third_party/pkg/collection/**",
         "third_party/pkg/crypto/**",
+        "third_party/pkg/ffi/**",
         "third_party/pkg/package_config/**",
         "third_party/pkg/source_span/**",
         "third_party/pkg/string_scanner/**",
@@ -254,7 +274,11 @@ aot_binary(
         "third_party/pkg/typed_data/**",
         "third_party/pkg/path/**",
         "third_party/pkg/yaml/**",
-    ]) + [".dart_tool/package_config.json"],
+    ]),
+)
+
+aot_binary(
+    name = "gen_kernel",
     script = "pkg/vm/bin/gen_kernel.dart",
 )
 
@@ -277,6 +301,9 @@ libdart(
         "x86_64",
         "x86_32",
         "k8",
+        "darwin_arm64",
+        "ios_sim_arm64",
+        "ios_arm64",
     ]
 ]
 
@@ -307,6 +334,9 @@ selects.config_setting_group(
     name = "any_arm64",
     match_any = [
         ":cpu_arm64-v8a",
+        ":cpu_darwin_arm64",
+        ":cpu_ios_arm64",
+        ":cpu_ios_sim_arm64",
     ],
 )
 
@@ -319,16 +349,25 @@ config_setting(
 
 config_setting(
     name = "macos",
-    constraint_values = [
-        "@platforms//os:macos",
-    ],
+    values = {
+        "apple_platform_type": "macos",
+        "crosstool_top": "@bazel_tools//tools/cpp:toolchain",
+    },
+)
+
+config_setting(
+    name = "ios",
+    values = {
+        "apple_platform_type": "ios",
+        "crosstool_top": "@bazel_tools//tools/cpp:toolchain",
+    },
 )
 
 config_setting(
     name = "linux",
-    values = {
-        "crosstool_top": "@bazel_tools//tools/cpp:toolchain",
-    },
+    constraint_values = [
+        "@platforms//os:linux",
+    ],
 )
 
 [
@@ -352,9 +391,14 @@ config_setting(
 
 config_setting(
     name = "macos_arm64",
-    constraint_values = [
-        "@platforms//os:macos",
-        "@platforms//cpu:arm64",
+    values = {"cpu": "darwin_arm64"},
+)
+
+selects.config_setting_group(
+    name = "ios_arm64",
+    match_any = [
+        ":cpu_ios_arm64",
+        ":cpu_ios_sim_arm64",
     ],
 )
 
@@ -434,6 +478,7 @@ cc_library(
     copts = [
         "-I" + SDK_ROOT + "/third_party/zlib",
         "-Iexternal/androidndk/sources/android/cpufeatures",
+        "-Wno-deprecated-non-prototype",
     ] + select({
         ":any_x86": [
             "-msse2",
@@ -477,6 +522,7 @@ cc_library(
         ":linux_arm64": ["ARMV8_OS_LINUX"],
         ":android_arm64": ["ARMV8_OS_ANDROID"],
         ":macos_arm64": ["ARMV8_OS_MACOS"],
+        ":ios_arm64": ["ARM_OS_IOS"],
         "//conditions:default": [],
     }),
     deps = select({
@@ -552,10 +598,10 @@ cc_library(
             "/utf-8",  # ICU source files are in UTF-8.
         ],
         "//conditions:default": [
-            "-Wno-unused-function",
             "-Wno-parentheses",
             "-Wno-unused-function",
             "-Wno-unused-variable",
+            "-Wno-unused-but-set-variable",
             "-Wno-deprecated-declarations",
         ],
     }),
@@ -579,7 +625,8 @@ cc_library(
             "UNICODE",
             "_UNICODE",
         ],
-        "//conditions:default": [],
+        "//conditions:default": [
+        ],
     }),
     includes = prefix(
         "third_party/icu",
@@ -608,7 +655,12 @@ cc_library(
             "/wd4267",  # Conversion from size_t on 64-bits.
             "/utf-8",  # ICU source files are in UTF-8.
         ],
-        "//conditions:default": [],
+        "//conditions:default": [
+            "-Wno-unused-function",
+            "-Wno-unused-variable",
+            "-Wno-unused-but-set-variable",
+            "-Wno-deprecated-declarations",
+        ],
     }),
     defines = [
         "U_I18N_IMPLEMENTATION",
