@@ -4,7 +4,9 @@
 
 #include "vm/regexp_assembler.h"
 
+#if !defined(DART_EXCLUDE_ICU)
 #include "unicode/uchar.h"
+#endif
 
 #include "platform/unicode.h"
 
@@ -79,8 +81,12 @@ uword /*BoolPtr*/ CaseInsensitiveCompareUTF16(uword /*StringPtr*/ str_raw,
         }
       }
     }
+#if !defined(DART_EXCLUDE_ICU)
     c1 = u_foldCase(c1, U_FOLD_CASE_DEFAULT);
     c2 = u_foldCase(c2, U_FOLD_CASE_DEFAULT);
+#else
+    UNREACHABLE();
+#endif
     if (c1 != c2) return static_cast<uword>(Bool::False().ptr());
   }
   return static_cast<uword>(Bool::True().ptr());

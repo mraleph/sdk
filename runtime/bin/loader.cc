@@ -52,7 +52,8 @@ Dart_Handle Loader::Init(const char* packages_file,
                      DartUtils::NewString("_Init"), kNumArgs, dart_args);
 }
 
-#if !defined(DART_PRECOMPILED_RUNTIME) && !defined(EXCLUDE_CFE_AND_KERNEL_PLATFORM)
+#if !defined(DART_PRECOMPILED_RUNTIME) &&                                      \
+    !defined(EXCLUDE_CFE_AND_KERNEL_PLATFORM)
 static void MallocFinalizer(void* isolate_callback_data, void* peer) {
   free(peer);
 }

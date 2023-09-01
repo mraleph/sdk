@@ -1,6 +1,7 @@
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load(
     "dart_sdk.bzl",
+    "COMMON_COPTS",
     "DART_EMBEDDER_API_SOURCES",
     "SDK_ROOT",
     "aot_binary",
@@ -18,7 +19,8 @@ package(default_visibility = ["//visibility:public"])
 
 exports_files(["runtime/bin/builtin.cc"] + DART_EMBEDDER_API_SOURCES + [
     "runtime/bin/simple_aot_embedder.cc",
-    "runtime/bin/simple_aot_embedder.h",
+    "runtime/bin/simple_jit_embedder.cc",
+    "runtime/bin/simple_embedder.h",
 ])
 
 vm_library(
@@ -36,8 +38,42 @@ vm_library(
 )
 
 vm_library(
+    compiler = "jit",
+    runtime_mode = "release",
+)
+
+vm_library(
     compiler = "precompiler",
     runtime_mode = "product",
+)
+
+cc_binary(
+    name = "runner",
+    srcs = prefix(
+        "runtime/bin",
+        [
+            # "builtin.cc",
+            # "dfe.cc",
+            # "dfe.h",
+            # "gzip.cc",
+            # "gzip.h",
+            # "loader.cc",
+            # "loader.h",
+            # "main.cc",
+            # "main_impl.cc",
+            # "main_impl.h",
+            # "snapshot_empty.cc",
+            "trivial_jit_main.cc",
+            "vmservice_impl.cc",
+            "vmservice_impl.h",
+        ],
+    ) + DART_EMBEDDER_API_SOURCES,
+    copts = ["-Iexternal/dart-sdk/runtime"],
+    local_defines = [],
+    deps = [
+        ":io_release",
+        ":vm_release_jit",
+    ],
 )
 
 dart_executable(
@@ -205,6 +241,38 @@ genrule(
 
 # Producing Dart platform file
 
+genrule(
+    name = "compile_platform_exe",
+    srcs = glob([
+        "pkg/front_end/**",
+        "pkg/_fe_analyzer_shared/**",
+        "pkg/kernel/**",
+        "pkg/vm/**",
+        "pkg/compiler/**",
+        "pkg/dart2wasm/**",
+        "pkg/build_integration/**",
+        "third_party/pkg/package_config/**",
+        "pkg/dev_compiler/**",
+        "pkg/_js_interop_checks/**",
+        "pkg/meta/**",
+        "third_party/pkg/collection/**",
+        "pkg/wasm_builder/**",
+    ]) + [".dart_tool/package_config.json"],
+    outs = ["compile_platform.exe"],
+    cmd = " ".join([
+        "$(location tools/sdks/dart-sdk/bin/dart)",
+        "compile",
+        "exe",
+        "--packages=$(location .dart_tool/package_config.json)",
+        "-o",
+        "$@",
+        "$(location pkg/front_end/tool/_fasta/compile_platform.dart)",
+    ]),
+    tools = [
+        "tools/sdks/dart-sdk/bin/dart",
+    ],
+)
+
 [genrule(
     name = "vm_platform_%s" % runtime_mode,
     srcs = glob([
@@ -228,9 +296,7 @@ genrule(
         "outline_%s.dill" % runtime_mode,
     ],
     cmd = " ".join([
-        "$(location tools/sdks/dart-sdk/bin/dart)",
-        "--packages=$(location .dart_tool/package_config.json)",
-        "$(location pkg/front_end/tool/_fasta/compile_platform.dart)",
+        "$(location :compile_platform.exe)",
         "dart:core",
         "-Ddart.vm.product=%s" % (runtime_mode == "product"),
         "-Ddart.isVM=true",
@@ -245,7 +311,7 @@ genrule(
         "$(location outline_%s.dill)" % runtime_mode,
     ]),
     tools = [
-        "tools/sdks/dart-sdk/bin/dart",
+        ":compile_platform.exe",
     ],
 ) for runtime_mode in ("release", "product")]
 
@@ -274,17 +340,52 @@ filegroup(
         "third_party/pkg/typed_data/**",
         "third_party/pkg/path/**",
         "third_party/pkg/yaml/**",
-    ]),
+    ]) + [
+        ".dart_tool/package_config.json",
+    ],
 )
 
-aot_binary(
-    name = "gen_kernel",
-    script = "pkg/vm/bin/gen_kernel.dart",
+genrule(
+    name = "gen_kernel_exe",
+    srcs = [
+        ":gen_kernel_sources",
+        ".dart_tool/package_config.json",
+        "pkg/vm/bin/gen_kernel.dart",
+    ],
+    outs = ["gen_kernel"],
+    cmd = " ".join([
+        "$(location tools/sdks/dart-sdk/bin/dart)",
+        "compile",
+        "exe",
+        "--packages=$(location .dart_tool/package_config.json)",
+        "-o",
+        "$@",
+        "$(location pkg/vm/bin/gen_kernel.dart)",
+    ]),
+    tools = [
+        "tools/sdks/dart-sdk/bin/dart",
+    ],
 )
 
 libdart(
     compiler = "aot",
     runtime_mode = "product",
+)
+
+libdart(
+    compiler = "jit",
+    runtime_mode = "release",
+)
+
+cc_binary(
+    name = "run_aot",
+    srcs = [
+        "runtime/bin/trivial_aot_main.cc",
+    ],
+    copts = COMMON_COPTS,
+    deps = [
+        ":libdart_product_aot",
+    ],
 )
 
 # Dependencies

@@ -7,10 +7,12 @@
 #include "bin/dartutils.h"
 #include "bin/eventhandler.h"
 #if !defined(DART_PRECOMPILED_RUNTIME) || !defined(PRODUCT)
-#include "bin/isolate_data.h"
+//#include "bin/isolate_data.h"
 #endif
 #include "bin/process.h"
+#if !defined(DART_IO_SECURE_SOCKET_DISABLED)
 #include "bin/secure_socket_filter.h"
+#endif
 #include "bin/thread.h"
 #include "bin/utils.h"
 #if !defined(PRODUCT)

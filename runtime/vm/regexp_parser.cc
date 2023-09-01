@@ -4,8 +4,10 @@
 
 #include "vm/regexp_parser.h"
 
+#if !defined(DART_EXCLUDE_ICU)
 #include "unicode/uchar.h"
 #include "unicode/uniset.h"
+#endif
 
 #include "platform/unicode.h"
 
@@ -241,10 +243,14 @@ bool RegExpBuilder::NeedsDesugaringForUnicode(RegExpCharacterClass* cc) {
 
 bool RegExpBuilder::NeedsDesugaringForIgnoreCase(uint32_t c) {
   if (is_unicode() && ignore_case()) {
+#if !defined(DART_EXCLUDE_ICU)
     icu::UnicodeSet set(c, c);
     set.closeOver(USET_CASE_INSENSITIVE);
     set.removeAllStrings();
     return set.size() > 1;
+#else
+    UNREACHABLE();
+#endif
   }
   return false;
 }
@@ -1066,8 +1072,10 @@ static inline constexpr bool IsAsciiIdentifierPart(uint32_t ch) {
 static bool IsIdentifierStartSlow(uint32_t c) {
   // cannot use u_isIDStart because it does not work for
   // Other_ID_Start characters.
-  return u_hasBinaryProperty(c, UCHAR_ID_START) ||
-         (c < 0x60 && (c == '$' || c == '\\' || c == '_'));
+#if !defined(DART_EXCLUDE_ICU)
+  if (u_hasBinaryProperty(c, UCHAR_ID_START)) return true;
+#endif
+  return (c < 0x60 && (c == '$' || c == '\\' || c == '_'));
 }
 
 // ES#sec-names-and-keywords Names and Keywords
@@ -1077,8 +1085,10 @@ static bool IsIdentifierPartSlow(uint32_t c) {
   const uint32_t kZeroWidthJoiner = 0x200D;
   // Can't use u_isIDPart because it does not work for
   // Other_ID_Continue characters.
-  return u_hasBinaryProperty(c, UCHAR_ID_CONTINUE) ||
-         (c < 0x60 && (c == '$' || c == '\\' || c == '_')) ||
+#if !defined(DART_EXCLUDE_ICU)
+  if (u_hasBinaryProperty(c, UCHAR_ID_CONTINUE)) return true;
+#endif
+  return (c < 0x60 && (c == '$' || c == '\\' || c == '_')) ||
          c == kZeroWidthNonJoiner || c == kZeroWidthJoiner;
 }
 
@@ -1463,6 +1473,7 @@ bool RegExpParser::ParseUnicodeEscape(uint32_t* value) {
   return result;
 }
 
+#if !defined(DART_EXCLUDE_ICU)
 namespace {
 
 bool IsExactPropertyAlias(const char* property_name, UProperty property) {
@@ -1637,9 +1648,11 @@ bool IsUnicodePropertyValueCharacter(char c) {
 }
 
 }  // anonymous namespace
+#endif  // !defined(DART_EXCLUDE_ICU)
 
 bool RegExpParser::ParsePropertyClassName(ZoneGrowableArray<char>* name_1,
                                           ZoneGrowableArray<char>* name_2) {
+#if !defined(DART_EXCLUDE_ICU)
   ASSERT(name_1->is_empty());
   ASSERT(name_2->is_empty());
   // Parse the property class as follows:
@@ -1675,6 +1688,9 @@ bool RegExpParser::ParsePropertyClassName(ZoneGrowableArray<char>* name_1,
   ASSERT(name_2->is_empty() ||
          static_cast<size_t>(name_2->length() - 1) == strlen(name_2->data()));
   return true;
+#else
+  return false;
+#endif
 }
 
 bool RegExpParser::AddPropertyClassRange(
@@ -1682,6 +1698,7 @@ bool RegExpParser::AddPropertyClassRange(
     bool negate,
     ZoneGrowableArray<char>* name_1,
     ZoneGrowableArray<char>* name_2) {
+#if !defined(DART_EXCLUDE_ICU)
   ASSERT(name_1->At(name_1->length() - 1) == '\0');
   ASSERT(name_2->is_empty() || name_2->At(name_2->length() - 1) == '\0');
   if (name_2->is_empty()) {
@@ -1716,6 +1733,9 @@ bool RegExpParser::AddPropertyClassRange(
     }
     return LookupPropertyValueName(property, value_name, negate, add_to);
   }
+#else
+  UNREACHABLE();
+#endif
 }
 
 bool RegExpParser::ParseUnlimitedLengthHexNumber(uint32_t max_value,

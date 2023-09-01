@@ -225,7 +225,8 @@ void transformLibraries(
   for (var node in transformer.exported) {
     final name = node.name.text;
     if (node.function.positionalParameters
-        .any((p) => requiresMarshalling(p.type))) {
+            .any((p) => requiresMarshalling(p.type)) ||
+        requiresMarshalling(node.function.returnType)) {
       final library = node.enclosingLibrary;
       node = generateWrapper(node);
       library.addProcedure(node);

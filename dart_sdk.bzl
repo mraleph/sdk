@@ -966,8 +966,10 @@ RUNTIME_INLUDE_DIRS = [
 COMMON_COPTS = [
     "-Wno-comment",
     "-Wno-unused-private-field",
+    "-Wunused-but-set-variable",
     "-Wno-deprecated-declarations",
     "-std=c++17",
+    "-DDART_IO_SECURE_SOCKET_DISABLED",
 ] + RUNTIME_INLUDE_DIRS
 
 def srcs_from(files):
@@ -989,11 +991,13 @@ def vm_library(runtime_mode = "release", compiler = "jit"):
     if compiler != "aot":
         srcs = srcs + COMPILER_SOURCES
     local_defines.append("EXCLUDE_CFE_AND_KERNEL_PLATFORM")
+    local_defines.append("DART_EXCLUDE_ICU")
     native.cc_library(
         name = "vm_%s_%s" % (runtime_mode, compiler),
         srcs = srcs_from(srcs),
         hdrs = hdrs_from(srcs),
-        deps = [":libdouble_conversion", "@dart-sdk//:icu", "//:target_configuration"],
+        # EXCLUDED: "@dart-sdk//:icu"
+        deps = [":libdouble_conversion", "//:target_configuration"],
         copts = copts,
         local_defines = local_defines,
 
@@ -1002,10 +1006,7 @@ def vm_library(runtime_mode = "release", compiler = "jit"):
 
 # runtime/bin/BUILD.gn, dart_executable
 def dart_executable(name, runtime_mode = "release", compiler = "jit", srcs = [], deps = [], no_main_sources = False):
-    deps = deps + [
-        # "//third_party/boringssl:boringssl",
-        # "//third_party/zlib:zlib",
-    ]
+    deps = deps + []
 
     deps += [
         ":io_" + runtime_mode,
@@ -1035,23 +1036,8 @@ def dart_executable(name, runtime_mode = "release", compiler = "jit", srcs = [],
     )
 
 def dart_io(runtime_mode = "release", deps = [], srcs = [], local_defines = []):
-    deps = deps + [":zlib", "@boringssl//:ssl"]
+    deps = deps + [":zlib"]
 
-    # deps = [
-    #    "//third_party/boringssl:boringssl",
-    #    "//third_party/zlib:zlib",
-    # ]
-    # if (is_mac || is_ios) {
-    #  frameworks = [
-    #    "CoreFoundation.framework",
-    #    "Security.framework",
-    #    "Foundation.framework",
-    #  ]
-    #
-    #  if (is_mac) {
-    #    frameworks += [ "CoreServices.framework" ]
-    #  }
-    # }
     srcs = srcs + IO_IMPL_SOURCES
     srcs += CLI_IMPL_SOURCES
     srcs += BUILTIN_IMPL_SOURCES
@@ -1114,7 +1100,7 @@ def dart_io(runtime_mode = "release", deps = [], srcs = [], local_defines = []):
     # }
 
 def aot_snapshot(name, script, srcs = [], format = "assembly", sources = []):
-    run_from_source = True  # name == "gen_kernel"
+    run_from_source = name == "gen_kernel"
     sources = sources + ["package:ffi/ffi.dart"]
     if script not in srcs:
         srcs = srcs + [script]
@@ -1138,11 +1124,33 @@ def aot_snapshot(name, script, srcs = [], format = "assembly", sources = []):
         gen_kernel_tools.append("@dart-sdk//:gen_kernel")
 
     if len(sources) > 0:
+        if not run_from_source:
+            gen_kernel_srcs += ["@dart-sdk//:gen_kernel_sources"]
         for source in sources:
             gen_kernel_cmd += [
                 "--source",
                 source,
             ]
+
+    native.genrule(
+        name = name + "_aot_dill",
+        srcs = gen_kernel_srcs,
+        outs = [
+            name + ".aot.dill",
+        ],
+        cmd = " ".join(gen_kernel_cmd + [
+            "--packages=$(location @dart-sdk//:.dart_tool/package_config.json)",
+            "--platform",
+            "$(location @dart-sdk//:platform_product.dill)",
+            "--aot",
+            "-Ddart.vm.product=true",
+            "--sound-null-safety",
+            "-o",
+            "$(location %s.aot.dill)" % (name),
+            "$(location %s)" % (script),
+        ]),
+        tools = gen_kernel_tools,
+    )
 
     native.genrule(
         name = name + "_dill",
@@ -1154,12 +1162,19 @@ def aot_snapshot(name, script, srcs = [], format = "assembly", sources = []):
             "--packages=$(location @dart-sdk//:.dart_tool/package_config.json)",
             "--platform",
             "$(location @dart-sdk//:platform_product.dill)",
-            "--aot",
-            "-Ddart.vm.product=true",
+            "--no-link-platform",
             "--sound-null-safety",
+            "--filesystem-scheme",
+            "root",
+            "--filesystem-root",
+            "$(@D)",
+            "--filesystem-root",
+            "$(RULEDIR)",
+            "--filesystem-root",
+            "$(location %s)/.." % (script),
             "-o",
             "$(location %s.dill)" % (name),
-            "$(location %s)" % (script),
+            "root:///%s" % (script),
         ]),
         tools = gen_kernel_tools,
     )
@@ -1169,7 +1184,7 @@ def aot_snapshot(name, script, srcs = [], format = "assembly", sources = []):
         srcs = [
             "@dart-sdk//:.dart_tool/package_config.json",
             "@dart-sdk//:gen_kernel_sources",
-            name + ".dill",
+            name + ".aot.dill",
         ],
         outs = [
             name + ".h",
@@ -1179,7 +1194,7 @@ def aot_snapshot(name, script, srcs = [], format = "assembly", sources = []):
             "$(location @dart-sdk//:tools/sdks/dart-sdk/bin/dart)",
             "--packages=$(location @dart-sdk//:.dart_tool/package_config.json)",
             "$(location @dart-sdk//:pkg/vm/bin/dump_exports.dart)",
-            "$(location " + name + ".dill)",
+            "$(location " + name + ".aot.dill)",
             name,
             "$(RULEDIR)/" + name + "",
         ]),
@@ -1191,7 +1206,7 @@ def aot_snapshot(name, script, srcs = [], format = "assembly", sources = []):
 
     native.genrule(
         name = name + "_assembly",
-        srcs = [name + ".dill"],
+        srcs = [name + ".aot.dill"],
         outs = [name + ".S"],
         cmd = select({
             "@dart-sdk//:linux_x86_64": "$(location @dart-sdk//:linux_x86_64/gen_snapshot)",
@@ -1213,6 +1228,26 @@ def aot_snapshot(name, script, srcs = [], format = "assembly", sources = []):
             "@dart-sdk//:macos_arm64": ["@dart-sdk//:macos_arm64/gen_snapshot"],
             "@dart-sdk//:ios_arm64": ["@dart-sdk//:ios_arm64/gen_snapshot"],
         }),
+    )
+
+    native.cc_library(
+        name = name + "_jit_clib",
+        srcs = [
+            name + ".cc",
+            "@dart-sdk//:runtime/bin/simple_jit_embedder.cc",
+            "@dart-sdk//:runtime/bin/simple_embedder.h",
+        ],
+        hdrs = [
+            name + ".h",
+        ],
+        data = [
+            "@dart-sdk//:platform_product.dill",
+            name + ".dill",
+        ],
+        tags = ["swift_module=" + name.capitalize() + "CLib"],
+        deps = [
+            "@dart-sdk//:libdart_release_jit",
+        ],
     )
 
     native.cc_library(
@@ -1261,9 +1296,16 @@ def libdart(runtime_mode = "release", compiler = "jit"):
     local_defines.append("EXCLUDE_CFE_AND_KERNEL_PLATFORM")
     local_defines.append("EXCLUDE_DARTDEV")
 
+    srcs = DART_EMBEDDER_API_SOURCES
+    if runtime_mode != "product":
+        srcs = srcs + prefix("runtime/bin", [
+            "vmservice_impl.cc",
+            "vmservice_impl.h",
+        ])
+
     native.cc_library(
         name = "libdart_%s_%s" % (runtime_mode, compiler),
-        srcs = DART_EMBEDDER_API_SOURCES,
+        srcs = srcs,
         hdrs = VM_API_HEADERS + hdrs_from(DART_EMBEDDER_API_SOURCES),
         copts = COMMON_COPTS,
         defines = local_defines,
@@ -1271,8 +1313,8 @@ def libdart(runtime_mode = "release", compiler = "jit"):
             "runtime",
         ],
         deps = [
-            "@dart-sdk//:io_product",
-            "@dart-sdk//:vm_product_aot",
+            "@dart-sdk//:io_" + runtime_mode,
+            "@dart-sdk//:vm_" + runtime_mode + "_" + compiler,
         ],
     )
 

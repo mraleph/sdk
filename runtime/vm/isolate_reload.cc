@@ -731,7 +731,8 @@ bool IsolateGroupReloadContext::Reload(bool force_reload,
                                       &kernel_buffer, &kernel_buffer_size);
         did_kernel_compilation = true;
         if (error != nullptr) {
-          TIR_Print("---- LOAD FAILED, ABORTING RELOAD\n");
+          TIR_Print("---- LOAD (root script: %s) FAILED, ABORTING RELOAD\n",
+                    root_script_url == nullptr ? "<null>" : root_script_url);
           const auto& error_str = String::Handle(Z, String::New(error));
           free(error);
           const ApiError& error = ApiError::Handle(Z, ApiError::New(error_str));

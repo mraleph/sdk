@@ -92,7 +92,7 @@ ${e['r']} ${name}_${e['n']}(${named(e).join(', ')});
       ].join('\n\n');
 
       final ccContent = '''
-#include "bin/simple_aot_embedder.h"
+#include "bin/simple_embedder.h"
 
 namespace {
 
@@ -106,6 +106,18 @@ extern "C" {
 
 $funcs
 
+void ${name}_Configure(const char* platform_path, const char* app_path) {
+  dart::embedder::simple::Configure(platform_path, app_path);
+}
+
+void ${name}_ConnectToEventLoop(void (*notify) (void*)) {
+  dart::embedder::simple::ConnectToEventLoop(notify);
+}
+
+void ${name}_ProcessEvents(void* isolate) {
+  dart::embedder::simple::ProcessEvents(isolate);
+}
+
 }
 ''';
 
@@ -115,6 +127,11 @@ extern "C" {
 #endif
 
 $funcDecls
+
+void ${name}_Configure(const char* platform_path, const char* app_path);
+
+void ${name}_ConnectToEventLoop(void (*notify) (void*));
+void ${name}_ProcessEvents(void* isolate);
 
 #ifdef __cplusplus
 }  // extern "C"

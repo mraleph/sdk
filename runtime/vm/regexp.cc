@@ -9,7 +9,9 @@
 #include "platform/splay-tree-inl.h"
 #include "platform/unicode.h"
 
+#if !defined(DART_EXCLUDE_ICU)
 #include "unicode/uniset.h"
+#endif
 
 #include "vm/dart_entry.h"
 #include "vm/regexp_assembler.h"
@@ -4131,6 +4133,7 @@ RegExpNode* UnanchoredAdvance(RegExpCompiler* compiler,
 }
 
 void AddUnicodeCaseEquivalents(ZoneGrowableArray<CharacterRange>* ranges) {
+#if !defined(DART_EXCLUDE_ICU)
   ASSERT(CharacterRange::IsCanonical(ranges));
 
   // Micro-optimization to avoid passing large ranges to UnicodeSet::closeOver.
@@ -4159,6 +4162,7 @@ void AddUnicodeCaseEquivalents(ZoneGrowableArray<CharacterRange>* ranges) {
   }
   // No errors and everything we collected have been ranges.
   CharacterRange::Canonicalize(ranges);
+#endif
 }
 
 RegExpNode* RegExpCharacterClass::ToNode(RegExpCompiler* compiler,

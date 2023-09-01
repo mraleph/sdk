@@ -2,13 +2,16 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-#if !defined(RUNTIME_BIN_SIMPLE_AOT_EMBEDDER)
-#define RUNTIME_BIN_SIMPLE_AOT_EMBEDDER
+#if !defined(RUNTIME_BIN_SIMPLE_EMBEDDER)
+#define RUNTIME_BIN_SIMPLE_EMBEDDER
 
 #include <utility>
 
 namespace dart::embedder::simple {
 
+void Configure(const char* platform_path, const char* app_path);
+void ConnectToEventLoop(void (*notify)(void*));
+void ProcessEvents(void* isolate);
 void EnterMainIsolate();
 void ExitMainIsolate();
 void* MainIsolate();
@@ -43,4 +46,4 @@ AutoIsolate<ExportTable> Exports() {
 
 }  // namespace dart::embedder::simple
 
-#endif
+#endif  // !defined(RUNTIME_BIN_SIMPLE_EMBEDDER)
