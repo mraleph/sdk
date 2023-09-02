@@ -138,8 +138,6 @@ Dart_Handle LibraryTagHandler(Dart_LibraryTag tag,
   RETURN_IF_ERROR(Dart_StringToCString(url, &url_string));
 
   if (tag == Dart_kKernelTag) {
-    LOG_ERROR("LOAD KERNEL: '%s'\n", url_string);
-
     uint8_t* kernel_buffer = nullptr;
     intptr_t kernel_buffer_size = 0;
     ReadFully(url_string, &kernel_buffer, &kernel_buffer_size);

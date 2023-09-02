@@ -182,7 +182,7 @@ int main(int argc, char* argv[]) {
     return -1;
   }
 
-  std::vector<const char*> flags{"--trace-reload", "--trace-reload-verbose"};
+  std::vector<const char*> flags{};
   error = Dart_SetVMFlags(flags.size(), flags.data());
   if (error != nullptr) {
     LOG_ERROR("Dart_SetVMFlags failed: %s\n", error);

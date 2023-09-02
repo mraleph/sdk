@@ -36,6 +36,7 @@ Stream<String> startCompiler() async* {
   Set<String> deps = {};
 
   bool compilationPending = false;
+  final sw = Stopwatch()..start();
 
   final dillFiles = StreamController<String>();
 
@@ -50,7 +51,7 @@ Stream<String> startCompiler() async* {
     if (boundaryKey != null && line.startsWith(boundaryKey!)) {
       final results = line.split(' ');
       compilationPending = false;
-      print('current deps:\n  ${deps.join('\n  ')}');
+      print("compiled in ${sw.elapsedMilliseconds} ms");
       dillFiles.add(results[1]);
       boundaryKey = null;
     } else if (line.startsWith('+')) {
@@ -71,6 +72,7 @@ Stream<String> startCompiler() async* {
   });
 
   compilationPending = true;
+  sw.reset();
   process.stdin.writeln('compile root:///hello.dart');
   await process.stdin.flush();
 
@@ -78,19 +80,14 @@ Stream<String> startCompiler() async* {
       .watch(events: FileSystemEvent.modify, recursive: true)
       .listen((event) {
     final uri = File(event.path).absolute.uri.toString();
-    // print(uri);
     if (deps.contains(uri) && !compilationPending) {
       compilationPending = true;
+      sw.reset();
       process.stdin.writeln('recompile changed-files');
       process.stdin.writeln('root:///hello.dart');
       process.stdin.writeln('changed-files');
     }
   });
-
-  // final initialDillPath = await initialDill.future;
-  // print('got initial dill');
-
-  // await process.stdin.flush();
 
   yield* dillFiles.stream;
 }
@@ -100,17 +97,15 @@ void main() async {
       await vmServiceConnectUri('ws://[::]:8787/ws', log: StdoutLog());
   try {
     VM vm = await serviceClient.getVM();
-    print('hostCPU=${vm.hostCPU}');
-    print(await serviceClient.getVersion());
+    print("Established connection to the VM");
     List<IsolateRef> isolates = vm.isolates!;
-    print(isolates);
 
     final createResult = await extensionCallHelper(
         serviceClient, '_createDevFS', {'fsName': 'reload'});
     final uri = createResult.json['uri'];
 
     await for (var dillPath in startCompiler()) {
-      print('got $dillPath');
+      final sw = Stopwatch()..start();
       await extensionCallHelper(serviceClient, '_writeDevFSFile', {
         'fsName': 'reload',
         'path': 'main.dill',
@@ -119,7 +114,7 @@ void main() async {
       final dillPathTarget = Uri.parse(uri).resolve('main.dill');
       final result = await serviceClient.reloadSources(isolates.first.id!,
           rootLibUri: dillPathTarget.toString());
-      print(result);
+      print('reloaded in ${sw.elapsedMilliseconds}');
     }
   } finally {
     try {

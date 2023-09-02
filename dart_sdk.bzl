@@ -1182,8 +1182,6 @@ def aot_snapshot(name, script, srcs = [], format = "assembly", sources = []):
     native.genrule(
         name = name + "_exports_to_c",
         srcs = [
-            "@dart-sdk//:.dart_tool/package_config.json",
-            "@dart-sdk//:gen_kernel_sources",
             name + ".aot.dill",
         ],
         outs = [
@@ -1191,16 +1189,14 @@ def aot_snapshot(name, script, srcs = [], format = "assembly", sources = []):
             name + ".cc",
         ],
         cmd = " ".join([
-            "$(location @dart-sdk//:tools/sdks/dart-sdk/bin/dart)",
-            "--packages=$(location @dart-sdk//:.dart_tool/package_config.json)",
-            "$(location @dart-sdk//:pkg/vm/bin/dump_exports.dart)",
+            "$(location @dart-sdk//:dump_exports_exe)",
             "$(location " + name + ".aot.dill)",
             name,
             "$(RULEDIR)/" + name + "",
         ]),
         tools = [
             "@dart-sdk//:tools/sdks/dart-sdk/bin/dart",
-            "@dart-sdk//:pkg/vm/bin/dump_exports.dart",
+            "@dart-sdk//:dump_exports_exe",
         ],
     )
 

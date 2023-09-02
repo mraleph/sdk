@@ -367,6 +367,28 @@ genrule(
     ],
 )
 
+genrule(
+    name = "dump_exports_exe",
+    srcs = [
+        ":gen_kernel_sources",
+        ".dart_tool/package_config.json",
+        "pkg/vm/bin/dump_exports.dart",
+    ],
+    outs = ["dump_kernel"],
+    cmd = " ".join([
+        "$(location tools/sdks/dart-sdk/bin/dart)",
+        "compile",
+        "exe",
+        "--packages=$(location .dart_tool/package_config.json)",
+        "-o",
+        "$@",
+        "$(location pkg/vm/bin/dump_exports.dart)",
+    ]),
+    tools = [
+        "tools/sdks/dart-sdk/bin/dart",
+    ],
+)
+
 libdart(
     compiler = "aot",
     runtime_mode = "product",
