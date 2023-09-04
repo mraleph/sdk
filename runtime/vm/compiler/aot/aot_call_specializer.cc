@@ -391,8 +391,29 @@ bool AotCallSpecializer::TryOptimizeStaticCallUsingStaticTypes(
     }
   }
 
-  return TryOptimizeIntegerOperation(instr, op_kind) ||
-         TryOptimizeDoubleOperation(instr, op_kind);
+  if (TryOptimizeIntegerOperation(instr, op_kind) ||
+      TryOptimizeDoubleOperation(instr, op_kind)) {
+    return true;
+  }
+
+  Definition* replacement = nullptr;
+  switch (instr->function().recognized_kind()) {
+    case MethodRecognizer::kInteger_bitAnd:
+      replacement = new (Z) BinaryInt64OpInstr(
+          op_kind, instr->ArgumentValueAt(0)->CopyWithType(Z),
+          instr->ArgumentValueAt(1)->CopyWithType(Z), DeoptId::kNone,
+          Instruction::kNotSpeculative);
+      break;
+    default:
+      break;
+  }
+
+  if (replacement != nullptr) {
+    ReplaceCall(instr, replacement);
+    RefineUseTypes(replacement);
+    return true;
+  }
+  return false;
 }
 
 // Modulo against a constant power-of-two can be optimized into a mask.
