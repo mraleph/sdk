@@ -3370,9 +3370,10 @@ static bool MayBeNumber(CompileType* type) {
 
 // Returns a replacement for a strict comparison and signals if the result has
 // to be negated.
-static Definition* CanonicalizeStrictCompare(StrictCompareInstr* compare,
+static Definition* CanonicalizeStrictCompare(FlowGraph* flow_graph,
+                                             StrictCompareInstr* compare,
                                              bool* negated,
-                                             bool is_branch) {
+                                             BranchInstr* branch) {
   // Use propagated cid and type information to eliminate number checks.
   // If one of the inputs is not a boxable number (Mint, Double), or
   // is not a subtype of num, no need for number checks.
@@ -3386,21 +3387,33 @@ static Definition* CanonicalizeStrictCompare(StrictCompareInstr* compare,
     }
   }
   *negated = false;
-  PassiveObject& constant = PassiveObject::Handle();
+  ConstantInstr* constant_defn = nullptr;
   Value* other = nullptr;
   if (compare->right()->BindsToConstant()) {
-    constant = compare->right()->BoundConstant().ptr();
+    constant_defn =
+        compare->right()->definition()->OriginalDefinition()->AsConstant();
     other = compare->left();
   } else if (compare->left()->BindsToConstant()) {
-    constant = compare->left()->BoundConstant().ptr();
+    constant_defn =
+        compare->left()->definition()->OriginalDefinition()->AsConstant();
     other = compare->right();
   } else {
     return compare;
   }
 
-  const bool can_merge = is_branch || (other->Type()->ToCid() == kBoolCid);
+  const Object& constant = constant_defn->value();
+  const bool can_merge =
+      (branch != nullptr) || (other->Type()->ToCid() == kBoolCid);
   Definition* other_defn = other->definition();
   Token::Kind kind = compare->kind();
+
+  if (branch != nullptr && !other_defn->IsConstant()) {
+    BlockEntryInstr* true_successor = (kind == Token::kEQ_STRICT)
+                                          ? branch->true_successor()
+                                          : branch->false_successor();
+    flow_graph->RenameDominatedUses(other_defn, true_successor, constant_defn);
+  }
+
   // Handle e === true.
   if ((kind == Token::kEQ_STRICT) && (constant.ptr() == Bool::True().ptr()) &&
       can_merge) {
@@ -3480,7 +3493,7 @@ Instruction* BranchInstr::Canonicalize(FlowGraph* flow_graph) {
   if (comparison()->IsStrictCompare()) {
     bool negated = false;
     Definition* replacement = CanonicalizeStrictCompare(
-        comparison()->AsStrictCompare(), &negated, /* is_branch = */ true);
+        flow_graph, comparison()->AsStrictCompare(), &negated, this);
     if (replacement == comparison()) {
       return this;
     }
@@ -3547,8 +3560,9 @@ Instruction* BranchInstr::Canonicalize(FlowGraph* flow_graph) {
 Definition* StrictCompareInstr::Canonicalize(FlowGraph* flow_graph) {
   if (!HasUses()) return nullptr;
   bool negated = false;
-  Definition* replacement = CanonicalizeStrictCompare(this, &negated,
-                                                      /* is_branch = */ false);
+  Definition* replacement =
+      CanonicalizeStrictCompare(flow_graph, this, &negated,
+                                /*branch=*/nullptr);
   if (negated && replacement->IsComparison()) {
     ASSERT(replacement != this);
     replacement->AsComparison()->NegateComparison();
