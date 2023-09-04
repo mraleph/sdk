@@ -983,24 +983,29 @@ bool CompileType::CanBeFuture() {
 }
 
 void CompileType::PrintTo(BaseTextBuffer* f) const {
-  const char* type_name = "?";
   if (IsNone()) {
     f->AddString("T{}");
     return;
-  } else if ((cid_ != kIllegalCid) && (cid_ != kDynamicCid)) {
-    const Class& cls =
-        Class::Handle(IsolateGroup::Current()->class_table()->At(cid_));
-    type_name = String::Handle(cls.ScrubbedName()).ToCString();
-  } else if (type_ != nullptr) {
-    type_name = type_->IsDynamicType()
-                    ? "*"
-                    : String::Handle(type_->ScrubbedName()).ToCString();
-  } else if (!is_nullable()) {
-    type_name = "!null";
   }
 
-  f->Printf("T{%s%s%s}", type_name, can_be_null_ ? "?" : "",
-            can_be_sentinel_ ? "~" : "");
+  f->AddString("T{");
+  if ((cid_ != kIllegalCid) && (cid_ != kDynamicCid)) {
+    const Class& cls =
+        Class::Handle(IsolateGroup::Current()->class_table()->At(cid_));
+    f->AddString(String::Handle(cls.ScrubbedName()).ToCString());
+    if (type_ != nullptr && !type_->IsDynamicType() && type_->IsType() &&
+        Class::Handle(Type::Cast(*type_).type_class()).IsGeneric() &&
+        type_->IsInstantiated()) {
+      f->Printf("(%s)", String::Handle(type_->ScrubbedName()).ToCString());
+    }
+  } else if (type_ != nullptr) {
+    f->AddString(type_->IsDynamicType()
+                     ? "*"
+                     : String::Handle(type_->ScrubbedName()).ToCString());
+  } else if (!is_nullable()) {
+    f->AddString("!null");
+  }
+  f->Printf("%s%s}", can_be_null_ ? "?" : "", can_be_sentinel_ ? "~" : "");
 }
 
 const char* CompileType::ToCString() const {
@@ -1985,12 +1990,17 @@ static CompileType ComputeArrayElementType(Value* array) {
 CompileType LoadIndexedInstr::ComputeType() const {
   switch (class_id_) {
     case kArrayCid:
-    case kImmutableArrayCid:
-      if (result_type_ != nullptr) {
+    case kImmutableArrayCid: {
+      if (result_type_ != nullptr &&
+          result_type_->ToAbstractType()->IsInstantiated()) {
         // The original call knew something.
         return *result_type_;
       }
-      return ComputeArrayElementType(array());
+      CompileType new_type = ComputeArrayElementType(array());
+      return result_type_ != nullptr
+                 ? *CompileType::ComputeRefinedType(result_type_, &new_type)
+                 : new_type;
+    }
 
     case kTypeArgumentsCid:
       return CompileType::FromAbstractType(Object::dynamic_type(),

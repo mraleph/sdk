@@ -6444,6 +6444,10 @@ LoadIndexedInstr::LoadIndexedInstr(Value* array,
       result_type_(result_type) {
   SetInputAt(0, array);
   SetInputAt(1, index);
+  if (result_type_ != nullptr &&
+      CompileType::Dynamic().IsEqualTo(result_type_)) {
+    result_type_ = nullptr;
+  }
 }
 
 Definition* LoadIndexedInstr::Canonicalize(FlowGraph* flow_graph) {
