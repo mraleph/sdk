@@ -25,7 +25,7 @@ import 'package:vm/transformations/type_flow/utils.dart';
 
 import 'common.dart' show FfiStaticTypeError, FfiTransformer;
 
-/// Transform @Native annotated functions into FFI native function pointer
+/// Transform @Export annotated functions into FFI native function pointer
 /// functions.
 void transformLibraries(
     Component component,

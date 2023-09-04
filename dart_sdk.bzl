@@ -1,4 +1,5 @@
 load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@build_bazel_rules_swift//swift:swift.bzl", "swift_library")
 
 SDK_ROOT = "external/dart-sdk"
 
@@ -1045,6 +1046,7 @@ def dart_io(runtime_mode = "release", deps = [], srcs = [], local_defines = []):
         "builtin_natives.cc",
         "io_natives.cc",
         "io_natives.h",
+        "dart_io_api_impl.cc",
     ])
     srcs += hdrs_from(PLATFORM_SOURCES)
     srcs += VM_API_HEADERS
@@ -1098,6 +1100,30 @@ def dart_io(runtime_mode = "release", deps = [], srcs = [], local_defines = []):
     #    defines += [ "DART_IO_ROOT_CERTS_DISABLED" ]
     #  }
     # }
+
+def bin_to_assembly(name, input, symbol):
+    native.genrule(
+        name = name + "_linkable",
+        srcs = [input],
+        outs = [name + ".S"],
+        cmd = " ".join([
+            "$(location @dart-sdk//:runtime/tools/bin_to_assembly.py)",
+            "--input $<",
+            "--output $@",
+            "--symbol_name " + symbol,
+            "--size_symbol_name " + symbol + "Size",
+        ]) + " " + select({
+            "@dart-sdk//:linux_x86_64": "--target_os linux --target_arch x64",
+            "@dart-sdk//:android_arm32": "--target_os android --target_arch arm32",
+            "@dart-sdk//:android_arm64": "--target_os android --target_arch arm64",
+            "@dart-sdk//:android_x86_64": "--target_os android --target_arch x64",
+            "@dart-sdk//:macos_arm64": "--target_os macos --target_arch arm64",
+            "@dart-sdk//:ios_arm64": "--target_os ios --target_arch arm64",
+        }),
+        tools = [
+            "@dart-sdk//:runtime/tools/bin_to_assembly.py",
+        ],
+    )
 
 def aot_snapshot(name, script, srcs = [], format = "assembly", sources = []):
     run_from_source = name == "gen_kernel"
@@ -1187,6 +1213,7 @@ def aot_snapshot(name, script, srcs = [], format = "assembly", sources = []):
         outs = [
             name + ".h",
             name + ".cc",
+            name + ".swift",
         ],
         cmd = " ".join([
             "$(location @dart-sdk//:dump_exports_exe)",
@@ -1226,19 +1253,23 @@ def aot_snapshot(name, script, srcs = [], format = "assembly", sources = []):
         }),
     )
 
+    bin_to_assembly(
+        name = name + "_dill",
+        input = ":" + name + ".dill",
+        symbol = "kAppDill",
+    )
+
     native.cc_library(
         name = name + "_jit_clib",
         srcs = [
             name + ".cc",
+            name + "_dill.S",
+            "@dart-sdk//:platform_product.S",
             "@dart-sdk//:runtime/bin/simple_jit_embedder.cc",
             "@dart-sdk//:runtime/bin/simple_embedder.h",
         ],
         hdrs = [
             name + ".h",
-        ],
-        data = [
-            "@dart-sdk//:platform_product.dill",
-            name + ".dill",
         ],
         tags = ["swift_module=" + name.capitalize() + "CLib"],
         deps = [
@@ -1247,12 +1278,12 @@ def aot_snapshot(name, script, srcs = [], format = "assembly", sources = []):
     )
 
     native.cc_library(
-        name = name + "_clib",
+        name = name + "_aot_clib",
         srcs = [
             name + ".cc",
             name + ".S",
             "@dart-sdk//:runtime/bin/simple_aot_embedder.cc",
-            "@dart-sdk//:runtime/bin/simple_aot_embedder.h",
+            "@dart-sdk//:runtime/bin/simple_embedder.h",
         ],
         hdrs = [
             name + ".h",
@@ -1261,6 +1292,24 @@ def aot_snapshot(name, script, srcs = [], format = "assembly", sources = []):
         deps = [
             "@dart-sdk//:libdart_product_aot",
         ],
+    )
+
+    swift_library(
+        name = name + "_swift",
+        srcs = [name + ".swift"],
+        module_name = name.capitalize(),
+        visibility = ["//visibility:public"],
+        deps = [
+            "//dart:hello_clib",
+        ],
+    )
+
+    native.alias(
+        name = name + "_clib",
+        actual = select({
+            "@dart-sdk//:building_jit": ":" + name + "_jit_clib",
+            "@dart-sdk//:building_aot": ":" + name + "_aot_clib",
+        }),
     )
 
 def aot_binary(name, script, srcs = []):

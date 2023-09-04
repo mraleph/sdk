@@ -64,14 +64,6 @@ Dart_Handle AbortIfError(Dart_Handle result, const char* action) {
   return result;
 }
 
-Dart_Handle AbortIfErrorOrNull(Dart_Handle result, const char* action) {
-  if (Dart_IsNull(AbortIfError(result, action))) {
-    LOG_ERROR("%s returned null unexpectedly\n", action);
-    abort();
-  }
-  return result;
-}
-
 Dart_Handle NewString(const char* str) {
   return ABORT_IF_ERROR(Dart_NewStringFromCString(str));
 }
@@ -166,6 +158,24 @@ void EnterMainIsolate() {
 }
 
 void ExitMainIsolate() {
+  Dart_ExitScope();
+  Dart_ExitIsolate();
+}
+
+void ProcessEvents(void* isolate) {
+  Dart_EnterIsolate(reinterpret_cast<Dart_Isolate>(isolate));
+  Dart_EnterScope();
+  ABORT_IF_ERROR(Dart_HandleMessage());
+  Dart_ExitScope();
+  Dart_ExitIsolate();
+}
+
+void ConnectToEventLoop(void (*notify)(void*)) {
+  MainIsolate();
+  Dart_EnterIsolate(main_isolate);
+  Dart_EnterScope();
+  Dart_SetMessageNotifyCallback(
+      reinterpret_cast<Dart_MessageNotifyCallback>(notify));
   Dart_ExitScope();
   Dart_ExitIsolate();
 }

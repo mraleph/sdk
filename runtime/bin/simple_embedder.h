@@ -9,7 +9,6 @@
 
 namespace dart::embedder::simple {
 
-void Configure(const char* platform_path, const char* app_path);
 void ConnectToEventLoop(void (*notify)(void*));
 void ProcessEvents(void* isolate);
 void EnterMainIsolate();

@@ -6,6 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(ANDROID) || defined(__ANDROID__)
+#include <android/log.h>
+#endif
+
 #include "include/bin/dart_io_api.h"
 #include "include/dart_api.h"
 #include "include/dart_tools_api.h"
@@ -91,6 +95,9 @@ void FUNCTION_NAME(Builtin_PrintString)(Dart_NativeArguments args) {
     Dart_PropagateError(result);
   }
 
+#if defined(ANDROID) || defined(__ANDROID__)
+  __android_log_print(ANDROID_LOG_INFO, "DART", "%s", chars);
+#else
   // Uses fwrite to support printing NUL bytes.
   intptr_t res = fwrite(chars, 1, length, stdout);
   ASSERT(res == length);
@@ -106,6 +113,7 @@ void FUNCTION_NAME(Builtin_PrintString)(Dart_NativeArguments args) {
                                     sizeof(newline));
     ASSERT(res == nullptr);
   }
+#endif
 }
 
 }  // namespace bin

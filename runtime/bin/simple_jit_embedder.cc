@@ -13,6 +13,15 @@
 
 #include "bin/dartutils.h"
 
+extern "C" {
+#define ASM_SYMBOL(Sym) Sym
+
+extern const uint8_t ASM_SYMBOL(kPlatformDill)[];
+extern const intptr_t ASM_SYMBOL(kPlatformDillSize);
+extern const uint8_t ASM_SYMBOL(kAppDill)[];
+extern const intptr_t ASM_SYMBOL(kAppDillSize);
+}
+
 namespace {
 
 #if defined(ANDROID) || defined(__ANDROID__)
@@ -62,14 +71,6 @@ void AbortIfError(char* result, const char* action) {
   }
 }
 
-Dart_Handle AbortIfErrorOrNull(Dart_Handle result, const char* action) {
-  if (Dart_IsNull(AbortIfError(result, action))) {
-    LOG_ERROR("%s returned null unexpectedly\n", action);
-    abort();
-  }
-  return result;
-}
-
 Dart_Handle NewString(const char* str) {
   return ABORT_IF_ERROR(Dart_NewStringFromCString(str));
 }
@@ -88,9 +89,6 @@ void ReadFully(const char* path, uint8_t** data, intptr_t* data_len) {
   dart::bin::DartUtils::CloseFile(stream);
 }
 
-uint8_t* platform_kernel_buffer = nullptr;
-intptr_t platform_kernel_buffer_size = 0;
-
 Dart_Isolate CreateGroupCallback(const char* script_uri,
                                  const char* name,
                                  const char* package_root,
@@ -100,6 +98,7 @@ Dart_Isolate CreateGroupCallback(const char* script_uri,
                                  char** error) {
   Dart_Isolate isolate = nullptr;
   if (strcmp(script_uri, DART_VM_SERVICE_ISOLATE_NAME) == 0) {
+    LOG_ERROR("STARTING VM SERVICE ISOLATE");
     dart::embedder::IsolateCreationData isolate_creation_data = {
         script_uri,
         name,
@@ -116,8 +115,8 @@ Dart_Isolate CreateGroupCallback(const char* script_uri,
     };
 
     isolate = dart::embedder::CreateVmServiceIsolateFromKernel(
-        isolate_creation_data, service_config, platform_kernel_buffer,
-        platform_kernel_buffer_size, error);
+        isolate_creation_data, service_config, ASM_SYMBOL(kPlatformDill),
+        ASM_SYMBOL(kPlatformDillSize), error);
     if (isolate == nullptr) {
       LOG_ERROR("Failed to start isolate %s (%s): %s\n", script_uri, name,
                 *error);
@@ -156,9 +155,6 @@ Dart_Handle LibraryTagHandler(Dart_LibraryTag tag,
 void* main_isolate_exports = nullptr;
 Dart_Isolate main_isolate = nullptr;
 
-const char* platform_path = nullptr;
-const char* app_path = nullptr;
-
 }  // namespace
 
 namespace dart::embedder::simple {
@@ -175,13 +171,6 @@ void* MainIsolate() {
   if (main_isolate != nullptr) {
     return main_isolate_exports;
   }
-
-  ReadFully(platform_path, &platform_kernel_buffer,
-            &platform_kernel_buffer_size);
-
-  uint8_t* kernel_buffer = nullptr;
-  intptr_t kernel_buffer_size = 0;
-  ReadFully(app_path, &kernel_buffer, &kernel_buffer_size);
 
   char* error;
 
@@ -219,7 +208,7 @@ void* MainIsolate() {
 
   Dart_Isolate isolate = Dart_CreateIsolateGroupFromKernel(
       /*script_uri=*/"main.dart",
-      /*name=*/"main", platform_kernel_buffer, platform_kernel_buffer_size,
+      /*name=*/"main", ASM_SYMBOL(kPlatformDill), ASM_SYMBOL(kPlatformDillSize),
       &isolate_flags,
       /*isolate_group_data=*/nullptr,
       /*isolate_data=*/nullptr, &error);
@@ -233,7 +222,8 @@ void* MainIsolate() {
   Dart_EnterScope();
 
   ABORT_IF_ERROR(Dart_SetLibraryTagHandler(&LibraryTagHandler));
-  ABORT_IF_ERROR(Dart_LoadScriptFromKernel(kernel_buffer, kernel_buffer_size));
+  ABORT_IF_ERROR(Dart_LoadScriptFromKernel(ASM_SYMBOL(kAppDill),
+                                           ASM_SYMBOL(kAppDillSize)));
   ABORT_IF_ERROR(dart::embedder::InitializeCoreLibraries());
 
   Dart_Handle exports =
@@ -264,11 +254,6 @@ void EnterMainIsolate() {
 void ExitMainIsolate() {
   Dart_ExitScope();
   Dart_ExitIsolate();
-}
-
-void Configure(const char* platform, const char* app) {
-  platform_path = strdup(platform);
-  app_path = strdup(app);
 }
 
 void ConnectToEventLoop(void (*notify)(void*)) {

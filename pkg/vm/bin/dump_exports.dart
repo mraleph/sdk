@@ -63,6 +63,21 @@ main(List<String> arguments) async {
     }
   }
 
+  String toSwift(String t) {
+    if (t == 'char*' || t == 'const char*') {
+      return 'String';
+    }
+    throw 'unknown type: "$t"';
+  }
+
+  Iterable<String> swiftNamed(Map<String, dynamic> e) sync* {
+    final p = e['p'] as List;
+    final n = e['pn'] as List;
+    for (var i = 0; i < p.length; i++) {
+      yield '${n[i]}:${toSwift(p[i])}';
+    }
+  }
+
   for (var p
       in component.mainMethod?.enclosingLibrary.procedures ?? <Procedure>[]) {
     if (p.name.text == '#ffiExports') {
@@ -106,10 +121,6 @@ extern "C" {
 
 $funcs
 
-void ${name}_Configure(const char* platform_path, const char* app_path) {
-  dart::embedder::simple::Configure(platform_path, app_path);
-}
-
 void ${name}_ConnectToEventLoop(void (*notify) (void*)) {
   dart::embedder::simple::ConnectToEventLoop(notify);
 }
@@ -128,8 +139,6 @@ extern "C" {
 
 $funcDecls
 
-void ${name}_Configure(const char* platform_path, const char* app_path);
-
 void ${name}_ConnectToEventLoop(void (*notify) (void*));
 void ${name}_ProcessEvents(void* isolate);
 
@@ -138,14 +147,50 @@ void ${name}_ProcessEvents(void* isolate);
 #endif
 ''';
 
+      String fromDart(String type) {
+        if (type == 'char*') {
+          return 'fromDartString';
+        }
+        throw 'unknown type: `$type`';
+      }
+
+      final swiftFuncs = [
+        for (var e in exports)
+          '''
+public func ${e['n']}(${swiftNamed(e).join(', ')}) -> ${toSwift(e['r'])} {
+  return ${fromDart(e['r'])}(${name}_${e['n']}(${e['pn'].join(', ')}));
+}
+'''
+      ].join('\n\n');
+
+      final swiftContent = '''
+import Foundation
+import ${name.capitalize()}CLib
+
+func fromDartString(_ cstr : UnsafeMutablePointer<CChar>?) -> String {
+  let result = String(cString: cstr!)
+  free(cstr)
+  return result
+}
+
+$swiftFuncs
+''';
+
       if (output != null) {
         File(output + ".h").writeAsStringSync(hContent);
         File(output + ".cc").writeAsStringSync(ccContent);
+        File(output + ".swift").writeAsStringSync(swiftContent);
       } else {
         print(hContent);
         print(ccContent);
       }
       break;
     }
+  }
+}
+
+extension on String {
+  String capitalize() {
+    return this.substring(0, 1).toUpperCase() + this.substring(1);
   }
 }

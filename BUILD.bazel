@@ -1,10 +1,12 @@
 load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 load(
     "dart_sdk.bzl",
     "COMMON_COPTS",
     "DART_EMBEDDER_API_SOURCES",
     "SDK_ROOT",
     "aot_binary",
+    "bin_to_assembly",
     "dart_executable",
     "dart_io",
     "dart_target_configuration",
@@ -22,6 +24,29 @@ exports_files(["runtime/bin/builtin.cc"] + DART_EMBEDDER_API_SOURCES + [
     "runtime/bin/simple_jit_embedder.cc",
     "runtime/bin/simple_embedder.h",
 ])
+
+string_flag(
+    name = "mode",
+    build_setting_default = "aot",
+    values = [
+        "jit",
+        "aot",
+    ],
+)
+
+config_setting(
+    name = "building_jit",
+    flag_values = {
+        ":mode": "jit",
+    },
+)
+
+config_setting(
+    name = "building_aot",
+    flag_values = {
+        ":mode": "aot",
+    },
+)
 
 vm_library(
     compiler = "aot",
@@ -237,6 +262,12 @@ genrule(
     outs = ["gen/runtime/version.cc"],
     cmd = "./$(location tools/make_version.py) --quiet --output $(location gen/runtime/version.cc) --input $(location runtime/vm/version_in.cc) --no_sdk_hash",
     tools = ["tools/make_version.py"],
+)
+
+bin_to_assembly(
+    name = "platform_product",
+    input = ":platform_product.dill",
+    symbol = "kPlatformDill",
 )
 
 # Producing Dart platform file

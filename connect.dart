@@ -11,10 +11,10 @@ import 'package:vm_service/src/vm_service.dart' show extensionCallHelper;
 final sdkRoot = p.dirname(Platform.script.toFilePath());
 
 Stream<String> startCompiler() async* {
-  final process = await Process.start(Platform.executable, [
-    p.join(sdkRoot, 'pkg', 'frontend_server/bin/frontend_server_starter.dart'),
+  final process = await Process.start(p.join(sdkRoot, 'frontend_server'), [
+    //p.join(sdkRoot, 'pkg', 'frontend_server/bin/frontend_server_starter.dart'),
     '--sdk-root',
-    'bazel-bin/swiftui_app/App_archive-root/Payload/App.app',
+    'bazel-out/darwin_arm64-opt/bin/external/dart-sdk/',
     '--platform',
     'platform_product.dill',
     '--source',
@@ -36,6 +36,7 @@ Stream<String> startCompiler() async* {
   Set<String> deps = {};
 
   bool compilationPending = false;
+  bool firstCompilation = true;
   final sw = Stopwatch()..start();
 
   final dillFiles = StreamController<String>();
@@ -51,7 +52,10 @@ Stream<String> startCompiler() async* {
     if (boundaryKey != null && line.startsWith(boundaryKey!)) {
       final results = line.split(' ');
       compilationPending = false;
-      print("compiled in ${sw.elapsedMilliseconds} ms");
+      if (!firstCompilation) {
+        print("recompiled in ${sw.elapsedMilliseconds} ms");
+      }
+      firstCompilation = false;
       dillFiles.add(results[1]);
       boundaryKey = null;
     } else if (line.startsWith('+')) {
@@ -94,16 +98,26 @@ Stream<String> startCompiler() async* {
 
 void main() async {
   final serviceClient =
-      await vmServiceConnectUri('ws://[::]:8787/ws', log: StdoutLog());
+      await vmServiceConnectUri('ws://localhost:8787/ws', log: StdoutLog());
   try {
     VM vm = await serviceClient.getVM();
-    print("Established connection to the VM");
+    print("Connected to the VM");
     List<IsolateRef> isolates = vm.isolates!;
+
+    final listResult =
+        await extensionCallHelper(serviceClient, '_listDevFS', {});
+
+    if (listResult.json['fsNames'].contains('reload')) {
+      await extensionCallHelper(serviceClient, '_deleteDevFS', {
+        'fsName': 'reload',
+      });
+    }
 
     final createResult = await extensionCallHelper(
         serviceClient, '_createDevFS', {'fsName': 'reload'});
     final uri = createResult.json['uri'];
 
+    var firstReload = true;
     await for (var dillPath in startCompiler()) {
       final sw = Stopwatch()..start();
       await extensionCallHelper(serviceClient, '_writeDevFSFile', {
@@ -114,7 +128,12 @@ void main() async {
       final dillPathTarget = Uri.parse(uri).resolve('main.dill');
       final result = await serviceClient.reloadSources(isolates.first.id!,
           rootLibUri: dillPathTarget.toString());
-      print('reloaded in ${sw.elapsedMilliseconds}');
+      if (firstReload) {
+        print("Battlecruiser operational 🚀");
+        firstReload = false;
+      } else {
+        print('reloaded in ${sw.elapsedMilliseconds}');
+      }
     }
   } finally {
     try {
@@ -122,7 +141,6 @@ void main() async {
           await extensionCallHelper(serviceClient, '_deleteDevFS', {
         'fsName': 'reload',
       });
-      print(deleteResult);
     } catch (_) {}
 
     await serviceClient.dispose();
