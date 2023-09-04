@@ -88,7 +88,7 @@ Stream<String> startCompiler() async* {
       compilationPending = true;
       sw.reset();
       process.stdin.writeln('recompile changed-files');
-      process.stdin.writeln('root:///hello.dart');
+      process.stdin.writeln('root:///' + p.basename(event.path));
       process.stdin.writeln('changed-files');
     }
   });
