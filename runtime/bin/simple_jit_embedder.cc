@@ -98,7 +98,6 @@ Dart_Isolate CreateGroupCallback(const char* script_uri,
                                  char** error) {
   Dart_Isolate isolate = nullptr;
   if (strcmp(script_uri, DART_VM_SERVICE_ISOLATE_NAME) == 0) {
-    LOG_ERROR("STARTING VM SERVICE ISOLATE");
     dart::embedder::IsolateCreationData isolate_creation_data = {
         script_uri,
         name,
