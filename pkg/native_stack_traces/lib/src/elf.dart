@@ -473,6 +473,7 @@ class ProgramHeader {
 
 /// An entry in the [SectionHeader] that describes a single [Section].
 class SectionHeaderEntry {
+  final int sectionIndex;
   final int nameIndex;
   final int type;
   final int flags;
@@ -487,6 +488,7 @@ class SectionHeaderEntry {
   late String name;
 
   SectionHeaderEntry._(
+      this.sectionIndex,
       this.nameIndex,
       this.type,
       this.flags,
@@ -499,7 +501,7 @@ class SectionHeaderEntry {
       this.entrySize,
       this.wordSize);
 
-  static SectionHeaderEntry fromReader(Reader reader) {
+  static SectionHeaderEntry fromReader(Reader reader, int sectionIndex) {
     final nameIndex = _readElfWord(reader);
     final type = _readElfWord(reader);
     final flags = _readElfNative(reader);
@@ -510,8 +512,8 @@ class SectionHeaderEntry {
     final info = _readElfWord(reader);
     final addrAlign = _readElfNative(reader);
     final entrySize = _readElfNative(reader);
-    return SectionHeaderEntry._(nameIndex, type, flags, addr, offset, size,
-        link, info, addrAlign, entrySize, reader.wordSize);
+    return SectionHeaderEntry._(sectionIndex, nameIndex, type, flags, addr,
+        offset, size, link, info, addrAlign, entrySize, reader.wordSize);
   }
 
   // sh_type constants from ELF specification.
@@ -601,8 +603,10 @@ class SectionHeader {
   static SectionHeader fromReader(Reader reader, ElfHeader header) {
     final headerReader =
         reader.shrink(header.sectionHeaderOffset, header.sectionHeaderSize);
-    final entries =
-        headerReader.readRepeated(SectionHeaderEntry.fromReader).toList();
+    int sectionIndex = 0;
+    final entries = headerReader
+        .readRepeated((r) => SectionHeaderEntry.fromReader(r, sectionIndex++))
+        .toList();
     final nameTableEntry = entries[header.sectionHeaderStringsIndex];
     assert(nameTableEntry.type == SectionHeaderEntry._SHT_STRTAB);
     return SectionHeader._(entries);
@@ -641,9 +645,10 @@ class SectionHeader {
 /// Only some sections are currently parsed by the  ELF reader; most are left
 /// unparsed as they are not needed for DWARF address translation.
 class Section {
+  final Reader reader;
   final SectionHeaderEntry headerEntry;
 
-  Section._(this.headerEntry);
+  Section._(this.reader, this.headerEntry);
 
   static Section fromReader(Reader reader, SectionHeaderEntry entry) {
     switch (entry.type) {
@@ -658,7 +663,7 @@ class Section {
       case SectionHeaderEntry._SHT_DYNAMIC:
         return DynamicTable.fromReader(reader, entry);
       default:
-        return Section._(entry);
+        return Section._(reader.shrink(entry.offset, entry.size), entry);
     }
   }
 
@@ -694,7 +699,9 @@ class Note extends Section {
   final String name;
   final Uint8List description;
 
-  Note._(super.headerEntry, this.type, this.name, this.description) : super._();
+  Note._(
+      super.reader, super.headerEntry, this.type, this.name, this.description)
+      : super._();
 
   static Note fromReader(Reader originalReader, SectionHeaderEntry entry) {
     final reader = originalReader.shrink(entry.offset, entry.size);
@@ -709,7 +716,7 @@ class Note extends Section {
     final descriptionEnd = descriptionStart + descriptionLength;
     final description =
         Uint8List.sublistView(reader.bdata, descriptionStart, descriptionEnd);
-    return Note._(entry, type, name, description);
+    return Note._(reader, entry, type, name, description);
   }
 
   @override
@@ -735,13 +742,13 @@ class Note extends Section {
 class StringTable extends Section implements DwarfContainerStringTable {
   final Map<int, String> _entries;
 
-  StringTable._(super.headerEntry, this._entries) : super._();
+  StringTable._(super.reader, super.headerEntry, this._entries) : super._();
 
   static StringTable fromReader(Reader reader, SectionHeaderEntry entry) {
     final sectionReader = reader.shrink(entry.offset, entry.size);
     final entries = Map.fromEntries(sectionReader
         .readRepeatedWithOffsets((r) => r.readNullTerminatedString()));
-    return StringTable._(entry, entries);
+    return StringTable._(sectionReader, entry, entries);
   }
 
   @override
@@ -920,14 +927,14 @@ class SymbolTable extends Section {
   final List<Symbol> _entries;
   final Map<String, Symbol> _nameCache;
 
-  SymbolTable._(super.headerEntry, this._entries)
+  SymbolTable._(super.reader, super.headerEntry, this._entries)
       : _nameCache = {},
         super._();
 
   static SymbolTable fromReader(Reader reader, SectionHeaderEntry entry) {
     final sectionReader = reader.shrink(entry.offset, entry.size);
     final entries = sectionReader.readRepeated(Symbol.fromReader).toList();
-    return SymbolTable._(entry, entries);
+    return SymbolTable._(sectionReader, entry, entries);
   }
 
   void _cacheNames(StringTable stringTable) {
@@ -987,7 +994,8 @@ class DynamicTable extends Section {
   final Map<int, int> _entries;
   final int _wordSize;
 
-  DynamicTable._(super.headerEntry, this._entries, this._wordSize) : super._();
+  DynamicTable._(super.reader, super.headerEntry, this._entries, this._wordSize)
+      : super._();
 
   static DynamicTable fromReader(Reader reader, SectionHeaderEntry entry) {
     final sectionReader = reader.shrink(entry.offset, entry.size);
@@ -1000,7 +1008,8 @@ class DynamicTable extends Section {
       if (tag == DynamicTableTag.DT_NULL.index) break;
       entries[tag] = value;
     }
-    return DynamicTable._(entry, entries, sectionReader.wordSize);
+    return DynamicTable._(
+        sectionReader, entry, entries, sectionReader.wordSize);
   }
 
   int? operator [](DynamicTableTag tag) => _entries[tag.index];
@@ -1090,6 +1099,11 @@ class Elf extends DwarfContainer {
 
   Iterable<Section> namedSections(String name) =>
       _sectionsByName[name] ?? <Section>[];
+
+  Section sectionByIndex(int sectionIndex) =>
+      _sections.values.elementAt(sectionIndex);
+
+  Iterable<Section> get sections => _sections.values;
 
   /// Checks that the contents of a given section have valid addresses when the
   /// file contents for the corresponding segment is loaded into memory.

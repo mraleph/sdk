@@ -49,6 +49,13 @@
 #define COMPRESSED_ONLY(x)
 #endif
 
+DART_FORCE_INLINE constexpr bool IsAvailableCpuReg(intptr_t reg) {
+  return ((dart::kDartAvailableCpuRegs & (1 << (reg))) != 0);
+}
+
+#define IS_AVAILABLE_CPU_REG(reg) IsAvailableCpuReg(reg)
+#define ALWAYS_TRUE(v) (true)
+
 #define COMMON_OFFSETS_LIST(FIELD, ARRAY, SIZEOF, ARRAY_SIZEOF,                \
                             PAYLOAD_SIZEOF, RANGE, CONSTANT)                   \
   ARRAY(Array, element_offset)                                                 \
@@ -152,7 +159,7 @@
   FIELD(Function, code_offset)                                                 \
   FIELD(Function, data_offset)                                                 \
   RANGE(Function, entry_point_offset, CodeEntryKind, CodeEntryKind::kNormal,   \
-        CodeEntryKind::kUnchecked, [](CodeEntryKind value) { return true; })   \
+        CodeEntryKind::kUnchecked, ALWAYS_TRUE)   \
   FIELD(Function, kind_tag_offset)                                             \
   FIELD(Function, signature_offset)                                            \
   FIELD(FutureOr, type_arguments_offset)                                       \
@@ -401,11 +408,9 @@
   FIELD(WeakReference, type_arguments_offset)                                  \
   RANGE(Code, entry_point_offset, CodeEntryKind, CodeEntryKind::kNormal,       \
         CodeEntryKind::kMonomorphicUnchecked,                                  \
-        [](CodeEntryKind value) { return true; })                              \
+        ALWAYS_TRUE)                              \
   RANGE(Thread, write_barrier_wrappers_thread_offset, Register, 0,             \
-        kNumberOfCpuRegisters - 1, [](Register reg) {                          \
-          return (kDartAvailableCpuRegs & (1 << reg)) != 0;                    \
-        })                                                                     \
+        kNumberOfCpuRegisters - 1, IS_AVAILABLE_CPU_REG)                                                                     \
                                                                                \
   SIZEOF(AbstractType, InstanceSize, UntaggedAbstractType)                     \
   SIZEOF(ApiError, InstanceSize, UntaggedApiError)                             \

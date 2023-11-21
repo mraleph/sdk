@@ -521,7 +521,7 @@ Var("dart_root") + "/third_party/pkg/tar":
               "version": "git_revision:fa7a5a9710540f30ff98ae48b62f2cdf72ed2acd",
           },
       ],
-      "condition": "host_os == linux",
+      # "condition": "host_os == linux",
       "dep_type": "cipd",
   },
 
