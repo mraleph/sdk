@@ -61,50 +61,65 @@ namespace dart {
 #define PRINT_FIELD_OFFSET(Class, Name)                                        \
   extern "C" const intptr_t AOT_##Class##_##Name = Class::Name();
 
-#define PRINT_ARRAY_LAYOUT(Class, Name) \
-  extern "C" const intptr_t AOT_##Class##_elements_start_offset = Class::ArrayTraits::elements_start_offset(); \
-  extern "C" const intptr_t AOT_##Class##_element_size = Class::ArrayTraits::kElementSize;
+#define PRINT_ARRAY_LAYOUT(Class, Name)                                        \
+  extern "C" const intptr_t AOT_##Class##_elements_start_offset =              \
+      Class::ArrayTraits::elements_start_offset();                             \
+  extern "C" const intptr_t AOT_##Class##_element_size =                       \
+      Class::ArrayTraits::kElementSize;
 
-#define PRINT_SIZEOF(Class, Name, What) \
+#define PRINT_SIZEOF(Class, Name, What)                                        \
   extern "C" const intptr_t AOT_##Class##_##Name = sizeof(What);
 
-#define RANGE_ELEM(I, Class, Name, Type, First, Last, Filter) \
-  (((static_cast<int>(First) <= (I)) && ((I) <= static_cast<int>(Last)) && Filter((I))) ? Class::Name(static_cast<Type>(I)) : -1)
+#define RANGE_ELEM(I, Class, Name, Type, First, Last, Filter)                  \
+  (((static_cast<int>(First) <= (I)) && ((I) <= static_cast<int>(Last)) &&     \
+    Filter((I)))                                                               \
+       ? Class::Name(static_cast<Type>(I))                                     \
+       : -1)
 
-#define RANGE_ELEM10(I, Class, Name, Type, First, Last, Filter) \
-    RANGE_ELEM(I*10 + 0, Class, Name, Type, First, Last, Filter), \
-    RANGE_ELEM(I*10 + 1, Class, Name, Type, First, Last, Filter), \
-    RANGE_ELEM(I*10 + 2, Class, Name, Type, First, Last, Filter), \
-    RANGE_ELEM(I*10 + 3, Class, Name, Type, First, Last, Filter), \
-    RANGE_ELEM(I*10 + 4, Class, Name, Type, First, Last, Filter), \
-    RANGE_ELEM(I*10 + 5, Class, Name, Type, First, Last, Filter), \
-    RANGE_ELEM(I*10 + 6, Class, Name, Type, First, Last, Filter), \
-    RANGE_ELEM(I*10 + 7, Class, Name, Type, First, Last, Filter), \
-    RANGE_ELEM(I*10 + 8, Class, Name, Type, First, Last, Filter), \
-    RANGE_ELEM(I*10 + 9, Class, Name, Type, First, Last, Filter)
+#define RANGE_ELEM10(I, Class, Name, Type, First, Last, Filter)                \
+  RANGE_ELEM(I * 10 + 0, Class, Name, Type, First, Last, Filter),              \
+      RANGE_ELEM(I * 10 + 1, Class, Name, Type, First, Last, Filter),          \
+      RANGE_ELEM(I * 10 + 2, Class, Name, Type, First, Last, Filter),          \
+      RANGE_ELEM(I * 10 + 3, Class, Name, Type, First, Last, Filter),          \
+      RANGE_ELEM(I * 10 + 4, Class, Name, Type, First, Last, Filter),          \
+      RANGE_ELEM(I * 10 + 5, Class, Name, Type, First, Last, Filter),          \
+      RANGE_ELEM(I * 10 + 6, Class, Name, Type, First, Last, Filter),          \
+      RANGE_ELEM(I * 10 + 7, Class, Name, Type, First, Last, Filter),          \
+      RANGE_ELEM(I * 10 + 8, Class, Name, Type, First, Last, Filter),          \
+      RANGE_ELEM(I * 10 + 9, Class, Name, Type, First, Last, Filter)
 
-
-#define PRINT_RANGE(Class, Name, Type, First, Last, Filter) \
-  extern "C" constexpr intptr_t AOT_##Class##_##Name##_FirstIndex = static_cast<intptr_t>(First); \
-  extern "C" constexpr intptr_t AOT_##Class##_##Name##_LastIndex = static_cast<intptr_t>(Last); \
-  static_assert((AOT_##Class##_##Name##_LastIndex - AOT_##Class##_##Name##_FirstIndex) <= 40); \
-  extern "C" const intptr_t AOT_##Class##_##Name [] = { \
-    RANGE_ELEM10(0, Class, Name, Type, First, Last, Filter), \
-    RANGE_ELEM10(1, Class, Name, Type, First, Last, Filter), \
-    RANGE_ELEM10(2, Class, Name, Type, First, Last, Filter), \
-    RANGE_ELEM10(3, Class, Name, Type, First, Last, Filter), \
+#define PRINT_RANGE(Class, Name, Type, First, Last, Filter)                    \
+  extern "C" constexpr intptr_t AOT_##Class##_##Name##_FirstIndex =            \
+      static_cast<intptr_t>(First);                                            \
+  extern "C" constexpr intptr_t AOT_##Class##_##Name##_LastIndex =             \
+      static_cast<intptr_t>(Last);                                             \
+  static_assert((AOT_##Class##_##Name##_LastIndex -                            \
+                 AOT_##Class##_##Name##_FirstIndex) <= 40);                    \
+  extern "C" const intptr_t AOT_##Class##_##Name[] = {                         \
+      RANGE_ELEM10(0, Class, Name, Type, First, Last, Filter),                 \
+      RANGE_ELEM10(1, Class, Name, Type, First, Last, Filter),                 \
+      RANGE_ELEM10(2, Class, Name, Type, First, Last, Filter),                 \
+      RANGE_ELEM10(3, Class, Name, Type, First, Last, Filter),                 \
   };
 
-#define PRINT_CONSTANT(Class, Name) \
+#define PRINT_CONSTANT(Class, Name)                                            \
   extern "C" const intptr_t AOT_##Class##_##Name = Class::Name;
 
-    JIT_OFFSETS_LIST(PRINT_FIELD_OFFSET, PRINT_ARRAY_LAYOUT, PRINT_SIZEOF,
-                     PRINT_ARRAY_SIZEOF, PRINT_PAYLOAD_SIZEOF, PRINT_RANGE,
-                     PRINT_CONSTANT)
+JIT_OFFSETS_LIST(PRINT_FIELD_OFFSET,
+                 PRINT_ARRAY_LAYOUT,
+                 PRINT_SIZEOF,
+                 PRINT_ARRAY_SIZEOF,
+                 PRINT_PAYLOAD_SIZEOF,
+                 PRINT_RANGE,
+                 PRINT_CONSTANT)
 
-    COMMON_OFFSETS_LIST(PRINT_FIELD_OFFSET, PRINT_ARRAY_LAYOUT, PRINT_SIZEOF,
-                        PRINT_ARRAY_SIZEOF, PRINT_PAYLOAD_SIZEOF, PRINT_RANGE,
-                        PRINT_CONSTANT)
+COMMON_OFFSETS_LIST(PRINT_FIELD_OFFSET,
+                    PRINT_ARRAY_LAYOUT,
+                    PRINT_SIZEOF,
+                    PRINT_ARRAY_SIZEOF,
+                    PRINT_PAYLOAD_SIZEOF,
+                    PRINT_RANGE,
+                    PRINT_CONSTANT)
 
 #undef PRINT_FIELD_OFFSET
 #undef PRINT_ARRAY_LAYOUT

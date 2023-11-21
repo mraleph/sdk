@@ -738,7 +738,8 @@ class Thread : public ThreadState {
 
   static intptr_t write_barrier_wrappers_thread_offset(Register reg) {
     ASSERT((kDartAvailableCpuRegs & (1 << reg)) != 0);
-    intptr_t index = Utils::CountOneBits32(kDartAvailableCpuRegs & ((1 << reg) - 1));
+    intptr_t index =
+        Utils::CountOneBits32(kDartAvailableCpuRegs & ((1 << reg) - 1));
     return OFFSET_OF(Thread, write_barrier_wrappers_entry_points_) +
            index * sizeof(uword);
   }
