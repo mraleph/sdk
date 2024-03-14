@@ -26,6 +26,8 @@ import 'summary_collector.dart';
 import 'types.dart';
 import 'utils.dart';
 
+import '../escape_analysis/summary.dart' as escape_analysis;
+
 // TODO(alexmarkov)
 // Unordered list of various improvements in type flow analysis,
 // organized in several categories:
@@ -1810,6 +1812,8 @@ class TypeFlowAnalysis
   void process() {
     workList.process();
     hierarchyCache.seal();
+
+    escape_analysis.analyse(this);
   }
 
   /// Returns true if analysis found that given member

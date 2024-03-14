@@ -26,6 +26,8 @@ import 'summary.dart';
 import 'types.dart';
 import 'utils.dart';
 
+import '../escape_analysis/summary.dart' as escape_analysis;
+
 /// Summary collector relies on either full or partial mixin resolution.
 /// Currently VmTarget.performModularTransformationsOnLibraries performs
 /// partial mixin resolution.
@@ -896,6 +898,14 @@ class SummaryCollector extends RecursiveResultVisitor<TypeExpr?> {
     debugPrint("---------------------------------");
 
     Statistics.summariesCreated++;
+
+    if (member.function != null && localFunction == null) {
+      final escapeSummary = escape_analysis.summarize(this, member.function!);
+      debugPrint("---------- ESCAPE ANALYSIS SUMMARY ---------");
+      debugPrint(escapeSummary);
+      debugPrint("---------------------------------");
+      _summary.escapeSummary = escapeSummary;
+    }
 
     return _summary;
   }

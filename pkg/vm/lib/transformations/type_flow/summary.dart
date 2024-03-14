@@ -9,6 +9,8 @@ import 'dart:core' hide Type;
 
 import 'package:kernel/ast.dart'
     hide Statement, StatementVisitor, MapLiteralEntry;
+import 'package:vm/transformations/escape_analysis/summary.dart'
+    as escape_analysis;
 
 import 'calls.dart';
 import 'types.dart';
@@ -963,6 +965,8 @@ class Summary {
 
   // Analysis time of callees. Populated only if kPrintTimings.
   int calleeTime = 0;
+
+  escape_analysis.Summary? escapeSummary;
 
   Summary(this.name,
       {this.parameterCount = 0,
