@@ -1720,6 +1720,7 @@ class TypeFlowAnalysis
   final LibraryIndex libraryIndex;
   final PragmaAnnotationParser annotationMatcher;
   final ProtobufHandler? protobufHandler;
+  final bool escapeAnalysis;
   late NativeCodeOracle nativeCodeOracle;
   late _ClassHierarchyCache hierarchyCache;
   late SummaryCollector summaryCollector;
@@ -1750,7 +1751,8 @@ class TypeFlowAnalysis
       this.environment,
       this.libraryIndex,
       this.protobufHandler,
-      PragmaAnnotationParser? matcher)
+      PragmaAnnotationParser? matcher,
+      {this.escapeAnalysis = false})
       : annotationMatcher =
             matcher ?? new ConstantPragmaAnnotationParser(coreTypes, target) {
     nativeCodeOracle = new NativeCodeOracle(libraryIndex, annotationMatcher);
@@ -1765,7 +1767,8 @@ class TypeFlowAnalysis
         nativeCodeOracle,
         hierarchyCache,
         this,
-        protobufHandler);
+        protobufHandler,
+        escapeAnalysis);
     _invocationsCache = new _InvocationsCache(this);
     workList = new _WorkList(this);
 
@@ -1813,7 +1816,9 @@ class TypeFlowAnalysis
     workList.process();
     hierarchyCache.seal();
 
-    escape_analysis.analyse(this);
+    if (escapeAnalysis) {
+      escape_analysis.analyse(this);
+    }
   }
 
   /// Returns true if analysis found that given member

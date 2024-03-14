@@ -125,7 +125,8 @@ class PrintSummaries extends RecursiveVisitor {
         NativeCodeOracle(coreTypes.index, annotationParser),
         GenericInterfacesInfoImpl(coreTypes, hierarchy),
         FakeSharedVariableBuilder(),
-        /*_protobufHandler=*/ null);
+        /*_protobufHandler=*/ null,
+        /*escapeAnalysis=*/ false);
   }
 
   String print(Library node) {

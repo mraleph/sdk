@@ -55,7 +55,8 @@ Component transformComponent(
     bool treeShakeSignatures = true,
     bool treeShakeWriteOnlyFields = true,
     bool treeShakeProtobufs = false,
-    bool useRapidTypeAnalysis = true}) {
+    bool useRapidTypeAnalysis = true,
+    bool escapeAnalysis = false}) {
   void ignoreAmbiguousSupertypes(Class cls, Supertype a, Supertype b) {}
   final hierarchy = new ClassHierarchy(component, coreTypes,
           onAmbiguousSupertypes: ignoreAmbiguousSupertypes)
@@ -102,7 +103,8 @@ Component transformComponent(
       types,
       libraryIndex,
       protobufHandler,
-      matcher);
+      matcher,
+      escapeAnalysis: escapeAnalysis);
 
   Procedure? main = component.mainMethod;
 

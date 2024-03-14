@@ -554,6 +554,7 @@ class SummaryCollector extends RecursiveResultVisitor<TypeExpr?> {
   final GenericInterfacesInfo _genericInterfacesInfo;
   final SharedVariableBuilder _sharedVariableBuilder;
   final ProtobufHandler? _protobufHandler;
+  final bool escapeAnalysis;
 
   final Map<TreeNode, Call> callSites = <TreeNode, Call>{};
   final Map<AsExpression, TypeCheck> explicitCasts =
@@ -604,15 +605,17 @@ class SummaryCollector extends RecursiveResultVisitor<TypeExpr?> {
   StaticTypeContext? _staticTypeContext;
 
   SummaryCollector(
-      this.target,
-      this._environment,
-      this._hierarchy,
-      this._entryPointsListener,
-      this._typesBuilder,
-      this._nativeCodeOracle,
-      this._genericInterfacesInfo,
-      this._sharedVariableBuilder,
-      this._protobufHandler) {
+    this.target,
+    this._environment,
+    this._hierarchy,
+    this._entryPointsListener,
+    this._typesBuilder,
+    this._nativeCodeOracle,
+    this._genericInterfacesInfo,
+    this._sharedVariableBuilder,
+    this._protobufHandler,
+    this.escapeAnalysis,
+  ) {
     constantAllocationCollector = new ConstantAllocationCollector(this);
     _nullMethodsAndGetters.addAll(getSelectors(
         _hierarchy, _environment.coreTypes.deprecatedNullClass,
@@ -899,12 +902,14 @@ class SummaryCollector extends RecursiveResultVisitor<TypeExpr?> {
 
     Statistics.summariesCreated++;
 
-    if (member.function != null && localFunction == null) {
-      final escapeSummary = escape_analysis.summarize(this, member.function!);
-      debugPrint("---------- ESCAPE ANALYSIS SUMMARY ---------");
-      debugPrint(escapeSummary);
-      debugPrint("---------------------------------");
-      _summary.escapeSummary = escapeSummary;
+    if (escapeAnalysis) {
+      if (member.function != null && localFunction == null) {
+        final escapeSummary = escape_analysis.summarize(this, member.function!);
+        debugPrint("---------- ESCAPE ANALYSIS SUMMARY ---------");
+        debugPrint(escapeSummary);
+        debugPrint("---------------------------------");
+        _summary.escapeSummary = escapeSummary;
+      }
     }
 
     return _summary;

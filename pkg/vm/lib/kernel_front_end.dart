@@ -124,6 +124,9 @@ void declareCompilerOptions(ArgParser args) {
   args.addFlag('rta',
       help: 'Use rapid type analysis for faster compilation in AOT mode.',
       defaultsTo: true);
+  args.addFlag('escape-analysis',
+      help: 'Compute which allocations escape into the heap from stack.',
+      defaultsTo: false);
   args.addFlag('tree-shake-write-only-fields',
       help: 'Enable tree shaking of fields which are only written in AOT mode.',
       defaultsTo: true);
@@ -214,6 +217,7 @@ Future<int> runCompiler(ArgResults options, String usage) async {
   final bool aot = options['aot'];
   final bool tfa = options['tfa'];
   final bool rta = options['rta'];
+  final bool escapeAnalysis = options['escape-analysis'];
   final bool linkPlatform = options['link-platform'];
   final bool embedSources = options['embed-sources'];
   final bool enableAsserts = options['enable-asserts'];
@@ -329,7 +333,8 @@ Future<int> runCompiler(ArgResults options, String usage) async {
       minimalKernel: minimalKernel,
       treeShakeWriteOnlyFields: treeShakeWriteOnlyFields,
       targetOS: targetOS,
-      fromDillFile: fromDillFile);
+      fromDillFile: fromDillFile,
+      escapeAnalysis: escapeAnalysis);
 
   errorPrinter.printCompilationMessages();
 
@@ -432,6 +437,7 @@ Future<KernelCompilationResults> compileToKernel(
   bool aot = false,
   bool useGlobalTypeFlowAnalysis = false,
   bool useRapidTypeAnalysis = true,
+  bool escapeAnalysis = false,
   required Map<String, String> environmentDefines,
   bool enableAsserts = true,
   bool useProtobufTreeShakerV2 = false,
@@ -493,6 +499,7 @@ Future<KernelCompilationResults> compileToKernel(
         minimalKernel: minimalKernel,
         treeShakeWriteOnlyFields: treeShakeWriteOnlyFields,
         useRapidTypeAnalysis: useRapidTypeAnalysis,
+        escapeAnalysis: escapeAnalysis,
         keepClassNamesImplementing: keepClassNamesImplementing,
         resourcesFile: resourcesFile);
 
@@ -555,6 +562,7 @@ Future runGlobalTransformations(
     {bool minimalKernel = false,
     bool treeShakeWriteOnlyFields = false,
     bool useRapidTypeAnalysis = true,
+    bool escapeAnalysis = false,
     NnbdMode nnbdMode = NnbdMode.Weak,
     Map<String, String>? environmentDefines,
     List<String>? keepClassNamesImplementing,
@@ -589,7 +597,8 @@ Future runGlobalTransformations(
         treeShakeSignatures: !minimalKernel,
         treeShakeWriteOnlyFields: treeShakeWriteOnlyFields,
         treeShakeProtobufs: useProtobufTreeShakerV2,
-        useRapidTypeAnalysis: useRapidTypeAnalysis);
+        useRapidTypeAnalysis: useRapidTypeAnalysis,
+        escapeAnalysis: escapeAnalysis);
   } else {
     devirtualization.transformComponent(coreTypes, component);
     no_dynamic_invocations_annotator.transformComponent(component);
