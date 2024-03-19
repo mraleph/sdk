@@ -154,7 +154,8 @@ Future<CompilerOutput?> compileToModule(compiler.WasmCompilerOptions options,
   globalTypeFlow.transformComponent(target, coreTypes, component,
       treeShakeSignatures: true,
       treeShakeWriteOnlyFields: true,
-      useRapidTypeAnalysis: false);
+      useRapidTypeAnalysis: false,
+      escapeAnalysis: true);
 
   if (options.dumpKernelAfterTfa != null) {
     writeComponentToText(component,

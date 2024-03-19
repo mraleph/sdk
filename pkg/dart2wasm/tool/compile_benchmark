@@ -6,7 +6,7 @@
 # Script to compile a benchmark using dart2wasm. Assumes the Dart repo's
 # directory structure.
 
-set -e
+set -ex
 
 function follow_links() {
   file="$1"

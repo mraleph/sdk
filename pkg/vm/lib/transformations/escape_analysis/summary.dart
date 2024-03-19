@@ -1,5 +1,7 @@
 import 'dart:collection';
 
+import 'package:kernel/ast.dart';
+import 'package:kernel/external_name.dart';
 import 'package:kernel/kernel.dart';
 import 'package:vm/transformations/type_flow/calls.dart';
 import 'package:vm/transformations/type_flow/summary.dart' as tfa;
@@ -16,18 +18,42 @@ import 'package:vm/transformations/type_flow/types.dart' as tfa;
 //
 
 sealed class Op {
-  const Op();
+  final List<int> inputs;
+
+  const Op({required this.inputs});
 
   @override
   String toString() {
-    return '${runtimeType}($operandsStr)';
+    final sb = StringBuffer();
+    sb.write(runtimeType);
+    final operands = operandsStr;
+    if (operands.isNotEmpty) {
+      sb.write('[');
+      sb.write(operands);
+      sb.write(']');
+    }
+    final inputsStr = this.inputsStr;
+    if (inputsStr.isNotEmpty) {
+      sb.write('(');
+      sb.write(inputsStr);
+      sb.write(')');
+    }
+    return sb.toString();
   }
 
-  String get operandsStr;
+  String get operandsStr => '';
 
-  bool isTrivial(List<Op> ops);
+  String get inputsStr => inputs.join(', ');
 
-  void rename(List<int> renames);
+  bool isTrivial(List<Op> ops) {
+    return _deref(inputs, ops);
+  }
+
+  void rename(List<int> renames) {
+    for (var i = 0; i < inputs.length; i++) {
+      inputs[i] = renames[inputs[i] + 1];
+    }
+  }
 }
 
 int _derefArg(int arg, List<Op> ops) {
@@ -58,23 +84,13 @@ bool _deref(List<int> inputs, List<Op> ops) {
   return trivial;
 }
 
-int _renameOne(int value, List<int> renames) {
-  return renames[value + 1];
-}
-
-void _rename(List<int> inputs, List<int> renames) {
-  for (var i = 0; i < inputs.length; i++) {
-    inputs[i] = _renameOne(inputs[i], renames);
-  }
-}
-
 final class Parameter extends Op {
   final int index;
   final String? name;
 
   bool escapes = false;
 
-  Parameter(this.index, {this.name});
+  Parameter(this.index, {this.name}) : super(inputs: const <int>[]);
 
   @override
   String get operandsStr =>
@@ -84,35 +100,16 @@ final class Parameter extends Op {
   bool isTrivial(List<Op> ops) {
     return false;
   }
-
-  @override
-  void rename(List<int> renames) {
-    // Nothing to do
-  }
 }
 
 final class Merge extends Op {
   bool escaped = false;
-  final List<int> inputs;
 
-  Merge(this.inputs);
-
-  bool isTrivial(List<Op> ops) {
-    return _deref(inputs, ops);
-  }
-
-  @override
-  void rename(List<int> renames) {
-    _rename(inputs, renames);
-  }
-
-  @override
-  String get operandsStr => inputs.join(', ');
+  Merge({required super.inputs});
 }
 
-final class InvocationArguments {
-  final List<int> positional;
-  final List<int> named;
+final class InvocationSelector {
+  final int numPositional;
   final List<String> names;
   late final Map<String, int> _descriptor = toDescriptor(names);
 
@@ -134,158 +131,218 @@ final class InvocationArguments {
   static Map<String, int> toDescriptor(List<String> names) => _descriptorCache
       .putIfAbsent(names, () => {for (var (i, name) in names.indexed) name: i});
 
-  InvocationArguments(
-    this.positional, {
-    this.named = const [],
+  InvocationSelector(
+    this.numPositional, {
     this.names = const [],
   });
 
-  bool isTrivial(List<Op> ops) {
-    return _deref(positional, ops) & _deref(named, ops);
+  String formatArgs(List<int> args) {
+    final result = [
+      ...args.take(numPositional),
+      for (var i = 0; i < names.length; i++)
+        '${names[i]}: ${args[numPositional + i]}',
+    ];
+    return result.join(', ');
   }
 
-  @override
-  String toString() {
-    return positional.join(', ') +
-        (named.isNotEmpty ? ', ' : '') +
-        [for (var i = 0; i < named.length; i++) '${names[i]}: ${named[i]}']
-            .join(', ');
-  }
-
-  int getNamed(String name) {
+  int getNamed(List<int> inputs, String name) {
     final idx = _descriptor[name];
     if (idx == null) {
       return -1;
     }
-    return named[idx];
+    return inputs[numPositional + idx];
   }
 }
 
 final class Invocation extends Op {
-  final tfa.Call call;
-  final InvocationArguments args;
-  Invocation(this.call, this.args);
+  final TreeNode? callNode;
+  final Selector callSelector;
+
+  final InvocationSelector selector;
+
+  Invocation(
+    this.callSelector, {
+    required super.inputs,
+    required this.selector,
+    required this.callNode,
+  });
 
   @override
-  String get operandsStr => '$call; ' + args.toString();
+  String get operandsStr => '$callSelector';
 
   @override
-  bool isTrivial(List<Op> ops) {
-    return args.isTrivial(ops);
-  }
-
-  @override
-  void rename(List<int> renames) {
-    _rename(args.positional, renames);
-    _rename(args.named, renames);
-  }
+  String get inputsStr => selector.formatArgs(inputs);
 }
 
 final class Escape extends Op {
-  /* int | List<int> */ Object value;
+  final String where;
 
-  Escape(this.value);
+  Escape({required super.inputs}) : where = StackTrace.current.toString();
 
-  bool isTrivial(List<Op> ops) {
-    if (value is List<int>) {
-      return _deref(value as List<int>, ops);
-    } else {
-      value = _derefArg(value as int, ops);
-      return value == -1;
-    }
-  }
-
-  @override
-  void rename(List<int> renames) {
-    if (value is List<int>) {
-      _rename(value as List<int>, renames);
-    } else {
-      value = _renameOne(value as int, renames);
-    }
-  }
-
-  @override
-  String get operandsStr => '$value';
+  String get operandsStr => where;
 }
 
 final class Allocation extends Op {
   TreeNode node;
   bool escapes = false;
 
-  Allocation(this.node);
+  Allocation(this.node, {required super.inputs});
 
   @override
-  String get operandsStr => escapes ? 'escapes' : '';
+  String get operandsStr {
+    final sb = StringBuffer();
+    sb.write(_constructedType);
+    if (escapes) {
+      sb.write(', escapes');
+    }
+    return sb.toString();
+  }
+
+  String? get _constructedType => switch (node) {
+        final ConstructorInvocation ctor => ctor.constructedType.toString(),
+        StaticInvocation(:final target) =>
+          target.enclosingClass!.name.toString(),
+        FunctionNode() => '<closure>',
+        _ => '?',
+      };
 
   @override
   bool isTrivial(List<Op> ops) {
     return false;
   }
-
-  @override
-  void rename(List<int> renames) {}
 }
 
-class _VariableCollector extends RecursiveVisitor {
-  int depth = -1;
+class VariableInfo {
+  final Scope owner;
+
+  bool captured = false;
+  bool alwaysEscapes = false;
+
+  VariableInfo(this.owner);
+}
+
+class Scope {
+  final Scope? parent;
+  final Map<VariableDeclaration, VariableInfo> variables = {};
+
   bool hasAwait = false;
-  bool _capturedThis = false;
-  final captured = <VariableDeclaration, bool>{};
+
+  Scope({this.parent});
+
+  void declare(VariableDeclaration v) {
+    variables[v] = VariableInfo(this);
+  }
+
+  VariableInfo use(VariableDeclaration v) {
+    VariableInfo? info = variables[v];
+    if (info == null) {
+      // Variable is not declare in the current scope. We need to find
+      // it in the parent scope.
+      if (parent == null) {
+        throw 'Use of undeclared variable: $v';
+      }
+
+      variables[v] = info = parent!.use(v)..captured = true;
+    }
+    return info;
+  }
+
+  void finishScope() {
+    if (hasAwait) {
+      // If the scope contains await then we mark all variables escaping.
+      for (var v in variables.values) {
+        v.alwaysEscapes = true;
+      }
+    }
+  }
+
+  bool alwaysEscapes(VariableDeclaration v) {
+    return variables[v]!.alwaysEscapes;
+  }
+
+  Iterable<VariableDeclaration> get captured sync* {
+    for (var MapEntry(key: v, value: info) in variables.entries) {
+      if (info.owner != this) {
+        yield v;
+      }
+    }
+  }
+}
+
+class _ScopeBuilder extends RecursiveVisitor {
+  final this$ = VariableDeclaration('%this%');
+
+  Scope scope = Scope(parent: null);
+
+  final Map<FunctionNode, Scope> scopes = {};
 
   @override
   void visitVariableDeclaration(VariableDeclaration node) {
     super.visitVariableDeclaration(node);
-    if (depth == 0) {
-      captured[node] = false;
-    }
+    scope.declare(node);
   }
 
   @override
   void visitAwaitExpression(AwaitExpression node) {
-    hasAwait = true;
+    super.visitAwaitExpression(node);
+    scope.hasAwait = true;
+  }
+
+  @override
+  void visitYieldStatement(YieldStatement node) {
+    super.visitYieldStatement(node);
+    scope.hasAwait = true;
   }
 
   @override
   void visitThisExpression(ThisExpression node) {
     super.visitThisExpression(node);
-    if (depth > 0) {
-      _capturedThis = true;
-    }
+    scope.use(this$);
   }
 
   @override
   void visitVariableGet(VariableGet node) {
     super.visitVariableGet(node);
-    if (depth > 0 && captured.containsKey(node.variable)) {
-      captured[node.variable] = true;
-    }
+    scope.use(node.variable);
   }
 
   @override
   void visitFunctionNode(FunctionNode node) {
-    depth++;
+    scope = Scope(parent: scope);
+    scopes[node] = scope;
+    super.visitFunctionNode(node);
+    scope.finishScope();
+    scope = scope.parent!;
+  }
+
+  void buildScopes(FunctionNode node) {
+    scopes[node] = scope;
+    node.positionalParameters.forEach(visitVariableDeclaration);
+    node.namedParameters.forEach(visitVariableDeclaration);
     if (node.parent case final Constructor ctor) {
       for (var initializer in ctor.initializers) {
         initializer.accept(this);
       }
+      scope.declare(this$);
+    } else if (node.parent case final Member member) {
+      if (member.isInstanceMember) {
+        scope.declare(this$);
+      }
     }
-    super.visitFunctionNode(node);
-    depth--;
+    node.body?.accept(this);
+    if (node.parent case Member(isExternal: true)) {
+      scope.hasAwait = true;
+    }
+    scope.finishScope();
   }
-
-  bool capturesVar(VariableDeclaration node) {
-    return hasAwait || captured[node]!;
-  }
-
-  bool get capturesThis => hasAwait || _capturedThis;
 }
 
 class _SummaryBuilder extends RecursiveVisitor {
-  final collector = _VariableCollector();
+  final scopeBuilder = _ScopeBuilder();
 
   final tfa.SummaryCollector tfaSummaryCollector;
 
-  int numParameters = 0;
+  late final int numParameters;
   final List<Op> ops = [];
 
   Map<VariableDeclaration, int> environment = {};
@@ -300,17 +357,17 @@ class _SummaryBuilder extends RecursiveVisitor {
 
   @override
   void visitVariableDeclaration(VariableDeclaration node) {
-    environment[node] = pushOp(Merge(<int>[]));
+    environment[node] = pushOp(Merge(inputs: <int>[]));
     if (node.initializer case final initializer?) {
       (ops[environment[node]!] as Merge).inputs.add(visitForValue(initializer));
-    }
-    if (collector.capturesVar(node)) {
-      pushOp(Escape(environment[node]!));
     }
   }
 
   @override
   void visitVariableGet(VariableGet node) {
+    if (!environment.containsKey(node.variable)) {
+      throw 'Unable to find ${node.variable}';
+    }
     stack.add(environment[node.variable]!);
   }
 
@@ -331,7 +388,8 @@ class _SummaryBuilder extends RecursiveVisitor {
   void merge(Map<VariableDeclaration, int> other) {
     for (var decl in other.keys) {
       if (environment.containsKey(decl) && environment[decl] != other[decl]) {
-        environment[decl] = addOp(Merge([environment[decl]!, other[decl]!]));
+        environment[decl] =
+            addOp(Merge(inputs: [environment[decl]!, other[decl]!]));
       }
     }
   }
@@ -426,8 +484,14 @@ class _SummaryBuilder extends RecursiveVisitor {
   @override
   void visitAwaitExpression(AwaitExpression node) {
     final value = visitForValue(node.operand);
-    addOp(Escape(value));
-    stack.add(-1);
+    addOp(Escape(inputs: [value]));
+    pushUnknown();
+  }
+
+  @override
+  void visitYieldStatement(YieldStatement node) {
+    final value = visitForValue(node.expression);
+    addOp(Escape(inputs: [value]));
   }
 
   @override
@@ -439,19 +503,22 @@ class _SummaryBuilder extends RecursiveVisitor {
   void visitLogicalExpression(LogicalExpression node) {
     visitForValue(node.left);
     visitForValue(node.right);
-    stack.add(-1);
+    pushUnknown();
   }
 
   @override
   void visitConstantExpression(ConstantExpression node) {
-    stack.add(-1);
+    pushUnknown();
   }
 
   @override
   void visitStringConcatenation(StringConcatenation node) {
-    final values = [for (var expr in node.expressions) visitForValue(expr)];
-    pushOp(Escape(values));
-    stack.add(-1);
+    pushOp(Escape(
+      inputs: [
+        for (var expr in node.expressions) visitForValue(expr),
+      ],
+    ));
+    pushUnknown();
   }
 
   @override
@@ -461,8 +528,31 @@ class _SummaryBuilder extends RecursiveVisitor {
       values.add(visitForValue(entry.key));
       values.add(visitForValue(entry.value));
     }
-    pushOp(Escape(values));
-    stack.add(-1);
+    pushOp(Escape(inputs: values));
+    pushUnknown();
+  }
+
+  @override
+  void visitSetLiteral(SetLiteral node) {
+    final values = <int>[];
+    for (var entry in node.expressions) {
+      values.add(visitForValue(entry));
+    }
+    pushOp(Escape(inputs: values));
+    pushUnknown();
+  }
+
+  @override
+  void visitRecordLiteral(RecordLiteral node) {
+    final values = <int>[];
+    for (var entry in node.positional) {
+      values.add(visitForValue(entry));
+    }
+    for (var entry in node.named) {
+      values.add(visitForValue(entry.value));
+    }
+    pushOp(Escape(inputs: values));
+    pushUnknown();
   }
 
   @override
@@ -471,104 +561,145 @@ class _SummaryBuilder extends RecursiveVisitor {
     for (var entry in node.expressions) {
       values.add(visitForValue(entry));
     }
-    pushOp(Escape(values));
-    stack.add(-1);
+    pushOp(Escape(inputs: values));
+    pushUnknown();
   }
 
   @override
   void visitStringLiteral(StringLiteral node) {
-    stack.add(-1);
+    pushUnknown();
   }
 
   @override
   void visitTypeLiteral(TypeLiteral node) {
-    stack.add(-1);
+    pushUnknown();
   }
 
   @override
   void visitDoubleLiteral(DoubleLiteral node) {
-    stack.add(-1);
+    pushUnknown();
   }
 
   @override
   void visitIntLiteral(IntLiteral node) {
-    stack.add(-1);
+    pushUnknown();
   }
 
   @override
   void visitBoolLiteral(BoolLiteral node) {
-    stack.add(-1);
+    pushUnknown();
   }
 
   @override
   void visitNullLiteral(NullLiteral node) {
-    stack.add(-1);
+    pushUnknown();
   }
 
   @override
   void visitStaticGet(StaticGet node) {
-    stack.add(-1);
+    pushUnknown();
   }
 
   @override
   void visitStaticSet(StaticSet node) {
     final value = visitForValue(node.value);
-    addOp(Escape(value));
+    addOp(Escape(inputs: [value]));
     stack.add(value);
   }
 
   @override
   void visitInstanceTearOff(InstanceTearOff node) {
     final receiver = visitForValue(node.receiver);
-    addOp(Escape(receiver));
-    stack.add(-1);
+    addOp(Escape(inputs: [receiver]));
+    pushUnknown();
   }
 
   tfa.Call? getCallFor(TreeNode callNode) {
     return tfaSummaryCollector.callSites[callNode];
   }
 
-  int unaryCall(TreeNode callNode, TreeNode arg0) {
+  int unaryCall(
+    Selector callSelector,
+    TreeNode arg0, {
+    TreeNode? callNode,
+  }) {
     final arg0Value = visitForValue(arg0);
-    final call = getCallFor(callNode);
-    if (call == null) {
-      return pushOp(Escape(arg0Value));
-    }
-    return pushOp(Invocation(call, InvocationArguments([arg0Value])));
+    return pushOp(Invocation(callSelector,
+        inputs: [arg0Value],
+        selector: InvocationSelector(1),
+        callNode: callNode));
   }
 
-  int binaryCall(TreeNode callNode, TreeNode arg0, TreeNode arg1) {
+  int binaryCall(
+    Selector callSelector,
+    TreeNode arg0,
+    TreeNode arg1, {
+    TreeNode? callNode,
+  }) {
     final arg0Value = visitForValue(arg0);
     final arg1Value = visitForValue(arg1);
-    final call = getCallFor(callNode);
-    if (call == null) {
-      return pushOp(Escape([arg0Value, arg1Value]));
-    }
-    return pushOp(
-        Invocation(call, InvocationArguments([arg0Value, arg1Value])));
+    return pushOp(Invocation(
+      callSelector,
+      inputs: [arg0Value, arg1Value],
+      selector: InvocationSelector(2),
+      callNode: callNode,
+    ));
   }
 
-  int callWithArguments(TreeNode callNode, Arguments args,
-      {TreeNode? receiver, int? receiverValue}) {
+  bool interesting = false;
+  void trace(String v) {
+    if (interesting) {
+      print(v);
+    }
+  }
+
+  int callWithArguments(
+    Selector callSelector,
+    Arguments args, {
+    TreeNode? receiver,
+    int? receiverValue,
+    TreeNode? callNode,
+  }) {
     if (receiver != null) {
       receiverValue = visitForValue(receiver);
     }
-    final argValues = translateArguments(args, implicitReceiver: receiverValue);
-    final call = getCallFor(callNode);
-    if (call == null) {
-      return pushOp(Escape([...argValues.positional, ...argValues.named]));
-    }
-    return pushOp(Invocation(call, argValues));
+    final (inputs, selector) =
+        translateArguments(args, implicitReceiver: receiverValue);
+    return pushOp(Invocation(
+      callSelector,
+      inputs: inputs,
+      selector: selector,
+      callNode: callNode,
+    ));
+  }
+
+  @override
+  void visitRecordIndexGet(RecordIndexGet node) {
+    visitForValue(node.receiver);
+    pushUnknown();
+  }
+
+  @override
+  void visitRecordNameGet(RecordNameGet node) {
+    visitForValue(node.receiver);
+    pushUnknown();
   }
 
   @override
   void visitInstanceGet(InstanceGet node) {
-    unaryCall(node, node.receiver);
+    unaryCall(
+        InterfaceSelector(node.interfaceTarget, callKind: CallKind.PropertyGet),
+        node.receiver,
+        callNode: node);
   }
 
   @override
   void visitInstanceSet(InstanceSet node) {
-    binaryCall(node, node.receiver, node.value);
+    binaryCall(
+        InterfaceSelector(node.interfaceTarget, callKind: CallKind.PropertySet),
+        node.receiver,
+        node.value,
+        callNode: node);
   }
 
   @override
@@ -576,36 +707,54 @@ class _SummaryBuilder extends RecursiveVisitor {
     visitForValue(node.expression);
   }
 
-  @override
-  void visitFunctionExpression(FunctionExpression node) {
-    // TODO(XXX) just mark all captured variables as escaping.
+  void pushUnknown() {
     stack.add(-1);
   }
 
   @override
-  void visitFunctionDeclaration(FunctionDeclaration node) {
-    environment[node.variable] = -1;
+  void visitFunctionExpression(FunctionExpression node) {
+    // We take the body of the closure and simply inline it into the current
+    // summary.
+    visitFunctionNode(node.function);
+
+    final inputs = [
+      for (var v in scopeBuilder.scopes[node.function]!.captured)
+        environment[v]!
+    ];
+    pushOp(Allocation(node.function, inputs: inputs));
   }
 
-  InvocationArguments translateArguments(Arguments arguments,
+  @override
+  void visitFunctionDeclaration(FunctionDeclaration node) {
+    final inputs = [
+      for (var v in scopeBuilder.scopes[node.function]!.captured)
+        if (v == node.variable) -1 else environment[v]!
+    ];
+    pushOp(Allocation(node.function, inputs: inputs));
+    environment[node.variable] = stack.removeLast();
+    visitFunctionNode(node.function);
+  }
+
+  (List<int>, InvocationSelector) translateArguments(Arguments arguments,
       {int? implicitReceiver}) {
-    final positional = <int>[];
-    if (implicitReceiver != null) positional.add(implicitReceiver);
+    final inputs = <int>[];
+    if (implicitReceiver != null) inputs.add(implicitReceiver);
     for (var arg in arguments.positional) {
-      positional.add(visitForValue(arg));
+      inputs.add(visitForValue(arg));
     }
 
-    var named = const <int>[], names = <String>[];
+    final numPositional = inputs.length;
+
+    var names = const <String>[];
     if (arguments.named.isNotEmpty) {
-      named = <int>[];
       names = <String>[];
       for (var arg in arguments.named) {
-        named.add(visitForValue(arg.value));
+        inputs.add(visitForValue(arg.value));
         names.add(arg.name);
       }
     }
 
-    return InvocationArguments(positional, named: named, names: names);
+    return (inputs, InvocationSelector(numPositional, names: names));
   }
 
   @override
@@ -616,24 +765,25 @@ class _SummaryBuilder extends RecursiveVisitor {
   @override
   void visitEqualsNull(EqualsNull node) {
     visitForValue(node.expression);
-    stack.add(-1);
+    pushUnknown();
   }
 
   @override
   void visitEqualsCall(EqualsCall node) {
-    binaryCall(node, node.left, node.right);
+    binaryCall(InterfaceSelector(node.interfaceTarget), node.left, node.right,
+        callNode: node);
   }
 
   @override
   void visitIsExpression(IsExpression node) {
     visitForValue(node.operand);
-    stack.add(-1);
+    pushUnknown();
   }
 
   @override
   void visitAsExpression(AsExpression node) {
     visitForValue(node.operand);
-    stack.add(-1);
+    pushUnknown();
   }
 
   @override
@@ -641,7 +791,7 @@ class _SummaryBuilder extends RecursiveVisitor {
     visitForValue(node.condition);
     final thenValue = visitForValue(node.then);
     final otherwiseValue = visitForValue(node.otherwise);
-    pushOp(Merge([thenValue, otherwiseValue]));
+    pushOp(Merge(inputs: [thenValue, otherwiseValue]));
   }
 
   int addOp(Op op) {
@@ -658,80 +808,121 @@ class _SummaryBuilder extends RecursiveVisitor {
 
   @override
   void visitDynamicInvocation(DynamicInvocation node) {
-    callWithArguments(node, node.arguments);
+    callWithArguments(
+      DynamicSelector(CallKind.Method, node.name),
+      node.arguments,
+    );
   }
 
   @override
   void visitDynamicGet(DynamicGet node) {
-    unaryCall(node, node.receiver);
+    unaryCall(
+      DynamicSelector(CallKind.PropertyGet, node.name),
+      node.receiver,
+    );
   }
 
   @override
   void visitDynamicSet(DynamicSet node) {
-    binaryCall(node, node.receiver, node.value);
+    binaryCall(DynamicSelector(CallKind.PropertySet, node.name), node.receiver,
+        node.value);
   }
 
   @override
   void visitStaticInvocation(StaticInvocation node) {
-    callWithArguments(node, node.arguments);
+    callWithArguments(DirectSelector(node.target), node.arguments);
+    if (node.target.isFactory) {
+      stack.removeLast();
+      pushOp(Allocation(node, inputs: const <int>[]));
+    }
   }
 
   @override
   void visitInstanceInvocation(InstanceInvocation node) {
-    callWithArguments(node, node.arguments, receiver: node.receiver);
+    callWithArguments(
+      InterfaceSelector(node.interfaceTarget),
+      node.arguments,
+      receiver: node.receiver,
+      callNode: node,
+    );
   }
 
   @override
   void visitSuperPropertyGet(SuperPropertyGet node) {
-    unaryCall(node, ThisExpression());
+    unaryCall(
+      DirectSelector(node.interfaceTarget, callKind: CallKind.PropertyGet),
+      ThisExpression(),
+    );
   }
 
   @override
   void visitSuperPropertySet(SuperPropertySet node) {
-    binaryCall(node, ThisExpression(), node.value);
+    binaryCall(
+      DirectSelector(node.interfaceTarget, callKind: CallKind.PropertySet),
+      ThisExpression(),
+      node.value,
+    );
   }
 
   @override
   void visitSuperMethodInvocation(SuperMethodInvocation node) {
-    callWithArguments(node, node.arguments, receiver: ThisExpression());
+    callWithArguments(
+      DirectSelector(node.interfaceTarget),
+      node.arguments,
+      receiver: ThisExpression(),
+    );
   }
 
   @override
   void visitConstructorInvocation(ConstructorInvocation node) {
-    final alloc = pushOp(Allocation(node));
-    callWithArguments(node, node.arguments, receiverValue: alloc);
+    final alloc = pushOp(Allocation(node, inputs: const <int>[]));
+    callWithArguments(
+      DirectSelector(node.target),
+      node.arguments,
+      receiverValue: alloc,
+    );
     stack.add(alloc);
   }
 
   @override
   void visitFunctionInvocation(FunctionInvocation node) {
-    callWithArguments(node, node.arguments);
+    final functionValue = visitForValue(node.receiver);
+    callWithArguments(
+      FunctionSelector(tfa.emptyType),
+      node.arguments,
+      receiverValue: functionValue,
+    );
   }
 
   @override
   void visitLocalFunctionInvocation(LocalFunctionInvocation node) {
-    callWithArguments(node, node.arguments);
+    final functionValue = environment[node.variable]!;
+    callWithArguments(
+      FunctionSelector(tfa.emptyType),
+      node.arguments,
+      receiverValue: functionValue,
+    );
   }
 
   @override
   void visitReturnStatement(ReturnStatement node) {
     if (node.expression case final expr?) {
       final value = visitForValue(expr);
-      ops.add(Escape(value));
+      ops.add(Escape(inputs: [value]));
     }
   }
 
   @override
   void visitThrow(Throw node) {
     final value = visitForValue(node.expression);
-    ops.add(Escape(value));
-    stack.add(-1);
+    ops.add(Escape(inputs: [value]));
+    pushUnknown();
   }
 
   @override
   void visitRethrow(Rethrow node) {
     // Nothing to do.
-    stack.add(-1);
+    pushUnknown();
   }
 
   @override
@@ -747,7 +938,11 @@ class _SummaryBuilder extends RecursiveVisitor {
 
   @override
   void visitRedirectingInitializer(RedirectingInitializer node) {
-    callWithArguments(node, node.arguments, receiver: ThisExpression());
+    callWithArguments(
+      DirectSelector(node.target),
+      node.arguments,
+      receiver: ThisExpression(),
+    );
   }
 
   @override
@@ -758,50 +953,67 @@ class _SummaryBuilder extends RecursiveVisitor {
   @override
   void visitFieldInitializer(FieldInitializer node) {
     final value = visitForValue(node.value);
-    ops.add(Escape(
-        value)); // TODO(XXX): tie escape of the value with escape of the receiver.
+    ops.add(Escape(inputs: [value]));
   }
 
   @override
   void visitSuperInitializer(SuperInitializer node) {
-    callWithArguments(node, node.arguments, receiver: ThisExpression());
+    callWithArguments(
+      DirectSelector(node.target),
+      node.arguments,
+      receiver: ThisExpression(),
+    );
   }
 
   @override
   void visitFunctionNode(FunctionNode node) {
-    final parent = node.parent as Member;
-    node.accept(collector);
-
-    if (parent.isInstanceMember) {
-      ops.add(Parameter(0)..escapes = collector.capturesThis);
-    } else if (parent is Constructor) {
-      ops.add(Parameter(0)..escapes = collector.capturesThis);
+    if (scopeBuilder.scopes.isEmpty) {
+      interesting = isInterestingMember(node.parent);
+      scopeBuilder.buildScopes(node);
     }
 
+    // We are entering the given node. We assume the scopes are already built.
+    final currentScope = scopeBuilder.scopes[node]!;
+
+    // Handle parameters.
+
     final params = <(VariableDeclaration, int)>[];
+    void createParam(VariableDeclaration param, {String? name}) {
+      int val = -1;
+      if (currentScope.parent == null) {
+        val = pushOp(Parameter(ops.length, name: name)
+          ..escapes = currentScope.alwaysEscapes(param));
+      }
+      params.add((param, val));
+    }
+
+    if (currentScope.parent == null) {
+      final parent = node.parent as Member;
+      if (parent.isInstanceMember || parent is Constructor) {
+        createParam(scopeBuilder.this$);
+      }
+    }
+
     for (var param in node.positionalParameters) {
-      params.add((
-        param,
-        pushOp(Parameter(ops.length)..escapes = collector.capturesVar(param))
-      ));
+      createParam(param);
     }
 
     for (var param in node.namedParameters) {
-      params.add((
-        param,
-        pushOp(Parameter(ops.length, name: param.name)
-          ..escapes = collector.capturesVar(param))
-      ));
+      createParam(param, name: param.name);
     }
 
-    numParameters = ops.length;
+    if (currentScope.parent == null) {
+      numParameters = ops.length;
+    }
 
     for (var (v, idx) in params) {
-      environment[v] = pushOp(Merge([idx]));
+      environment[v] = pushOp(Merge(inputs: [
+        if (idx != -1) idx,
+      ]));
     }
 
-    if (parent is Constructor) {
-      for (var initializer in parent.initializers) {
+    if (node.parent case Constructor(:final initializers)) {
+      for (var initializer in initializers) {
         initializer.accept(this);
       }
     }
@@ -839,12 +1051,11 @@ class Summary {
 
     final op = ops[v];
     switch (op) {
-      case Merge(escaped: false, :final inputs) && final m:
+      case Merge(escaped: false) && final m:
         m.escaped = true;
-        for (var u in inputs) {
+        for (var u in m.inputs) {
           markEscaping(u, analysis);
         }
-        return;
 
       case Parameter(escapes: false) && final p:
         p.escapes = true;
@@ -852,6 +1063,9 @@ class Summary {
 
       case Allocation(escapes: false) && final a:
         a.escapes = true;
+        for (var u in a.inputs) {
+          markEscaping(u, analysis);
+        }
 
       default:
         return;
@@ -861,13 +1075,36 @@ class Summary {
 
 final summaries = <Summary>[];
 
+final interestingMembers = <String>{
+  'SkwasmPaint.isAntiAlias',
+  'TwentyThree._drawBox',
+  'Canvas.drawRect',
+  'SkwasmCanvas.drawRect',
+};
+
+bool isInterestingMember(TreeNode? m) {
+  return m is Member &&
+      (m.enclosingLibrary.importUri.path.endsWith('test.dart') ||
+          interestingMembers
+              .contains('${m.enclosingClass?.name}.${m.name.text}'));
+}
+
 Summary summarize(tfa.SummaryCollector tfaSummaryCollector, FunctionNode node) {
   final visitor = _SummaryBuilder(tfaSummaryCollector: tfaSummaryCollector);
   node.accept(visitor);
 
-  final nop = Merge([-1]);
+  final bool xxx = isInterestingMember(node.parent);
+
+  final nop = Merge(inputs: [-1]);
 
   final ops = visitor.ops;
+  if (xxx) {
+    print("${node.parent}:");
+    for (var (i, op) in ops.indexed) {
+      print("$i: $op");
+    }
+    print("");
+  }
 
   final escaped = List<bool>.filled(ops.length, false);
   final interesting = List<bool>.filled(ops.length + 1, false);
@@ -887,18 +1124,16 @@ Summary summarize(tfa.SummaryCollector tfaSummaryCollector, FunctionNode node) {
       p.escapes = true;
     } else if (ops[v] case final Allocation a) {
       a.escapes = true;
+      for (var u in a.inputs) {
+        markEscaped(u);
+      }
     }
   }
 
   for (var op in ops) {
-    if (op case Escape(value: final v)) {
-      // Mark all escaping values.
-      if (v case final List<int> values) {
-        for (var v in values) {
-          markEscaped(v);
-        }
-      } else {
-        markEscaped(v as int);
+    if (op case Escape(:final inputs)) {
+      for (var v in inputs) {
+        markEscaped(v);
       }
     }
   }
@@ -948,21 +1183,14 @@ Summary summarize(tfa.SummaryCollector tfaSummaryCollector, FunctionNode node) {
       case Merge():
         ops[i] = nop;
 
-      case Invocation(:final args):
-        if (!args.positional.any(isInteresting) &&
-            !args.named.any(isInteresting)) {
+      case Invocation(:final inputs):
+        if (!inputs.any(isInteresting)) {
           ops[i] = nop;
         }
 
-      case Escape(:final value):
-        if (value is List<int>) {
-          if (!value.any(isInteresting)) {
-            ops[i] = nop;
-          }
-        } else {
-          if (!isInteresting(value as int)) {
-            ops[i] = nop;
-          }
+      case Escape(:final inputs):
+        if (!inputs.any(isInteresting)) {
+          ops[i] = nop;
         }
 
       case Allocation(escapes: true):
@@ -1033,6 +1261,14 @@ Summary summarize(tfa.SummaryCollector tfaSummaryCollector, FunctionNode node) {
     summaries.add(summary);
   }
 
+  if (xxx) {
+    print("COMPACTED ${node.parent}:");
+    for (var (i, op) in ops.indexed) {
+      print("$i: $op");
+    }
+    print("");
+  }
+
   return summary;
 }
 
@@ -1054,19 +1290,24 @@ class EscapeAnalysis {
 
   void handleDirectInvocation(Invocation invocation, Member target) {
     trace(
-        '    -> call of $target [${target.runtimeType}] [${invocation.call.selector}]');
+        '    -> call of $target [${target.runtimeType}] [${invocation.callSelector}]');
     if (target is Field) {
       if (target.isLate) {
         handleUnknownInvocation(invocation);
       }
-      if (invocation.call.selector.isSetter) {
-        summary.markEscaping(invocation.args.positional[1], this);
+      if (invocation.callSelector.isSetter) {
+        summary.markEscaping(invocation.inputs[1], this);
       }
       return; // Accessing field should not do anything.
     }
-    final tfaSummary = analysis.getSummary(target);
+    final tfaSummary = analysis.tryGetSummary(target);
+    if (tfaSummary == null) {
+      // Not reachable member.
+      return;
+    }
     if (tfaSummary.escapeSummary case final escapeSummary?) {
-      final args = invocation.args;
+      final inputs = invocation.inputs;
+      final selector = invocation.selector;
       escapeSummary.callers.add(summary);
       if (!escapeSummary.processed && !escapeSummary.inWorklist) {
         worklist.add(escapeSummary);
@@ -1078,22 +1319,23 @@ class EscapeAnalysis {
         trace('      | $p');
         if (p.escapes) {
           if (p.name case final name?) {
-            summary.markEscaping(args.getNamed(name), this);
-          } else if (p.index < args.positional.length) {
+            summary.markEscaping(selector.getNamed(inputs, name), this);
+          } else if (p.index < selector.numPositional) {
             // Positional parameter.
-            summary.markEscaping(args.positional[p.index], this);
+            summary.markEscaping(inputs[p.index], this);
           }
         }
       }
     } else {
-      throw 'No escape summary';
+      handleUnknownInvocation(invocation);
+      //throw 'No escape summary for $target';
     }
   }
 
   void _handleInvocationWithConcreteReceiver(
       tfa.ConcreteType receiver, Invocation invocation) {
     final cls = receiver.cls as dynamic;
-    Member? target = cls.getDispatchTarget(invocation.call.selector);
+    Member? target = cls.getDispatchTarget(invocation.callSelector);
     if (target != null) {
       handleDirectInvocation(invocation, target);
     } else {
@@ -1101,11 +1343,10 @@ class EscapeAnalysis {
     }
   }
 
-  void handleUnknownInvocation(Invocation op) {
-    for (var v in op.args.positional) {
-      summary.markEscaping(v, this);
-    }
-    for (var v in op.args.named) {
+  void handleUnknownInvocation(Invocation op, {bool ignoreReceiver = false}) {
+    final inputs = op.inputs;
+    for (var i = ignoreReceiver ? 1 : 0; i < inputs.length; i++) {
+      final v = inputs[i];
       summary.markEscaping(v, this);
     }
   }
@@ -1121,16 +1362,20 @@ class EscapeAnalysis {
   }
 
   void process() {
-    interesting = summary.member?.name.text == '_ensureDoneFuture';
+    interesting = isInterestingMember(summary.member);
 
     trace('processing summary for ${summary.member}');
     for (var (i, op) in summary.ops.indexed) {
       trace('$i: $op');
-      if (op case Invocation(:final call)) {
-        if (call.isMonomorphic && call.monomorphicTarget != null) {
+      if (op case Invocation(:final callSelector, :final callNode)) {
+        final call = callNode != null ? analysis.callSite(callNode) : null;
+        if (call != null &&
+            call.isMonomorphic &&
+            call.monomorphicTarget != null) {
+          if (callSelector is FunctionSelector) throw 'what?';
           handleDirectInvocation(op, call.monomorphicTarget!);
         } else {
-          final selector = call.selector;
+          final selector = callSelector;
           switch (selector) {
             case DirectSelector(:final member):
               handleDirectInvocation(op, member);
@@ -1153,8 +1398,10 @@ class EscapeAnalysis {
                 assert(receiver is tfa.EmptyType);
               }
 
-            case DynamicSelector():
             case FunctionSelector():
+              handleUnknownInvocation(op, ignoreReceiver: true);
+
+            case DynamicSelector():
               handleUnknownInvocation(op);
           }
         }
@@ -1181,6 +1428,8 @@ class EscapeAnalysis {
           break;
         }
       }
+
+      interesting = isInterestingMember(summary.member);
 
       if (interesting) {
         print('${summary.member}');

@@ -1778,6 +1778,8 @@ class TypeFlowAnalysis
 
   _Invocation get currentInvocation => workList.callStack.last;
 
+  Summary? tryGetSummary(Member member) => _summaries[member];
+
   Summary getSummary(Member member) {
     Summary? summary = _summaries[member];
     if (summary == null) {

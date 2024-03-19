@@ -547,6 +547,7 @@ typedef JumpHandler = void Function(List<TypeExpr?> state);
 class SummaryCollector extends RecursiveResultVisitor<TypeExpr?> {
   final Target target;
   final TypeEnvironment _environment;
+  TypeEnvironment get $env => _environment;
   final ClosedWorldClassHierarchy _hierarchy;
   final EntryPointsListener _entryPointsListener;
   final TypesBuilder _typesBuilder;
@@ -905,6 +906,9 @@ class SummaryCollector extends RecursiveResultVisitor<TypeExpr?> {
     if (escapeAnalysis) {
       if (member.function != null && localFunction == null) {
         final escapeSummary = escape_analysis.summarize(this, member.function!);
+        if (escape_analysis.isInterestingMember(member)) {
+          print(_summary);
+        }
         debugPrint("---------- ESCAPE ANALYSIS SUMMARY ---------");
         debugPrint(escapeSummary);
         debugPrint("---------------------------------");
