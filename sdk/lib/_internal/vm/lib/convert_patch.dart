@@ -17,7 +17,8 @@ import "dart:_internal"
         POWERS_OF_TEN,
         unsafeCast,
         writeIntoOneByteString,
-        writeIntoTwoByteString;
+        writeIntoTwoByteString,
+        createOneByteStringFromCharacters;
 
 import "dart:typed_data" show Uint8List, Uint16List;
 
@@ -139,12 +140,12 @@ class _JsonListener {
   }
 
   void propertyName() {
-    key = value as String;
+    key = unsafeCast<String>(value);
     value = null;
   }
 
   void propertyValue() {
-    var map = currentContainer as Map;
+    var map = unsafeCast<Map>(currentContainer);
     var reviver = this.reviver;
     if (reviver != null) {
       value = reviver(key, value);
@@ -164,7 +165,7 @@ class _JsonListener {
   }
 
   void arrayElement() {
-    var list = currentContainer as List;
+    var list = unsafeCast<List>(currentContainer);
     var reviver = this.reviver;
     if (reviver != null) {
       value = reviver(list.length, value);
@@ -819,16 +820,24 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
       position = parsePartial(position);
       if (position == length) return;
     }
+    final charAttributes = _characterAttributes;
+
     int state = this.state;
+    outer:
     while (position < length) {
-      int char = getChar(position);
-      switch (char) {
-        case SPACE:
-        case CARRIAGE_RETURN:
-        case NEWLINE:
-        case TAB:
-          position++;
+      int char = 0;
+      do {
+        char = getChar(position);
+        if ((charAttributes[char] & CHAR_WHITESPACE) == 0) {
           break;
+        }
+        position++;
+        if (position >= length) {
+          break outer;
+        }
+      } while (true);
+
+      switch (char) {
         case QUOTE:
           if ((state & ALLOW_STRING_MASK) != 0) fail(position);
           state |= VALUE_READ_BITS;
@@ -988,6 +997,24 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
     return length;
   }
 
+  static const int CHAR_SIMPLE_STRING_END = 1;
+  static const int CHAR_WHITESPACE = 2;
+
+  static final Uint8List _characterAttributes = () {
+    final list = Uint8List(256);
+    for (var i = 0; i < SPACE; i++) {
+      list[i] |= CHAR_SIMPLE_STRING_END;
+    }
+    list[QUOTE] |= CHAR_SIMPLE_STRING_END;
+    list[BACKSLASH] |= CHAR_SIMPLE_STRING_END;
+
+    list[SPACE] |= CHAR_WHITESPACE;
+    list[CARRIAGE_RETURN] |= CHAR_WHITESPACE;
+    list[NEWLINE] |= CHAR_WHITESPACE;
+    list[TAB] |= CHAR_WHITESPACE;
+    return list;
+  }();
+
   /**
    * Parses a string value.
    *
@@ -995,31 +1022,40 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
    * Returned position right after the final quote.
    */
   int parseString(int position) {
+    final charAttributes = _characterAttributes;
+
     // Format: '"'([^\x00-\x1f\\\"]|'\\'[bfnrt/\\"])*'"'
     // Initial position is right after first '"'.
     int start = position;
     int end = chunkEnd;
     int bits = 0;
-    while (position < end) {
-      int char = getChar(position++);
+
+    int char = 0;
+    do {
+      // Caveat: do not combine the following two lines together. It helps
+      // compiler to generate better code (it currently can't reorder operations
+      // to reduce register pressure).
+      char = getChar(position);
+      position++;
       bits |= char; // Includes final '"', but that never matters.
-      // BACKSLASH is larger than QUOTE and SPACE.
-      if (char > BACKSLASH) {
-        continue;
+      if ((charAttributes[char] & CHAR_SIMPLE_STRING_END) != 0) {
+        break;
       }
-      if (char == BACKSLASH) {
-        beginString();
-        int sliceEnd = position - 1;
-        if (start < sliceEnd) addSliceToString(start, sliceEnd);
-        return parseStringToBuffer(sliceEnd);
-      }
-      if (char == QUOTE) {
-        listener.handleString(getString(start, position - 1, bits));
-        return position;
-      }
-      if (char < SPACE) {
-        fail(position - 1, "Control character in string");
-      }
+    } while (position < end);
+
+    if (char == QUOTE) {
+      int sliceEnd = position - 1;
+      listener.handleString(getString(start, sliceEnd, bits));
+      return sliceEnd + 1;
+    }
+    if (char == BACKSLASH) {
+      int sliceEnd = position - 1;
+      beginString();
+      if (start < sliceEnd) addSliceToString(start, sliceEnd);
+      return parseStringToBuffer(sliceEnd);
+    }
+    if (char < SPACE) {
+      fail(position - 1, "Control character in string");
     }
     beginString();
     if (start < end) addSliceToString(start, end);
@@ -1066,6 +1102,8 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
    * slices of non-escape characters using [addSliceToString].
    */
   int parseStringToBuffer(int position) {
+    final charAttributes = _characterAttributes;
+
     int end = chunkEnd;
     int start = position;
     while (true) {
@@ -1075,11 +1113,20 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
         }
         return chunkString(STR_PLAIN);
       }
-      int char = getChar(position++);
-      if (char > BACKSLASH) continue;
+
+      int char = 0;
+      do {
+        char = getChar(position);
+        position++;
+        if ((charAttributes[char] & CHAR_SIMPLE_STRING_END) != 0) {
+          break;
+        }
+      } while (position < end);
+
       if (char < SPACE) {
         fail(position - 1); // Control character in string.
       }
+
       if (char == QUOTE) {
         int quotePosition = position - 1;
         if (quotePosition > start) {
@@ -1088,13 +1135,16 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
         listener.handleString(endString());
         return position;
       }
+
       if (char != BACKSLASH) {
         continue;
       }
+
       // Handle escape.
       if (position - 1 > start) {
         addSliceToString(start, position - 1);
       }
+
       if (position == end) return chunkString(STR_ESCAPE);
       position = parseStringEscape(position);
       if (position == end) return position;
@@ -1518,7 +1568,7 @@ class _JsonUtf8Parser extends _JsonParserWithListener
   String getString(int start, int end, int bits) {
     const int maxAsciiChar = 0x7f;
     if (bits <= maxAsciiChar) {
-      return new String.fromCharCodes(chunk, start, end);
+      return createOneByteStringFromCharacters(chunk, start, end);
     }
     beginString();
     if (start < end) addSliceToString(start, end);
