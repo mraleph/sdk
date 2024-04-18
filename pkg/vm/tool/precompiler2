@@ -114,7 +114,7 @@ $DART                                                                          \
      "$SOURCE_FILE"
 
 # Step 2: Generate snapshot from the Kernel binary.
-"$BIN_DIR"/gen_snapshot                                                        \
+"$BIN_DIR"/clang_x64/gen_snapshot                                                        \
      ${GEN_SNAPSHOT_FLAGS}                                                     \
      "$GEN_SNAPSHOT_OPTION"                                                    \
      "$GEN_SNAPSHOT_FILENAME"                                                  \

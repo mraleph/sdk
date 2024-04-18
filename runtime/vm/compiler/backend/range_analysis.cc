@@ -1344,9 +1344,18 @@ class BoundsCheckGeneralizer {
   Scheduler scheduler_;
 };
 
+static bool IsMarkedWithNoBoundsChecks(const Function& function) {
+  Object& options = Object::Handle();
+  return Library::FindPragma(dart::Thread::Current(),
+                             /*only_core=*/false, function,
+                             Symbols::vm_unsafe_no_bounds_checks(),
+                             /*multiple=*/false, &options);
+}
+
 void RangeAnalysis::EliminateRedundantBoundsChecks() {
   if (FLAG_array_bounds_check_elimination) {
     const Function& function = flow_graph_->function();
+    const bool eliminate_all = IsMarkedWithNoBoundsChecks(function);
     // Generalization only if we have not deoptimized on a generalized
     // check earlier and we are not compiling precompiled code
     // (no optimistic hoisting of checks possible)
@@ -1355,7 +1364,7 @@ void RangeAnalysis::EliminateRedundantBoundsChecks() {
         !function.ProhibitsBoundsCheckGeneralization();
     BoundsCheckGeneralizer generalizer(this, flow_graph_);
     for (CheckBoundBaseInstr* check : bounds_checks_) {
-      if (check->IsRedundant(/*use_loops=*/true)) {
+      if (eliminate_all || check->IsRedundant(/*use_loops=*/true)) {
         check->ReplaceUsesWith(check->index()->definition());
         check->RemoveFromGraph();
       } else if (try_generalization) {

@@ -1296,7 +1296,7 @@ Condition EqualityCompareInstr::EmitComparisonCode(FlowGraphCompiler* compiler,
   }
 }
 
-LocationSummary* TestSmiInstr::MakeLocationSummary(Zone* zone, bool opt) const {
+LocationSummary* TestIntInstr::MakeLocationSummary(Zone* zone, bool opt) const {
   const intptr_t kNumInputs = 2;
   const intptr_t kNumTemps = 0;
   LocationSummary* locs = new (zone)
@@ -1308,16 +1308,18 @@ LocationSummary* TestSmiInstr::MakeLocationSummary(Zone* zone, bool opt) const {
   return locs;
 }
 
-Condition TestSmiInstr::EmitComparisonCode(FlowGraphCompiler* compiler,
+Condition TestIntInstr::EmitComparisonCode(FlowGraphCompiler* compiler,
                                            BranchLabels labels) {
   const Register left = locs()->in(0).reg();
   Location right = locs()->in(1);
+  const auto operand_size = representation_ == kTagged ? compiler::kObjectBytes : compiler::kEightBytes;
   if (right.IsConstant()) {
     ASSERT(right.constant().IsSmi());
-    const int64_t imm = Smi::RawValue(Smi::Cast(right.constant()).Value());
-    __ TestImmediate(left, imm, compiler::kObjectBytes);
+    const int64_t bit = Smi::Cast(right.constant()).Value();
+    const int64_t imm = representation_ == kTagged ? Smi::RawValue(bit) : bit;
+    __ TestImmediate(left, imm, operand_size);
   } else {
-    __ tst(left, compiler::Operand(right.reg()), compiler::kObjectBytes);
+    __ tst(left, compiler::Operand(right.reg()), operand_size);
   }
   Condition true_condition = (kind() == Token::kNE) ? NE : EQ;
   return true_condition;

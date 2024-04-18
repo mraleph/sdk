@@ -4560,7 +4560,7 @@ void CheckStackOverflowElimination::EliminateStackOverflow(FlowGraph* graph) {
         current = current->AsBranch()->comparison();
       }
 
-      if (current->HasUnknownSideEffects()) {
+      if (current->HasUnknownSideEffects() && !should_remove_all) {
         return;
       }
     }

@@ -814,6 +814,8 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
    * Starts parsing at [position] and continues until [chunkEnd].
    * Continues parsing where the previous chunk (if any) ended.
    */
+  @pragma('vm:unsafe:no-interrupts')
+  @pragma('vm:unsafe:no-bounds-checks')
   void parse(int position) {
     int length = chunkEnd;
     if (partialState != NO_PARTIAL) {
@@ -1021,6 +1023,8 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
    * Initial [position] is right after the initial quote.
    * Returned position right after the final quote.
    */
+  @pragma('vm:unsafe:no-interrupts')
+  @pragma('vm:unsafe:no-bounds-checks')
   int parseString(int position) {
     final charAttributes = _characterAttributes;
 
@@ -1101,6 +1105,8 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
    * This function scans through the string literal for escapes, and copies
    * slices of non-escape characters using [addSliceToString].
    */
+  @pragma('vm:unsafe:no-interrupts')
+  @pragma('vm:unsafe:no-bounds-checks')
   int parseStringToBuffer(int position) {
     final charAttributes = _characterAttributes;
 
