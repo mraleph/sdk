@@ -4907,6 +4907,14 @@ Fragment StreamingFlowGraphBuilder::BuildForStatement(TokenPosition* position) {
   return loop;
 }
 
+static bool IsMarkedWithSwitchUsingJumpTable(const Function& function) {
+  Object& options = Object::Handle();
+  return Library::FindPragma(dart::Thread::Current(),
+                             /*only_core=*/false, function,
+                             Symbols::vm_switch_using_jump_table(),
+                             /*multiple=*/false, &options);
+}
+
 Fragment StreamingFlowGraphBuilder::BuildSwitchStatement(
     TokenPosition* position) {
   const TokenPosition pos = ReadPosition();  // read position.
@@ -4934,7 +4942,7 @@ Fragment StreamingFlowGraphBuilder::BuildSwitchStatement(
   case_count = ReadListLength();  // read number of cases.
 
   SwitchHelper helper(Z, pos, is_exhaustive, *expression_type, &block,
-                      case_count);
+                      case_count, /*force_switch_using_dispatch_table=*/IsMarkedWithSwitchUsingJumpTable(flow_graph_builder_->function_));
 
   // Build the case bodies and collect the expressions into the helper
   // for the next step.

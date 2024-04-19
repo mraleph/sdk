@@ -63,8 +63,8 @@ void RangeAnalysis::Analyze() {
 
   NarrowMintToInt32();
 
-  IntegerInstructionSelector iis(flow_graph_);
-  iis.Select();
+  // IntegerInstructionSelector iis(flow_graph_);
+  // iis.Select();
 
   RemoveConstraints();
 }

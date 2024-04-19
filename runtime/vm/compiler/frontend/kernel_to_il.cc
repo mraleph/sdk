@@ -5851,7 +5851,8 @@ SwitchHelper::SwitchHelper(Zone* zone,
                            bool is_exhaustive,
                            const AbstractType& expression_type,
                            SwitchBlock* switch_block,
-                           intptr_t case_count)
+                           intptr_t case_count,
+                           bool force_dispatch_table)
     : zone_(zone),
       position_(position),
       is_exhaustive_(is_exhaustive),
@@ -5861,7 +5862,8 @@ SwitchHelper::SwitchHelper(Zone* zone,
       case_bodies_(case_count),
       case_expression_counts_(case_count),
       expressions_(case_count),
-      sorted_expressions_(case_count) {
+      sorted_expressions_(case_count),
+      forced_dispatch_strategy_(force_dispatch_table ? kSwitchDispatchJumpTable : static_cast<SwitchDispatch>(FLAG_force_switch_dispatch_type)) {
   case_expression_counts_.FillWith(0, 0, case_count);
 
   if (expression_type.nullability() == Nullability::kNonNullable) {
@@ -5930,7 +5932,7 @@ SwitchDispatch SwitchHelper::SelectDispatchStrategy() {
     return kSwitchDispatchLinearScan;
   }
 
-  if (FLAG_force_switch_dispatch_type == kSwitchDispatchLinearScan) {
+  if (forced_dispatch_strategy_ == kSwitchDispatchLinearScan) {
     return kSwitchDispatchLinearScan;
   }
 
@@ -5942,7 +5944,7 @@ SwitchDispatch SwitchHelper::SelectDispatchStrategy() {
     return kSwitchDispatchLinearScan;
   }
 
-  if (FLAG_force_switch_dispatch_type == kSwitchDispatchBinarySearch) {
+  if (forced_dispatch_strategy_ == kSwitchDispatchBinarySearch) {
     return kSwitchDispatchBinarySearch;
   }
 
@@ -5957,7 +5959,7 @@ SwitchDispatch SwitchHelper::SelectDispatchStrategy() {
   const intptr_t max_holes = num_expressions * kJumpTableMaxHolesRatio;
   const int64_t holes = range - num_expressions;
 
-  if (FLAG_force_switch_dispatch_type != kSwitchDispatchJumpTable) {
+  if (forced_dispatch_strategy_ != kSwitchDispatchJumpTable) {
     if (num_expressions < kJumpTableMinExpressions) {
       return kSwitchDispatchBinarySearch;
     }

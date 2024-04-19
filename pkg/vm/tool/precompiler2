@@ -94,7 +94,12 @@ else
   OUT_DIR="$SDK_DIR/out"
 fi
 
-export DART_CONFIGURATION=${DART_CONFIGURATION:-ReleaseX64}
+HOST_ARCH=X64
+if [[ `uname -m` == 'arm64' ]]; then
+  HOST_ARCH=ARM64
+fi
+
+export DART_CONFIGURATION=${DART_CONFIGURATION:-Release$HOST_ARCH}
 BIN_DIR="$OUT_DIR/$DART_CONFIGURATION"
 
 DART="${SDK_DIR}/tools/sdks/dart-sdk/bin/dart"
@@ -114,7 +119,7 @@ $DART                                                                          \
      "$SOURCE_FILE"
 
 # Step 2: Generate snapshot from the Kernel binary.
-"$BIN_DIR"/clang_x64/gen_snapshot                                                        \
+"$BIN_DIR"/gen_snapshot                                                        \
      ${GEN_SNAPSHOT_FLAGS}                                                     \
      "$GEN_SNAPSHOT_OPTION"                                                    \
      "$GEN_SNAPSHOT_FILENAME"                                                  \

@@ -1002,7 +1002,8 @@ class SwitchHelper {
                bool is_exhaustive,
                const AbstractType& expression_type,
                SwitchBlock* switch_block,
-               intptr_t case_count);
+               intptr_t case_count,
+               bool force_dispatch_table);
 
   // A switch statement is optimizable if static type of the scrutinee
   // expression is a non-nullable int or enum, and all case expressions
@@ -1083,6 +1084,7 @@ class SwitchHelper {
   GrowableArray<SwitchExpression*> sorted_expressions_;
   const Integer* expression_min_ = nullptr;
   const Integer* expression_max_ = nullptr;
+  const SwitchDispatch forced_dispatch_strategy_;
 };
 
 }  // namespace kernel

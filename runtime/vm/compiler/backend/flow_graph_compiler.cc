@@ -651,6 +651,16 @@ void FlowGraphCompiler::CompileGraph() {
   }
 }
 
+#if defined(TARGET_ARCH_X64)
+static bool IsMarkedWithAlignLoops(const Function& function) {
+  Object& options = Object::Handle();
+  return Library::FindPragma(dart::Thread::Current(),
+                             /*only_core=*/false, function,
+                             Symbols::vm_align_loops(),
+                             /*multiple=*/false, &options);
+}
+#endif
+
 void FlowGraphCompiler::VisitBlocks() {
   CompactBlocks();
   if (compiler::Assembler::EmittingComments()) {
@@ -669,9 +679,20 @@ void FlowGraphCompiler::VisitBlocks() {
   const auto inner_lr_state = ComputeInnerLRState(flow_graph());
 #endif  // defined(TARGET_ARCH_ARM) || defined(TARGET_ARCH_ARM64)
 
+#if defined(TARGET_ARCH_X64)
+  const bool should_align_loop_headers = IsMarkedWithAlignLoops(flow_graph().function());
+#endif
+
   for (intptr_t i = 0; i < block_order().length(); ++i) {
     // Compile the block entry.
     BlockEntryInstr* entry = block_order()[i];
+
+#if defined(TARGET_ARCH_X64)
+    if (entry->IsLoopHeader() && should_align_loop_headers) {
+      assembler()->Align(32, 0);
+    }
+#endif
+
     assembler()->Comment("B%" Pd "", entry->block_id());
     set_current_block(entry);
 
@@ -698,6 +719,9 @@ void FlowGraphCompiler::VisitBlocks() {
     if (compiler::Assembler::EmittingComments()) {
       for (LoopInfo* l = entry->loop_info(); l != nullptr; l = l->outer()) {
         assembler()->Comment("  Loop %" Pd "", l->id());
+      }
+      if (entry->IsLoopHeader()) {
+        assembler()->Comment("  Loop Header");
       }
     }
 

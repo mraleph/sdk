@@ -1408,10 +1408,10 @@ static AliasedSet* NumberPlaces(FlowGraph* graph,
 
 // Load instructions handled by load elimination.
 static bool IsLoadEliminationCandidate(Instruction* instr) {
-  if (instr->IsDefinition() &&
-      instr->AsDefinition()->MayCreateUnsafeUntaggedPointer()) {
-    return false;
-  }
+  // if (instr->IsDefinition() &&
+  //    instr->AsDefinition()->MayCreateUnsafeUntaggedPointer()) {
+  //  return false;
+  // }
   return instr->IsLoadField() || instr->IsLoadIndexed() ||
          instr->IsLoadStaticField();
 }

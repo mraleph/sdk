@@ -325,6 +325,8 @@ FlowGraph* CompilerPass::RunPipeline(PipelineMode mode,
   // unreachable code.
   INVOKE_PASS_AOT(ApplyICData);
   INVOKE_PASS_AOT(OptimizeTypedDataAccesses);
+  // This must be done after all other possible intra-block code motion.
+  INVOKE_PASS(LoweringAfterCodeMotionDisabled);
   INVOKE_PASS(WidenSmiToInt32);
   INVOKE_PASS(SelectRepresentations);
   INVOKE_PASS(CSE);
@@ -358,8 +360,6 @@ FlowGraph* CompilerPass::RunPipeline(PipelineMode mode,
   INVOKE_PASS(Canonicalize);
   INVOKE_PASS(AllocationSinking_DetachMaterializations);
   INVOKE_PASS(EliminateWriteBarriers);
-  // This must be done after all other possible intra-block code motion.
-  INVOKE_PASS(LoweringAfterCodeMotionDisabled);
   INVOKE_PASS(FinalizeGraph);
   INVOKE_PASS(Canonicalize);
   INVOKE_PASS(ReorderBlocks);

@@ -816,6 +816,8 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
    */
   @pragma('vm:unsafe:no-interrupts')
   @pragma('vm:unsafe:no-bounds-checks')
+  @pragma('vm:align-loops')
+  @pragma('vm:switch-using-jump-table')
   void parse(int position) {
     int length = chunkEnd;
     if (partialState != NO_PARTIAL) {
@@ -839,48 +841,48 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
         }
       } while (true);
 
-      switch (char) {
-        case QUOTE:
+      switch (charAttributes[char] >> 2) {
+        case TOK_QUOTE:
           if ((state & ALLOW_STRING_MASK) != 0) fail(position);
           state |= VALUE_READ_BITS;
           position = parseString(position + 1);
           break;
-        case LBRACKET:
+        case TOK_LBRACKET:
           if ((state & ALLOW_VALUE_MASK) != 0) fail(position);
           listener.beginArray();
           saveState(state);
           state = STATE_ARRAY_EMPTY;
           position++;
           break;
-        case LBRACE:
+        case TOK_LBRACE:
           if ((state & ALLOW_VALUE_MASK) != 0) fail(position);
           listener.beginObject();
           saveState(state);
           state = STATE_OBJECT_EMPTY;
           position++;
           break;
-        case CHAR_n:
+        case TOK_CHAR_n:
           if ((state & ALLOW_VALUE_MASK) != 0) fail(position);
           state |= VALUE_READ_BITS;
           position = parseNull(position);
           break;
-        case CHAR_f:
+        case TOK_CHAR_f:
           if ((state & ALLOW_VALUE_MASK) != 0) fail(position);
           state |= VALUE_READ_BITS;
           position = parseFalse(position);
           break;
-        case CHAR_t:
+        case TOK_CHAR_t:
           if ((state & ALLOW_VALUE_MASK) != 0) fail(position);
           state |= VALUE_READ_BITS;
           position = parseTrue(position);
           break;
-        case COLON:
+        case TOK_COLON:
           if (state != STATE_OBJECT_KEY) fail(position);
           listener.propertyName();
           state = STATE_OBJECT_COLON;
           position++;
           break;
-        case COMMA:
+        case TOK_COMMA:
           if (state == STATE_OBJECT_VALUE) {
             listener.propertyValue();
             state = STATE_OBJECT_COMMA;
@@ -893,7 +895,7 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
             fail(position);
           }
           break;
-        case RBRACKET:
+        case TOK_RBRACKET:
           if (state == STATE_ARRAY_EMPTY) {
             listener.endArray();
           } else if (state == STATE_ARRAY_VALUE) {
@@ -905,7 +907,7 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
           state = restoreState() | VALUE_READ_BITS;
           position++;
           break;
-        case RBRACE:
+        case TOK_RBRACE:
           if (state == STATE_OBJECT_EMPTY) {
             listener.endObject();
           } else if (state == STATE_OBJECT_VALUE) {
@@ -1001,6 +1003,16 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
 
   static const int CHAR_SIMPLE_STRING_END = 1;
   static const int CHAR_WHITESPACE = 2;
+  static const int TOK_QUOTE = 1;
+  static const int TOK_LBRACKET = 2;
+  static const int TOK_LBRACE = 3;
+  static const int TOK_CHAR_n = 4;
+  static const int TOK_CHAR_f = 5;
+  static const int TOK_CHAR_t = 6;
+  static const int TOK_COLON = 7;
+  static const int TOK_COMMA = 8;
+  static const int TOK_RBRACKET = 9;
+  static const int TOK_RBRACE = 10;
 
   static final Uint8List _characterAttributes = () {
     final list = Uint8List(256);
@@ -1014,6 +1026,18 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
     list[CARRIAGE_RETURN] |= CHAR_WHITESPACE;
     list[NEWLINE] |= CHAR_WHITESPACE;
     list[TAB] |= CHAR_WHITESPACE;
+
+    list[QUOTE] |= TOK_QUOTE << 2;
+    list[LBRACKET] |= TOK_LBRACKET << 2;
+    list[LBRACE] |= TOK_LBRACE << 2;
+    list[CHAR_n] |= TOK_CHAR_n << 2;
+    list[CHAR_f] |= TOK_CHAR_f << 2;
+    list[CHAR_t] |= TOK_CHAR_t << 2;
+    list[COLON] |= TOK_COLON << 2;
+    list[COMMA] |= TOK_COMMA << 2;
+    list[RBRACKET] |= TOK_RBRACKET << 2;
+    list[RBRACE] |= TOK_RBRACE << 2;
+
     return list;
   }();
 
@@ -1025,6 +1049,7 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
    */
   @pragma('vm:unsafe:no-interrupts')
   @pragma('vm:unsafe:no-bounds-checks')
+  @pragma('vm:align-loops')
   int parseString(int position) {
     final charAttributes = _characterAttributes;
 
@@ -2016,6 +2041,7 @@ class _Utf8Decoder {
     return result;
   }
 
+  @pragma('vm:unsafe:no-bounds-checks')
   String decode16(Uint8List bytes, int start, int end, int size) {
     assert(start < end);
     final String typeTable = _Utf8Decoder.typeTable;
@@ -2039,15 +2065,19 @@ class _Utf8Decoder {
     }
 
     while (i < end) {
-      final int byte = bytes[i++];
+      final int byte = bytes[i];
+      i++;
       final int type = typeTable.codeUnitAt(byte) & typeMask;
       if (state == accept) {
         if (char >= 0x10000) {
           assert(char < 0x110000);
-          writeIntoTwoByteString(result, j++, 0xD7C0 + (char >> 10));
-          writeIntoTwoByteString(result, j++, 0xDC00 + (char & 0x3FF));
+          writeIntoTwoByteString(result, j, 0xD7C0 + (char >> 10));
+          j++;
+          writeIntoTwoByteString(result, j, 0xDC00 + (char & 0x3FF));
+          j++;
         } else {
-          writeIntoTwoByteString(result, j++, char);
+          writeIntoTwoByteString(result, j, char);
+          j++;
         }
         char = byte & (shiftedByteMask >> type);
         state = transitionTable.codeUnitAt(type);
