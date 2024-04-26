@@ -37,12 +37,30 @@ class InductionVar : public ZoneAllocated {
     kPeriodic,
   };
 
-  // Strict (exclusive) upper or lower bound on unit stride linear induction:
-  //   i < U (i++)
-  //   i > L (i--)
   struct Bound {
+    // For linear induction with unit stride this represents strict (exclusive)
+    // upper or lower bound:
+    //
+    //   i < limit (i++)
+    //   i > limit (i--)
+    //
     Bound(BranchInstr* b, InductionVar* l) : branch_(b), limit_(l) {}
-    BranchInstr* branch_;
+
+    // For invariant induction variable this represents an inequality fact
+    // connecting this variable to another invariant induction variable.
+    //
+    //   i <condition> limit
+    //
+    // Where condition can be <, <=, > or >=.
+    Bound(Token::Kind condition, InductionVar* l)
+        : condition_(condition), limit_(l) {}
+
+    bool BoundHoldsAt(Instruction* pos) const;
+
+    union {
+      BranchInstr* branch_;
+      Token::Kind condition_;
+    };
     InductionVar* limit_;
   };
 
@@ -128,8 +146,8 @@ class InductionVar : public ZoneAllocated {
   const GrowableArray<Bound>& bounds() { return bounds_; }
 
   // For debugging.
-  void PrintTo(BaseTextBuffer* f) const;
-  const char* ToCString() const;
+  void PrintTo(BaseTextBuffer* f, bool include_bounds = false) const;
+  const char* ToCString(bool include_bounds = false) const;
 
   // Returns true if x is invariant.
   static bool IsInvariant(const InductionVar* x) {
