@@ -3618,8 +3618,9 @@ static bool RecognizeTestPattern(Value* left, Value* right, bool* negate) {
     return false;
   }
 
-  BinarySmiOpInstr* mask_op = left->definition()->AsBinarySmiOp();
-  if ((mask_op == nullptr) || (mask_op->op_kind() != Token::kBIT_AND) ||
+  auto mask_op = left->definition()->AsBinaryIntegerOp();
+  if ((mask_op == nullptr) ||
+      (mask_op->op_kind() != Token::kBIT_AND) ||
       !mask_op->HasOnlyUse(left)) {
     return false;
   }
@@ -3686,24 +3687,26 @@ Instruction* BranchInstr::Canonicalize(FlowGraph* flow_graph) {
   }
 
   if (comparison()->IsEqualityCompare() &&
-      comparison()->operation_cid() == kSmiCid) {
-    BinarySmiOpInstr* bit_and = nullptr;
+      (comparison()->operation_cid() == kSmiCid ||
+       comparison()->operation_cid() == kMintCid)) {
+    BinaryIntegerOpInstr* bit_and = nullptr;
     bool negate = false;
     if (RecognizeTestPattern(comparison()->left(), comparison()->right(),
                              &negate)) {
-      bit_and = comparison()->left()->definition()->AsBinarySmiOp();
+      bit_and = comparison()->left()->definition()->AsBinaryIntegerOp();
     } else if (RecognizeTestPattern(comparison()->right(), comparison()->left(),
                                     &negate)) {
-      bit_and = comparison()->right()->definition()->AsBinarySmiOp();
+      bit_and = comparison()->right()->definition()->AsBinaryIntegerOp();
     }
     if (bit_and != nullptr) {
       if (FLAG_trace_optimization && flow_graph->should_print()) {
-        THR_Print("Merging test smi v%" Pd "\n", bit_and->ssa_temp_index());
+        THR_Print("Merging test integer v%" Pd "\n", bit_and->ssa_temp_index());
       }
-      TestSmiInstr* test = new TestSmiInstr(
+      TestIntInstr* test = new TestIntInstr(
           comparison()->source(),
           negate ? Token::NegateComparison(comparison()->kind())
                  : comparison()->kind(),
+          comparison()->operation_cid() == kSmiCid ? kTagged : kUnboxedInt64,
           bit_and->left()->Copy(zone), bit_and->right()->Copy(zone));
       ASSERT(!CanDeoptimize());
       RemoveEnvironment();
@@ -6575,9 +6578,9 @@ ComparisonInstr* StrictCompareInstr::CopyWithNewOperands(Value* new_left,
                                 needs_number_check(), DeoptId::kNone);
 }
 
-ComparisonInstr* TestSmiInstr::CopyWithNewOperands(Value* new_left,
+ComparisonInstr* TestIntInstr::CopyWithNewOperands(Value* new_left,
                                                    Value* new_right) {
-  return new TestSmiInstr(source(), kind(), new_left, new_right);
+  return new TestIntInstr(source(), kind(), representation_, new_left, new_right);
 }
 
 ComparisonInstr* TestCidsInstr::CopyWithNewOperands(Value* new_left,

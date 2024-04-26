@@ -1410,7 +1410,7 @@ CompileType StrictCompareInstr::ComputeType() const {
   return CompileType::Bool();
 }
 
-CompileType TestSmiInstr::ComputeType() const {
+CompileType TestIntInstr::ComputeType() const {
   return CompileType::Bool();
 }
 
