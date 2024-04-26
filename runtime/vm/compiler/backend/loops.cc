@@ -6,6 +6,7 @@
 
 #include "vm/bit_vector.h"
 #include "vm/compiler/backend/il.h"
+#include "vm/zone_text_buffer.h"
 
 namespace dart {
 
@@ -63,6 +64,7 @@ class InductionVarAnalysis : public ValueObject {
   void Classify(LoopInfo* loop, Definition* def);
   void ClassifySCC(LoopInfo* loop);
   void ClassifyControl(LoopInfo* loop);
+  void TryComputeBound(LoopInfo* loop, PhiInstr* phi, InductionVar* phi_induc);
 
   // Transfer methods. Compute how induction of the operands, if any,
   // transfers over the operation performed by the given definition.
@@ -96,7 +98,7 @@ class InductionVarAnalysis : public ValueObject {
   const GrowableArray<BlockEntryInstr*>& preorder_;
   GrowableArray<Definition*> stack_;
   GrowableArray<Definition*> scc_;
-  GrowableArray<BranchInstr*> branches_;
+  GrowableArray<std::pair<BranchInstr*, bool>> branches_;
   DirectChainedHashMap<LoopInfo::InductionKV> cycle_;
   DirectChainedHashMap<VisitKV> map_;
   intptr_t current_index_;
@@ -238,11 +240,33 @@ void InductionVarAnalysis::VisitLoop(LoopInfo* loop) {
     for (ForwardInstructionIterator it(block); !it.Done(); it.Advance()) {
       Instruction* instruction = it.Current();
       Visit(loop, instruction->AsDefinition());
-      if (instruction->IsBranch()) {
-        branches_.Add(instruction->AsBranch());
+      if (auto branch = instruction->AsBranch()) {
+        auto true_successor_in_loop = loop->Contains(branch->true_successor());
+        auto false_successor_in_loop =
+            loop->Contains(branch->false_successor());
+        if (true_successor_in_loop != false_successor_in_loop) {
+          branches_.Add({instruction->AsBranch(), true_successor_in_loop});
+        }
       }
     }
   }
+
+  for (BlockEntryInstr *dom = loop->header()->dominator(),
+                       *prev = loop->header();
+       dom != nullptr; prev = dom, dom = dom->dominator()) {
+    if (loop->blocks_->Contains(dom->preorder_number())) {
+      continue;
+    }
+
+    if (auto branch = dom->last_instruction()->AsBranch()) {
+      if (prev == branch->true_successor()) {
+        branches_.Add({branch, true});
+      } else if (prev == branch->false_successor()) {
+        branches_.Add({branch, false});
+      }
+    }
+  }
+
   ASSERT(stack_.is_empty());
   map_.Clear();
   // Classify loop control.
@@ -400,8 +424,153 @@ void InductionVarAnalysis::ClassifySCC(LoopInfo* loop) {
   }
 }
 
+void InductionVarAnalysis::TryComputeBound(LoopInfo* loop,
+                                           PhiInstr* phi,
+                                           InductionVar* phi_induc) {
+  const int64_t stride = phi_induc->next_->offset_;  // expected to be +1 or -1
+
+  const bool should_trace = CompilerState::Current().should_trace();
+
+  if (should_trace) {
+    THR_Print("would like to compute bound for (v%" Pd ") %s\n",
+              phi->ssa_temp_index(), phi_induc->ToCString());
+  }
+  GrowableArray<InductionVar*> limits;
+  for (intptr_t i = 0; i < phi->InputCount(); i++) {
+    auto input = phi->InputAt(i)->definition();
+    auto input_induc = Lookup(loop, input);
+    if (input_induc == nullptr) {
+      return;
+    }
+
+    if (should_trace) {
+      THR_Print("v%" Pd ": %s\n", input->ssa_temp_index(),
+                input_induc->ToCString(/*include_bounds=*/true));
+    }
+
+    if (input_induc->bounds().is_empty()) {
+      return;
+    }
+
+    if (InductionVar::IsInvariant(input_induc)) {
+      if (limits.is_empty()) {
+        for (const auto& bound : input_induc->bounds()) {
+          switch (bound.condition_) {
+            case Token::kLT:
+              // Accept i < limit (i++).
+              if (stride == 1) break;
+              continue;
+            case Token::kGT:
+              // Accept i > limit (i--).
+              if (stride == -1) break;
+              continue;
+            default:
+              continue;
+          }
+          if (should_trace) {
+            THR_Print("add limit: %s\n", bound.limit_->ToCString());
+          }
+          limits.Add(bound.limit_);
+        }
+      } else {
+        intptr_t new_length = 0;
+        for (intptr_t i = 0; i < limits.length(); i++) {
+          const auto& limit = limits[i];
+          bool found = false;
+          for (const auto& bound : input_induc->bounds()) {
+            switch (bound.condition_) {
+              case Token::kLT:
+                // Accept i < limit (i++).
+                if (stride == 1) break;
+                continue;
+              case Token::kGT:
+                // Accept i > limit (i--).
+                if (stride == -1) break;
+                continue;
+              default:
+                continue;
+            }
+            if (limit->IsEqual(bound.limit_)) {
+              if (should_trace) {
+                THR_Print("found equal limit: %s\n", bound.limit_->ToCString());
+              }
+              found = true;
+              break;
+            }
+          }
+          if (found) {
+            limits[new_length++] = limit;
+          } else {
+            if (should_trace) {
+              THR_Print("failed to unify limit: %s\n", limit->ToCString());
+            }
+          }
+        }
+        limits.TruncateTo(new_length);
+      }
+    } else if (InductionVar::IsLinear(input_induc)) {
+      if (limits.is_empty()) {
+        for (const auto& bound : input_induc->bounds()) {
+          if (bound.BoundHoldsAt(
+                  loop->header_->PredecessorAt(i)->last_instruction())) {
+            limits.Add(bound.limit_);
+            if (should_trace) {
+              THR_Print("add limit: %s\n", bound.limit_->ToCString());
+            }
+          }
+        }
+      } else {
+        intptr_t new_length = 0;
+        for (intptr_t l = 0; l < limits.length(); l++) {
+          const auto& limit = limits[l];
+          bool found = false;
+          for (const auto& bound : input_induc->bounds()) {
+            if (bound.BoundHoldsAt(
+                    loop->header_->PredecessorAt(i)->last_instruction())) {
+              if (limit->IsEqual(bound.limit_)) {
+                found = true;
+                if (should_trace) {
+                  THR_Print("found equal limit: %s\n",
+                            bound.limit_->ToCString());
+                }
+
+                break;
+              }
+            }
+          }
+          if (found) {
+            limits[new_length++] = limit;
+          } else {
+            if (should_trace) {
+              THR_Print("failed to unify limit: %s\n", limit->ToCString());
+            }
+          }
+        }
+        limits.TruncateTo(new_length);
+      }
+    }
+
+    if (limits.is_empty()) {
+      return;
+    }
+  }
+
+  for (const auto& limit : limits) {
+    if (should_trace) {
+      OS::PrintErr("[success] %s\n", limit->ToCString());
+    }
+    phi_induc->bounds_.Add(InductionVar::Bound(nullptr, limit));
+  }
+}
+
 void InductionVarAnalysis::ClassifyControl(LoopInfo* loop) {
-  for (auto branch : branches_) {
+  const bool should_trace = CompilerState::Current().should_trace();
+
+  for (auto [branch, true_successor_in_loop] : branches_) {
+    if (should_trace) {
+      THR_Print("Classifying %s\n", branch->ToCString());
+    }
+
     // Proper comparison?
     ComparisonInstr* compare = branch->comparison();
     if (compare->InputCount() != 2) {
@@ -409,14 +578,8 @@ void InductionVarAnalysis::ClassifyControl(LoopInfo* loop) {
     }
     Token::Kind cmp = compare->kind();
     // Proper loop exit? Express the condition in "loop while true" form.
-    TargetEntryInstr* ift = branch->true_successor();
-    TargetEntryInstr* iff = branch->false_successor();
-    if (loop->Contains(ift) && !loop->Contains(iff)) {
-      // ok as is
-    } else if (!loop->Contains(ift) && loop->Contains(iff)) {
+    if (!true_successor_in_loop) {
       cmp = Token::NegateComparison(cmp);
-    } else {
-      continue;
     }
     // Comparison against linear constant stride induction?
     // Express the comparison such that induction appears left.
@@ -429,6 +592,17 @@ void InductionVarAnalysis::ClassifyControl(LoopInfo* loop) {
                      ->OriginalDefinitionIgnoreBoxingAndConstraints();
     InductionVar* x = Lookup(loop, left);
     InductionVar* y = Lookup(loop, right);
+
+    if (should_trace) {
+      THR_Print("  lhs induction %s\n",
+                x != nullptr ? x->ToCString() : "<none>");
+    }
+
+    if (should_trace) {
+      THR_Print("  rhs induction %s\n",
+                y != nullptr ? y->ToCString() : "<none>");
+    }
+
     if (InductionVar::IsLinear(x, &stride) && InductionVar::IsInvariant(y)) {
       // ok as is
     } else if (InductionVar::IsInvariant(x) &&
@@ -438,6 +612,15 @@ void InductionVarAnalysis::ClassifyControl(LoopInfo* loop) {
       y = tmp;
       cmp = Token::FlipComparison(cmp);
     } else {
+      if (InductionVar::IsInvariant(x) && InductionVar::IsInvariant(y) &&
+          Token::IsRelationalOperator(cmp)) {
+        if (x->mult_ != 0) {
+          x->bounds_.Add(InductionVar::Bound(cmp, y));
+        }
+        if (y->mult_ != 0) {
+          y->bounds_.Add(InductionVar::Bound(Token::FlipComparison(cmp), x));
+        }
+      }
       continue;
     }
     // Can we find a strict (exclusive) comparison for the looping condition?
@@ -499,6 +682,19 @@ void InductionVarAnalysis::ClassifyControl(LoopInfo* loop) {
     // Record control induction.
     if (branch == loop->header_->last_instruction()) {
       loop->control_ = x;
+    }
+  }
+
+  if (auto join = loop->header_->AsJoinEntry()) {
+    if (join->phis() != nullptr) {
+      for (auto phi : *join->phis()) {
+        auto induc = Lookup(loop, phi);
+        int64_t stride;
+        if (induc != nullptr && InductionVar::IsLinear(induc, &stride) &&
+            (stride == 1 || stride == -1) && induc->bounds().is_empty()) {
+          TryComputeBound(loop, phi, induc);
+        }
+      }
     }
   }
 }
@@ -896,8 +1092,8 @@ bool InductionVar::CanComputeBoundsImpl(LoopInfo* loop,
       // Find extreme using a control bound for which the branch dominates
       // the given position (to make sure it really is under its control).
       // Then refine with anything that dominates that branch.
-      for (auto bound : loop->control()->bounds()) {
-        if (pos->IsDominatedBy(bound.branch_)) {
+      for (const auto& bound : loop->control()->bounds()) {
+        if (bound.branch_ != nullptr && bound.BoundHoldsAt(pos)) {
           InductionVar* u_min = nullptr;
           InductionVar* u_max = nullptr;
           if (bound.limit_->CanComputeBounds(loop, bound.branch_, &u_min,
@@ -948,18 +1144,32 @@ bool InductionVar::CanComputeBounds(LoopInfo* loop,
   return false;
 }
 
-void InductionVar::PrintTo(BaseTextBuffer* f) const {
+void InductionVar::PrintTo(BaseTextBuffer* f,
+                           bool include_bounds /* = false */) const {
   switch (kind_) {
     case kInvariant:
       if (mult_ != 0) {
-        f->Printf("(%" Pd64 " + %" Pd64 " x %.4s)", offset_, mult_,
-                  def_->ToCString());
+        f->Printf("(%" Pd64 " + %" Pd64 " x v%" Pd ")", offset_, mult_,
+                  def_->ssa_temp_index());
+
+        if (include_bounds) {
+          for (auto bound : bounds_) {
+            f->Printf(" [%s %s]", Token::Str(bound.condition_),
+                      bound.limit_->ToCString());
+          }
+        }
       } else {
         f->Printf("%" Pd64, offset_);
       }
       break;
     case kLinear:
       f->Printf("LIN(%s + %s * i)", initial_->ToCString(), next_->ToCString());
+      if (include_bounds) {
+        for (auto bound : bounds_) {
+          f->Printf(" [%s %s]", next_->offset_ == 1 ? "<" : ">",
+                    bound.limit_->ToCString());
+        }
+      }
       break;
     case kWrapAround:
       f->Printf("WRAP(%s, %s)", initial_->ToCString(), next_->ToCString());
@@ -970,10 +1180,10 @@ void InductionVar::PrintTo(BaseTextBuffer* f) const {
   }
 }
 
-const char* InductionVar::ToCString() const {
+const char* InductionVar::ToCString(bool include_bounds /* = false */) const {
   char buffer[1024];
   BufferFormatter f(buffer, sizeof(buffer));
-  PrintTo(&f);
+  PrintTo(&f, include_bounds);
   return Thread::Current()->zone()->MakeCopyOfString(buffer);
 }
 
@@ -1086,6 +1296,27 @@ InductionVar* LoopInfo::LookupInduction(Definition* def) const {
   return nullptr;
 }
 
+// Checks if |v| is guaranteed to be non-negative.
+static bool IsNonNegative(InductionVar* v, bool recurse = true) {
+  int64_t val;
+  if (InductionVar::IsConstant(v, &val)) {
+    return 0 <= val;
+  } else if (recurse && InductionVar::IsInvariant(v) && v->offset() == 0 &&
+             v->mult() == 1) {
+    for (const auto& bound : v->bounds()) {
+      if ((bound.condition_ == Token::kGT || bound.condition_ == Token::kGTE) &&
+          IsNonNegative(bound.limit_)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool InductionVar::Bound::BoundHoldsAt(Instruction* pos) const {
+  return branch_ == nullptr || branch_ == pos || pos->IsDominatedBy(branch_);
+}
+
 // Checks if an index is in range of a given length:
 //   for (int i = initial; i <= length - C; i++) {
 //     .... a[i] ....  // initial >= 0 and C > 0:
@@ -1101,12 +1332,36 @@ bool LoopInfo::IsInRange(Instruction* pos, Value* index, Value* length) {
     int64_t stride = 0;
     int64_t val = 0;
     int64_t diff = 0;
-    if (InductionVar::IsLinear(induc, &stride) && stride == 1 &&
-        InductionVar::IsConstant(induc->initial(), &val) && 0 <= val) {
-      for (auto bound : induc->bounds()) {
-        if (pos->IsDominatedBy(bound.branch_) &&
-            len->CanComputeDifferenceWith(bound.limit_, &diff) && diff <= 0) {
-          return true;
+    if (InductionVar::IsLinear(induc, &stride) && stride == 1) {
+      if (CompilerState::Current().should_trace()) {
+        THR_Print("-> %s\n", induc->ToCString(/*include_bounds=*/true));
+        THR_Print("-initial-> %s\n",
+                  induc->initial()->ToCString(/*include_bounds=*/true));
+      }
+      if (IsNonNegative(induc->initial())) {
+        if (CompilerState::Current().should_trace()) {
+          THR_Print("--> %s >= 0 is true\n",
+                    induc->initial()->ToCString(/*include_bounds=*/true));
+        }
+        for (const auto& bound : induc->bounds()) {
+          if (bound.BoundHoldsAt(pos)) {
+            if (len->CanComputeDifferenceWith(bound.limit_, &diff) &&
+                diff <= 0) {
+              return true;
+            }
+            if (CompilerState::Current().should_trace()) {
+              THR_Print("-bound-> %s\n", bound.limit_->ToCString(true));
+            }
+            for (const auto& bounds_bound : bound.limit_->bounds()) {
+              // Check if it might be bounded itself.
+              if ((bounds_bound.condition_ == Token::kLT ||
+                   bounds_bound.condition_ == Token::kLTE) &&
+                  len->CanComputeDifferenceWith(bounds_bound.limit_, &diff) &&
+                  diff <= 0) {
+                return true;
+              }
+            }
+          }
         }
       }
     }
@@ -1116,6 +1371,10 @@ bool LoopInfo::IsInRange(Instruction* pos, Value* index, Value* length) {
     InductionVar* min = nullptr;
     InductionVar* max = nullptr;
     if (induc->CanComputeBounds(this, pos, &min, &max)) {
+      if (CompilerState::Current().should_trace()) {
+        THR_Print("--> bounds at %s: min=%s, max=%s\n", pos->ToCString(),
+                  min->ToCString(), max->ToCString());
+      }
       return InductionVar::IsConstant(min, &val) && 0 <= val &&
              len->CanComputeDifferenceWith(max, &diff) && diff < 0;
     }
@@ -1204,8 +1463,62 @@ void LoopHierarchy::Print(LoopInfo* loop) const {
   }
 }
 
+static void FormatInduction(BaseTextBuffer* f,
+                            LoopInfo* loop,
+                            const GrowableArray<BlockEntryInstr*>& preorder) {
+  for (; loop != nullptr; loop = loop->next()) {
+    intptr_t depth = loop->NestingDepth();
+    f->Printf("%*c[Loop %" Pd "\n", static_cast<int>(2 * depth), ' ',
+              loop->id());
+    for (BitVector::Iterator block_it(loop->blocks()); !block_it.Done();
+         block_it.Advance()) {
+      BlockEntryInstr* block = preorder[block_it.Current()];
+      if (auto join = block->AsJoinEntry()) {
+        if (join->phis() == nullptr) {
+          continue;
+        }
+
+        for (auto phi : *join->phis()) {
+          InductionVar* induc = loop->LookupInduction(phi);
+          if (induc != nullptr) {
+            // Obtain the debug string for induction and bounds.
+            f->Printf("%*c v%" Pd " %s", static_cast<int>(2 * depth), ' ',
+                      phi->ssa_temp_index(), induc->ToCString());
+            for (auto bound : induc->bounds()) {
+              f->Printf(" bound[%s]", bound.limit_->ToCString());
+            }
+            f->AddString("\n");
+          }
+        }
+      }
+
+      for (auto instr : block->instructions()) {
+        if (auto defn = instr->AsDefinition()) {
+          InductionVar* induc = loop->LookupInduction(defn);
+          if (InductionVar::IsInduction(induc)) {
+            f->Printf("%*c v%" Pd " %s", static_cast<int>(2 * depth), ' ',
+                      defn->ssa_temp_index(), induc->ToCString());
+            for (auto bound : induc->bounds()) {
+              f->Printf(" bound[%s]", bound.limit_->ToCString());
+            }
+            f->AddString("\n");
+          }
+        }
+      }
+    }
+    FormatInduction(f, loop->inner(), preorder);
+    f->Printf("%*c]\n", static_cast<int>(2 * depth), ' ');
+  }
+}
+
 void LoopHierarchy::ComputeInduction() const {
   InductionVarAnalysis(preorder_).VisitHierarchy(top_);
+
+  if (FLAG_trace_optimization && print_traces_) {
+    ZoneTextBuffer printer(Thread::Current()->zone());
+    FormatInduction(&printer, top_, preorder_);
+    THR_Print("Induction: %s\n", printer.buffer());
+  }
 }
 
 }  // namespace dart

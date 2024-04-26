@@ -198,7 +198,7 @@ constexpr bool FLAG_support_il_printer = false;
   D(trace_handles, bool, false, "Traces allocation of handles.")               \
   D(trace_kernel_binary, bool, false, "Trace Kernel reader/writer.")           \
   D(trace_natives, bool, false, "Trace invocation of natives")                 \
-  D(trace_optimization, bool, false, "Print optimization details.")            \
+  P(trace_optimization, bool, false, "Print optimization details.")            \
   R(trace_profiler, false, bool, false, "Profiler trace")                      \
   D(trace_profiler_verbose, bool, false, "Verbose profiler trace")             \
   D(trace_runtime_calls, bool, false, "Trace runtime calls.")                  \
