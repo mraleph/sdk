@@ -527,6 +527,8 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
    */
   T get chunk;
 
+  int get chunkLength;
+
   /**
    * Get character/code unit of current chunk.
    *
@@ -830,7 +832,7 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
       int char = 0;
       do {
         char = getChar(position);
-        if ((charAttributes[char] & CHAR_WHITESPACE) == 0) {
+        if ((charAttributes.codeUnitAt(char) & CHAR_WHITESPACE) == 0) {
           break;
         }
         position++;
@@ -1002,20 +1004,11 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
   static const int CHAR_SIMPLE_STRING_END = 1;
   static const int CHAR_WHITESPACE = 2;
 
-  static final Uint8List _characterAttributes = () {
-    final list = Uint8List(256);
-    for (var i = 0; i < SPACE; i++) {
-      list[i] |= CHAR_SIMPLE_STRING_END;
-    }
-    list[QUOTE] |= CHAR_SIMPLE_STRING_END;
-    list[BACKSLASH] |= CHAR_SIMPLE_STRING_END;
-
-    list[SPACE] |= CHAR_WHITESPACE;
-    list[CARRIAGE_RETURN] |= CHAR_WHITESPACE;
-    list[NEWLINE] |= CHAR_WHITESPACE;
-    list[TAB] |= CHAR_WHITESPACE;
-    return list;
-  }();
+  static const String _characterAttributes =
+      '!!!!!!!!!##!!#!!!!!!!!!!!!!!!!!!" !                             '
+      '                            !                                   '
+      '                                                                '
+      '                                                                ';
 
   /**
    * Parses a string value.
@@ -1024,7 +1017,7 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
    * Returned position right after the final quote.
    */
   @pragma('vm:unsafe:no-interrupts')
-  @pragma('vm:unsafe:no-bounds-checks')
+  @pragma('vm:align-loops')
   int parseString(int position) {
     final charAttributes = _characterAttributes;
 
@@ -1032,20 +1025,25 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
     // Initial position is right after first '"'.
     int start = position;
     int end = chunkEnd;
-    int bits = 0;
+    if (position < 0 || end > chunkLength) {
+      throw 'illegal state';
+    }
 
+    int bits = 0;
     int char = 0;
-    do {
-      // Caveat: do not combine the following two lines together. It helps
-      // compiler to generate better code (it currently can't reorder operations
-      // to reduce register pressure).
-      char = getChar(position);
-      position++;
-      bits |= char; // Includes final '"', but that never matters.
-      if ((charAttributes[char] & CHAR_SIMPLE_STRING_END) != 0) {
-        break;
-      }
-    } while (position < end);
+    if (position < end) {
+      do {
+        // Caveat: do not combine the following two lines together. It helps
+        // compiler to generate better code (it currently can't reorder operations
+        // to reduce register pressure).
+        char = getChar(position);
+        position++;
+        bits |= char; // Includes final '"', but that never matters.
+        if ((charAttributes.codeUnitAt(char) & CHAR_SIMPLE_STRING_END) != 0) {
+          break;
+        }
+      } while (position < end);
+    }
 
     if (char == QUOTE) {
       int sliceEnd = position - 1;
@@ -1124,7 +1122,7 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
       do {
         char = getChar(position);
         position++;
-        if ((charAttributes[char] & CHAR_SIMPLE_STRING_END) != 0) {
+        if ((charAttributes.codeUnitAt(char) & CHAR_SIMPLE_STRING_END) != 0) {
           break;
         }
       } while (position < end);
@@ -1445,6 +1443,9 @@ class _JsonStringParser extends _JsonParserWithListener
   String chunk = '';
   int chunkEnd = 0;
 
+  @pragma('vm:prefer-inline')
+  int get chunkLength => chunk.length;
+
   _JsonStringParser(_JsonListener listener) : super(listener);
 
   int getChar(int position) => chunk.codeUnitAt(position);
@@ -1545,6 +1546,9 @@ class _JsonUtf8Parser extends _JsonParserWithListener
   final _Utf8Decoder decoder;
   Uint8List chunk = emptyChunk;
   int chunkEnd = 0;
+
+  @pragma('vm:prefer-inline')
+  int get chunkLength => chunk.length;
 
   _JsonUtf8Parser(_JsonListener listener, bool allowMalformed)
       : decoder = new _Utf8Decoder(allowMalformed),
