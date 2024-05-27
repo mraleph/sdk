@@ -17,14 +17,19 @@
 
 namespace dart {
 
-#if !defined(PRODUCT)
+#if !defined(PRODUCT) || defined(DART_PRECOMPILER)
 #define INCLUDE_LINEAR_SCAN_TRACING_CODE
 #endif
 
 #if defined(INCLUDE_LINEAR_SCAN_TRACING_CODE)
+DEFINE_FLAG(bool,
+            trace_linearscan,
+            false,
+            "Trace state of the linear scan register allocator.");
+
 #define TRACE_ALLOC(statement)                                                 \
   do {                                                                         \
-    if (FLAG_trace_ssa_allocator && CompilerState::ShouldTrace()) statement;   \
+    if (FLAG_trace_linearscan && CompilerState::ShouldTrace()) statement;   \
   } while (0)
 #else
 #define TRACE_ALLOC(statement)

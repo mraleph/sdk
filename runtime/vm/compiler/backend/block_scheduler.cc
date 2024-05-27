@@ -286,7 +286,7 @@ class AOTBlockScheduler {
       if ((marks & kVisitedMark) == 0) {
         marks |= kVisitedMark;
 
-        if (last->IsThrow() || last->IsReThrow()) {
+        if (last->IsThrow() || last->IsReThrow() || last->IsUnreachable()) {
           marks |= kColdMark;
         } else {
           // When visiting a block inside a loop with two successors

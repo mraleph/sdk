@@ -34,6 +34,7 @@ ConstantPropagator::ConstantPropagator(
       unknown_(Object::unknown_constant()),
       non_constant_(Object::non_constant()),
       constant_value_(Object::Handle(Z)),
+      abstract_type_(AbstractType::Handle(Z)),
       reachable_(new(Z) BitVector(Z, graph->preorder().length())),
       unwrapped_phis_(new(Z) BitVector(Z, graph->current_ssa_temp_index())),
       block_worklist_(),
@@ -145,41 +146,55 @@ void ConstantPropagator::VisitNativeEntry(NativeEntryInstr* block) {
   VisitFunctionEntry(block);
 }
 
+void ConstantPropagator::VisitBlockEntry(BlockEntryInstr* block) {
+  current_instruction_always_throws_ = false;
+  Instruction* last_instruction = nullptr;
+  for (auto instr : block->instructions()) {
+    instr->Accept(this);
+    if (current_instruction_always_throws_) {
+      last_instruction = instr;
+      break;
+    }
+  }
+  if (last_instruction != nullptr && last_instruction != block->last_instruction()) {
+    if (auto defn = last_instruction->AsDefinition()) {
+      defn->ReplaceUsesWith(graph_->constant_dead());
+    }
+    auto unreachable = new UnreachableInstr();
+    last_instruction->LinkTo(unreachable);
+    block->set_last_instruction(last_instruction);
+  }
+}
+
+void ConstantPropagator::VisitUnreachable(UnreachableInstr* instr) {
+  current_instruction_always_throws_ = true;
+}
+
 void ConstantPropagator::VisitOsrEntry(OsrEntryInstr* block) {
   for (auto def : *block->initial_definitions()) {
     def->Accept(this);
   }
-  for (ForwardInstructionIterator it(block); !it.Done(); it.Advance()) {
-    it.Current()->Accept(this);
-  }
+  VisitBlockEntry(block);
 }
 
 void ConstantPropagator::VisitCatchBlockEntry(CatchBlockEntryInstr* block) {
   for (auto def : *block->initial_definitions()) {
     def->Accept(this);
   }
-  for (ForwardInstructionIterator it(block); !it.Done(); it.Advance()) {
-    it.Current()->Accept(this);
-  }
+  VisitBlockEntry(block);
 }
 
 void ConstantPropagator::VisitJoinEntry(JoinEntryInstr* block) {
   // Phis are visited when visiting Goto at a predecessor. See VisitGoto.
-  for (ForwardInstructionIterator it(block); !it.Done(); it.Advance()) {
-    it.Current()->Accept(this);
-  }
+  VisitBlockEntry(block);
 }
 
 void ConstantPropagator::VisitTargetEntry(TargetEntryInstr* block) {
-  for (ForwardInstructionIterator it(block); !it.Done(); it.Advance()) {
-    it.Current()->Accept(this);
-  }
+  VisitBlockEntry(block);
 }
 
 void ConstantPropagator::VisitIndirectEntry(IndirectEntryInstr* block) {
-  for (ForwardInstructionIterator it(block); !it.Done(); it.Advance()) {
-    it.Current()->Accept(this);
-  }
+  VisitBlockEntry(block);
 }
 
 void ConstantPropagator::VisitParallelMove(ParallelMoveInstr* instr) {
@@ -539,7 +554,13 @@ void ConstantPropagator::VisitStaticCall(StaticCallInstr* instr) {
     default:
       break;
   }
+
   SetValue(instr, non_constant_);
+
+  abstract_type_ = instr->function().result_type();
+  if (abstract_type_.IsNeverType()) {
+    current_instruction_always_throws_ = true;
+  }
 }
 
 void ConstantPropagator::VisitCachableIdempotentCall(

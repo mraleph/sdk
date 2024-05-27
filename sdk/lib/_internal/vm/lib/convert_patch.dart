@@ -824,6 +824,7 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
    */
   @pragma('vm:unsafe:no-interrupts')
   @pragma('vm:unsafe:no-bounds-checks')
+  @pragma('vm:align-loops')
   void parse(int position) {
     int length = chunkEnd;
     if (partialState != NO_PARTIAL) {
@@ -1049,6 +1050,7 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
    */
   @pragma('vm:unsafe:no-interrupts')
   @pragma('vm:unsafe:no-bounds-checks')
+  @pragma('vm:align-loops')
   int parseString(int position) {
     final charAttributes = _characterAttributes;
 
@@ -1134,6 +1136,7 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
    */
   @pragma('vm:unsafe:no-interrupts')
   @pragma('vm:unsafe:no-bounds-checks')
+  @pragma('vm:align-loops')
   int parseStringToBuffer(int position) {
     final charAttributes = _characterAttributes;
 
@@ -1162,32 +1165,36 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
         }
       } while (position < end);
 
-      if (char < SPACE) {
-        fail(position - 1); // Control character in string.
-      }
+      bits |= 1;
+      position -= 1;
 
+      // End of string
       if (char == QUOTE) {
-        int quotePosition = position - 1;
-        if (quotePosition > start) {
-          addSliceToString(start, quotePosition, bits);
+        final endPos = position + 1;
+        if (position > start) {
+          addSliceToString(start, position, bits);
         }
         listener.handleString(endString());
-        return position;
-      }
-
-      if (char != BACKSLASH) {
-        continue;
+        return endPos;
       }
 
       // Handle escape.
-      if (position - 1 > start) {
-        addSliceToString(start, position - 1, bits);
+      if (char == BACKSLASH) {
+        final escapeStart = position + 1;
+        if (position > start) {
+          addSliceToString(start, position, bits);
+        }
+        position = escapeStart;
+        if (position == end) return chunkString(STR_ESCAPE);
+        position = parseStringEscape(position);
+        if (position == end) return position;
+        start = position;
+        continue;
       }
 
-      if (position == end) return chunkString(STR_ESCAPE);
-      position = parseStringEscape(position);
-      if (position == end) return position;
-      start = position;
+      if (char < SPACE) {
+        fail(position); // Control character in string.
+      }
     }
     return -1; // UNREACHABLE.
   }
@@ -1454,6 +1461,7 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
     return position;
   }
 
+  @pragma('vm:never-inline')
   Never fail(int position, [String? message]) {
     if (message == null) {
       message = "Unexpected character";
@@ -1626,6 +1634,7 @@ class _JsonUtf8Parser extends _JsonParserWithListener
   static const int notAsciiSlice = 1;
   static const int notLatin1Char = 2;
 
+  @pragma('vm:prefer-inline')
   void beginString(int bits, int start) {
     _totalLength = 0;
     _isAscii = 0;
@@ -1633,6 +1642,7 @@ class _JsonUtf8Parser extends _JsonParserWithListener
     _stringSlicesIndex = 0;
   }
 
+  @pragma('vm:never-inline')
   void addSliceToString(int start, int end, int bits) {
     // This is a one byte string, we can just add it to the _stringSlices.
     if (_stringSlicesIndex == _stringSlicesCapacity) {

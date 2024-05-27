@@ -424,6 +424,7 @@ struct InstrAttrs {
   M(MoveArgument, kNoGC)                                                       \
   M(DartReturn, kNoGC)                                                         \
   M(NativeReturn, kNoGC)                                                       \
+  M(Unreachable, kNoGC) \
   M(Throw, kNoGC)                                                              \
   M(ReThrow, kNoGC)                                                            \
   M(Stop, kNoGC)                                                               \
@@ -3577,6 +3578,22 @@ class NativeReturnInstr : public ReturnBaseInstr {
   virtual void RawSetInputAt(intptr_t i, Value* value) { inputs_[i] = value; }
 
   DISALLOW_COPY_AND_ASSIGN(NativeReturnInstr);
+};
+
+class UnreachableInstr : public TemplateInstruction<0, NoThrow> {
+ public:
+  explicit UnreachableInstr() : TemplateInstruction(InstructionSource(), DeoptId::kNone) {
+  }
+
+  DECLARE_INSTRUCTION(Unreachable)
+  DECLARE_EMPTY_SERIALIZATION(UnreachableInstr, TemplateInstruction)
+
+  virtual bool ComputeCanDeoptimize() const { return false; }
+  virtual bool ComputeCanDeoptimizeAfterCall() const { return false; }
+  virtual bool HasUnknownSideEffects() const { return false; }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(UnreachableInstr);
 };
 
 class ThrowInstr : public TemplateInstruction<1, Throws> {

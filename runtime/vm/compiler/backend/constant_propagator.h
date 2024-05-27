@@ -74,6 +74,8 @@ class ConstantPropagator : public FlowGraphVisitor {
 
   virtual void VisitBlocks() { UNREACHABLE(); }
 
+  void VisitBlockEntry(BlockEntryInstr* block);
+
 #define DECLARE_VISIT(type, attrs) virtual void Visit##type(type##Instr* instr);
   FOR_EACH_INSTRUCTION(DECLARE_VISIT)
 
@@ -95,12 +97,15 @@ class ConstantPropagator : public FlowGraphVisitor {
   const Object& unknown_;
   const Object& non_constant_;
 
-  // Temporary handle used in [TransformDefinition].
+  // Temporary handles.
   Object& constant_value_;
+  AbstractType& abstract_type_;
 
   // Analysis results. For each block, a reachability bit.  Indexed by
   // preorder number.
   BitVector* reachable_;
+
+  bool current_instruction_always_throws_;
 
   // Bitvector of phis that were "unwrapped" into one of their inputs
   // when visiting one of their uses. These uses of these phis

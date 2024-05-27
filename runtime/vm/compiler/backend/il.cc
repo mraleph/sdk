@@ -1296,6 +1296,7 @@ Instruction* Instruction::RemoveFromGraph(bool return_previous) {
   ASSERT(!IsBlockEntry());
   ASSERT(!IsBranch());
   ASSERT(!IsThrow());
+  ASSERT(!IsUnreachable());
   ASSERT(!IsReturnBase());
   ASSERT(!IsReThrow());
   ASSERT(!IsGoto());
@@ -4775,6 +4776,18 @@ void LoadFieldInstr::EmitNativeCodeForInitializerCall(
                              /*kind=*/UntaggedPcDescriptors::kOther, locs(),
                              deopt_id(), env());
   __ Bind(&no_call);
+}
+
+LocationSummary* UnreachableInstr::MakeLocationSummary(Zone* zone, bool opt) const {
+  const intptr_t kNumInputs = 0;
+  const intptr_t kNumTemps = 0;
+  LocationSummary* summary = new (zone)
+      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
+  return summary;
+}
+
+void UnreachableInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
+  __ Breakpoint();
 }
 
 LocationSummary* ThrowInstr::MakeLocationSummary(Zone* zone, bool opt) const {
