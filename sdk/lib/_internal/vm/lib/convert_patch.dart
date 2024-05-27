@@ -20,7 +20,7 @@ import "dart:_internal"
         writeIntoTwoByteString,
         createOneByteStringFromCharacters;
 
-import "dart:typed_data" show Uint8List, Uint16List;
+import "dart:typed_data" show Uint8List, Uint16List, Int32List;
 
 /// This patch library has no additional parts.
 
@@ -558,20 +558,21 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
    * The buffer is stored in the [buffer] field. If the string is unterminated,
    * the same buffer is used to continue parsing in the next chunk.
    */
-  void beginString();
+  void beginString(int bits, int start);
+
   /**
    * Add single character code to string being built.
    *
    * Used for unparsed escape sequences.
    */
-  void addCharToString(int charCode);
+  void addCharToString(int charCode, int escapeLength);
 
   /**
    * Adds slice of current chunk to string being built.
    *
    * The [start] positions is inclusive, [end] is exclusive.
    */
-  void addSliceToString(int start, int end);
+  void addSliceToString(int start, int end, int bits);
 
   /** Finalizes the string being built and returns it as a String. */
   String endString();
@@ -766,7 +767,7 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
       if (digit < 0) fail(position, "Invalid hex digit");
       value = 16 * value + digit;
     }
-    addCharToString(value);
+    addCharToString(value, 6); // TODO(XXX) this is incorrect.
     return parseStringToBuffer(position);
   }
 
@@ -1079,16 +1080,16 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
       }
       if (char == BACKSLASH) {
         int sliceEnd = position - 1;
-        beginString();
-        if (start < sliceEnd) addSliceToString(start, sliceEnd);
+        beginString(bits, start);
+        if (start < sliceEnd) addSliceToString(start, sliceEnd, bits);
         return parseStringToBuffer(sliceEnd);
       }
       if (char < SPACE) {
         fail(position - 1, "Control character in string");
       }
     }
-    beginString();
-    if (start < end) addSliceToString(start, end);
+    beginString(bits, start);
+    if (start < end) addSliceToString(start, end, bits);
     return chunkString(STR_PLAIN);
   }
 
@@ -1138,18 +1139,21 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
 
     int end = chunkEnd;
     int start = position;
+    int bits = 0;
     while (true) {
       if (position == end) {
         if (position > start) {
-          addSliceToString(start, position);
+          addSliceToString(start, position, bits);
         }
         return chunkString(STR_PLAIN);
       }
 
       int char = 0;
+      bits = 0;
       do {
         char = getChar(position);
         position++;
+        bits |= char;
         if (isUtf16Input && char > 0xFF) {
           continue;
         }
@@ -1165,7 +1169,7 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
       if (char == QUOTE) {
         int quotePosition = position - 1;
         if (quotePosition > start) {
-          addSliceToString(start, quotePosition);
+          addSliceToString(start, quotePosition, bits);
         }
         listener.handleString(endString());
         return position;
@@ -1177,7 +1181,7 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
 
       // Handle escape.
       if (position - 1 > start) {
-        addSliceToString(start, position - 1);
+        addSliceToString(start, position - 1, bits);
       }
 
       if (position == end) return chunkString(STR_ESCAPE);
@@ -1187,6 +1191,12 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
     }
     return -1; // UNREACHABLE.
   }
+
+  static const String _escapes =
+      "\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\"\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000/\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000"
+      "\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\\\u0000\u0000\u0000\u0000\u0000\b\u0000\u0000\u0000\f\u0000\u0000\u0000\u0000\u0000\u0000\u0000\n\u0000\u0000\u0000\r\u0000\t\u0001\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000"
+      "\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000"
+      "\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000";
 
   /**
    * Parse a string escape.
@@ -1199,52 +1209,39 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
    */
   int parseStringEscape(int position) {
     int char = getChar(position++);
-    int length = chunkEnd;
-    switch (char) {
-      case CHAR_b:
-        char = BACKSPACE;
-        break;
-      case CHAR_f:
-        char = FORM_FEED;
-        break;
-      case CHAR_n:
-        char = NEWLINE;
-        break;
-      case CHAR_r:
-        char = CARRIAGE_RETURN;
-        break;
-      case CHAR_t:
-        char = TAB;
-        break;
-      case SLASH:
-      case BACKSLASH:
-      case QUOTE:
-        break;
-      case CHAR_u:
-        int hexStart = position - 1;
-        int value = 0;
-        for (int i = 0; i < 4; i++) {
-          if (position == length) return chunkStringEscapeU(i, value);
-          char = getChar(position++);
-          int digit = char ^ 0x30;
-          value *= 16;
-          if (digit <= 9) {
-            value += digit;
-          } else {
-            digit = (char | 0x20) - CHAR_a;
-            if (digit < 0 || digit > 5) {
-              fail(hexStart, "Invalid unicode escape");
-            }
-            value += digit + 10;
-          }
-        }
-        char = value;
-        break;
-      default:
-        if (char < SPACE) fail(position, "Control character in string");
-        fail(position, "Unrecognized string escape");
+    if (isUtf16Input && char > 0xFF) {
+      fail(position, "Unrecognized string escape");
     }
-    addCharToString(char);
+    int escape = _escapes.codeUnitAt(char);
+    if (escape > 1) {
+      addCharToString(escape, 2);
+      if (position == chunkEnd) return chunkString(STR_PLAIN);
+      return position;
+    }
+    if (escape == 0) {
+      if (char < SPACE) fail(position, "Control character in string");
+      fail(position, "Unrecognized string escape");
+    }
+    int length = chunkEnd;
+    int hexStart = position - 1;
+    int value = 0;
+    for (int i = 0; i < 4; i++) {
+      if (position == length) return chunkStringEscapeU(i, value);
+      char = getChar(position++);
+      int digit = char ^ 0x30;
+      value *= 16;
+      if (digit <= 9) {
+        value += digit;
+      } else {
+        digit = (char | 0x20) - CHAR_a;
+        if (digit < 0 || digit > 5) {
+          fail(hexStart, "Invalid unicode escape");
+        }
+        value += digit + 10;
+      }
+    }
+    char = value;
+    addCharToString(char, 6);
     if (position == length) return chunkString(STR_PLAIN);
     return position;
   }
@@ -1486,16 +1483,16 @@ class _JsonStringParser extends _JsonParserWithListener
     return chunk.substring(start, end);
   }
 
-  void beginString() {
+  void beginString(int bits, int start) {
     this.buffer = new StringBuffer();
   }
 
-  void addSliceToString(int start, int end) {
+  void addSliceToString(int start, int end, int bits) {
     StringBuffer buffer = this.buffer;
     buffer.write(chunk.substring(start, end));
   }
 
-  void addCharToString(int charCode) {
+  void addCharToString(int charCode, int escapeLength) {
     StringBuffer buffer = this.buffer;
     buffer.writeCharCode(charCode);
   }
@@ -1607,38 +1604,222 @@ class _JsonUtf8Parser extends _JsonParserWithListener
   @pragma('vm:prefer-inline')
   int getChar(int position) => chunk[position];
 
+  static const int maxAsciiChar = 0x7f;
+
   String getString(int start, int end, int bits) {
-    const int maxAsciiChar = 0x7f;
     if (bits <= maxAsciiChar) {
       return createOneByteStringFromCharacters(chunk, start, end);
     }
-    beginString();
-    if (start < end) addSliceToString(start, end);
+    beginString(bits, start);
+    if (start < end) addSliceToString(start, end, bits);
     String result = endString();
     return result;
   }
 
-  void beginString() {
-    decoder.reset();
-    this.buffer = new StringBuffer();
+  int _stringStart = 0;
+  Int32List _stringSlices = Int32List(8);
+  int _stringSlicesCapacity = 8;
+  int _stringSlicesIndex = 0;
+  int _isAscii = 0;
+  int _totalLength = 0;
+
+  static const int notAsciiSlice = 1;
+  static const int notLatin1Char = 2;
+
+  void beginString(int bits, int start) {
+    _totalLength = 0;
+    _isAscii = 0;
+    _stringStart = start;
+    _stringSlicesIndex = 0;
   }
 
-  void addSliceToString(int start, int end) {
-    final StringBuffer buffer = this.buffer;
-    buffer.write(decoder.convertChunked(chunk, start, end));
+  void addSliceToString(int start, int end, int bits) {
+    // This is a one byte string, we can just add it to the _stringSlices.
+    if (_stringSlicesIndex == _stringSlicesCapacity) {
+      _stringSlicesCapacity *= 2;
+      _stringSlices = Int32List(_stringSlicesCapacity)
+        ..setRange(0, _stringSlices.length, _stringSlices);
+    }
+    _stringSlices[_stringSlicesIndex++] = end - start;
+    _totalLength += end - start;
+    if (bits > maxAsciiChar) {
+      _isAscii |= notAsciiSlice;
+    }
   }
 
-  void addCharToString(int charCode) {
-    final StringBuffer buffer = this.buffer;
-    decoder.flush(buffer);
-    buffer.writeCharCode(charCode);
+  void addCharToString(int charCode, int escapeLength) {
+    if (_stringSlicesIndex == _stringSlicesCapacity) {
+      _stringSlicesCapacity *= 2;
+      _stringSlices = Int32List(_stringSlicesCapacity)
+        ..setRange(0, _stringSlices.length, _stringSlices);
+    }
+
+    _totalLength++;
+    _stringSlices[_stringSlicesIndex++] = -((charCode << 3) | escapeLength);
+    if (charCode > 0xFF) {
+      _isAscii |= notLatin1Char;
+    }
   }
 
   String endString() {
-    final StringBuffer buffer = this.buffer;
-    decoder.flush(buffer);
-    this.buffer = null;
-    return buffer.toString();
+    if (_isAscii == 0) {
+      final result = allocateOneByteString(_totalLength);
+      int index = _stringStart;
+      int pos = 0;
+      for (int i = 0; i < _stringSlicesIndex; i++) {
+        int op = _stringSlices[i];
+        if (op > 0) {
+          copyRangeFromUint8ListToOneByteString(chunk, result, index, pos, op);
+          index += op;
+          pos += op;
+        } else {
+          op = -op;
+          index += (op & 0x7);
+          writeIntoOneByteString(result, pos, (op >> 3));
+          pos++;
+        }
+      }
+      if (pos != result.length) {
+        throw 'Something went wrong with allocating string.';
+      }
+      return result;
+    }
+
+    if (_isAscii == notLatin1Char) {
+      final result = allocateTwoByteString(_totalLength);
+      int index = _stringStart;
+      int pos = 0;
+      for (int i = 0; i < _stringSlicesIndex; i++) {
+        int op = _stringSlices[i];
+        if (op > 0) {
+          while (--op >= 0) {
+            writeIntoTwoByteString(result, pos, chunk[index]);
+            index++;
+            pos++;
+          }
+        } else {
+          op = -op;
+          index += (op & 0x7);
+          writeIntoTwoByteString(result, pos, (op >> 3));
+          pos++;
+        }
+      }
+      if (pos != result.length) {
+        throw 'Something went wrong with allocating string.';
+      }
+      return result;
+    }
+
+    // Scan through all slices to compute the final length of the string.
+    int totalSize = 0;
+    int totalFlags = 0;
+    {
+      int index = _stringStart;
+      int pos = 0;
+      for (int i = 0; i < _stringSlicesIndex; i++) {
+        int op = _stringSlices[i];
+        if (op > 0) {
+          final start = index;
+          final end = index + op;
+          totalSize += decoder.scan(chunk, start, end);
+          final flags = decoder._scanFlags;
+          totalFlags |= flags;
+          if (flags != 0) {
+            // We don't expect any incomplete characters.
+            final adjustment =
+                decoder._skipFinalIncompleteCharacter(chunk, start, end);
+            if (adjustment > 0) {
+              /*
+              // TODO(XXX) if allowMalformed then add unicodeReplacementCharacterRune
+              // otherwise throw an error.
+              {
+                print('STRING STARTS AT $_stringStart');
+                int j = _stringStart;
+                for (int i = 0; i < _stringSlicesIndex; i++) {
+                  int op = _stringSlices[i];
+                  if (op > 0) {
+                    print('  SLICE $j to ${j + op}');
+                    j += op;
+                  } else {
+                    print('  ESCAPE at $j to ${j + (op & 0x7)}');
+                    j += (op & 0x7);
+                  }
+                }
+              }*/
+
+              throw 'An incomplete character was found at the end of chunk going from $start to $end.';
+            }
+          }
+          index += op;
+        } else {
+          op = -op;
+          index += (op & 0x7);
+          totalSize++;
+        }
+      }
+    }
+
+    if (((_isAscii & notLatin1Char) == 0) &&
+        totalFlags == (_Utf8Decoder.flagLatin1 | _Utf8Decoder.flagExtension)) {
+      // Every escaped character is Latin1 and slices are Latin1.
+      decoder.reset();
+      final result = allocateOneByteString(totalSize);
+      int index = _stringStart;
+      int pos = 0;
+      for (int i = 0; i < _stringSlicesIndex; i++) {
+        int op = _stringSlices[i];
+        if (op > 0) {
+          final start = index;
+          final end = index + op;
+          pos = decoder.decode8Into(chunk, start, end, result, pos);
+          if (pos < 0) {
+            throw 'Error during decoding';
+          }
+          if (decoder._state != _Utf8Decoder.accept) {
+            // TODO(XXX): allow malformed.
+            throw 'Error state';
+          }
+          index += op;
+        } else {
+          op = -op;
+          index += op & 0x7;
+          writeIntoOneByteString(result, pos, (op >> 3));
+          pos++;
+        }
+      }
+
+      return result;
+    }
+
+    {
+      decoder.reset();
+      final result = allocateTwoByteString(totalSize);
+      int index = _stringStart;
+      int pos = 0;
+      for (int i = 0; i < _stringSlicesIndex; i++) {
+        int op = _stringSlices[i];
+        if (op > 0) {
+          final start = index;
+          final end = index + op;
+          pos = decoder.decode16Into(chunk, start, end, result, pos);
+          if (pos < 0) {
+            throw 'Error during decoding';
+          }
+          if (decoder._state != _Utf8Decoder.accept) {
+            // TODO(XXX): allow malformed.
+            throw 'Error state';
+          }
+          index += op;
+        } else {
+          op = -op;
+          index += op & 0x7;
+          writeIntoTwoByteString(result, pos, (op >> 3));
+          pos++;
+        }
+      }
+
+      return result;
+    }
   }
 
   void copyCharsToList(int start, int end, List target, int offset) {
@@ -1859,6 +2040,21 @@ class _Utf8Decoder {
     return result;
   }
 
+  // Do not include any final, incomplete character in size.
+  @pragma('vm:prefer-inline')
+  int _skipFinalIncompleteCharacter(Uint8List bytes, int start, int end) {
+    int extensionCount = 0;
+    int i = end - 1;
+    while (i >= start && (bytes[i] & 0xC0) == 0x80) {
+      extensionCount++;
+      i--;
+    }
+    if (i >= start && bytes[i] >= ((~0x3F >> extensionCount) & 0xFF)) {
+      return bytes[i] >= 0xF0 ? 2 : 1;
+    }
+    return 0;
+  }
+
   @patch
   String convertChunked(List<int> codeUnits, int start, int? maybeEnd) {
     int end = RangeError.checkValidRange(start, maybeEnd, codeUnits.length);
@@ -1925,15 +2121,7 @@ class _Utf8Decoder {
     }
 
     // Do not include any final, incomplete character in size.
-    int extensionCount = 0;
-    int i = end - 1;
-    while (i >= start && (bytes[i] & 0xC0) == 0x80) {
-      extensionCount++;
-      i--;
-    }
-    if (i >= start && bytes[i] >= ((~0x3F >> extensionCount) & 0xFF)) {
-      size -= bytes[i] >= 0xF0 ? 2 : 1;
-    }
+    size -= _skipFinalIncompleteCharacter(bytes, start, end);
 
     final int carryOverState = _state;
     final int carryOverChar = _charOrIndex;
@@ -2002,6 +2190,55 @@ class _Utf8Decoder {
     return i;
   }
 
+  int decode8Into(Uint8List bytes, int start, int end, String result, int pos) {
+    assert(start < end);
+    int i = start;
+    int j = pos;
+    if (_state == X1) {
+      // Half-way though 2-byte sequence
+      assert(_charOrIndex == 2 || _charOrIndex == 3);
+      final int e = bytes[i++] ^ 0x80;
+      if (e >= 0x40) {
+        _state = errorMissingExtension;
+        _charOrIndex = i - 1;
+        return -1;
+      }
+      writeIntoOneByteString(result, j++, (_charOrIndex << 6) | e);
+      _state = accept;
+    }
+    assert(_state == accept);
+    while (i < end) {
+      int byte = bytes[i++];
+      if (byte >= 0x80) {
+        if (byte < 0xC0) {
+          _state = errorUnexpectedExtension;
+          _charOrIndex = i - 1;
+          return -1;
+        }
+        assert(byte == 0xC2 || byte == 0xC3);
+        if (i == end) {
+          _state = X1;
+          _charOrIndex = byte & 0x1F;
+          break;
+        }
+        final int e = bytes[i++] ^ 0x80;
+        if (e >= 0x40) {
+          _state = errorMissingExtension;
+          _charOrIndex = i - 1;
+          return -1;
+        }
+        byte = (byte << 6) | e;
+      }
+      writeIntoOneByteString(result, j++, byte);
+    }
+    // Output size must match, unless we are doing single conversion and are
+    // inside an unfinished sequence (which will trigger an error later).
+    // assert(_bomIndex == 0 && _state != accept
+    //    ? (j == size - 1 || j == size - 2)
+    //    : (j == size));
+    return j;
+  }
+
   String decode8(Uint8List bytes, int start, int end, int size) {
     assert(start < end);
     String result = allocateOneByteString(size);
@@ -2050,6 +2287,77 @@ class _Utf8Decoder {
         ? (j == size - 1 || j == size - 2)
         : (j == size));
     return result;
+  }
+
+  int decode16Into(
+      Uint8List bytes, int start, int end, String result, int pos) {
+    assert(start < end);
+    final String typeTable = _Utf8Decoder.typeTable;
+    final String transitionTable = _Utf8Decoder.transitionTable;
+    int i = start;
+    int j = pos;
+    int state = _state;
+    int char;
+
+    // First byte
+    assert(!isErrorState(state));
+    final int byte = bytes[i++];
+    final int type = typeTable.codeUnitAt(byte) & typeMask;
+    if (state == accept) {
+      char = byte & (shiftedByteMask >> type);
+      state = transitionTable.codeUnitAt(type);
+    } else {
+      char = (byte & 0x3F) | (_charOrIndex << 6);
+      state = transitionTable.codeUnitAt(state + type);
+    }
+
+    while (i < end) {
+      final int byte = bytes[i++];
+      final int type = typeTable.codeUnitAt(byte) & typeMask;
+      if (state == accept) {
+        if (char >= 0x10000) {
+          assert(char < 0x110000);
+          writeIntoTwoByteString(result, j++, 0xD7C0 + (char >> 10));
+          writeIntoTwoByteString(result, j++, 0xDC00 + (char & 0x3FF));
+        } else {
+          writeIntoTwoByteString(result, j++, char);
+        }
+        char = byte & (shiftedByteMask >> type);
+        state = transitionTable.codeUnitAt(type);
+      } else if (isErrorState(state)) {
+        _state = state;
+        _charOrIndex = i - 2;
+        return -1;
+      } else {
+        char = (byte & 0x3F) | (char << 6);
+        state = transitionTable.codeUnitAt(state + type);
+      }
+    }
+
+    // Final write?
+    if (state == accept) {
+      if (char >= 0x10000) {
+        assert(char < 0x110000);
+        writeIntoTwoByteString(result, j++, 0xD7C0 + (char >> 10));
+        writeIntoTwoByteString(result, j++, 0xDC00 + (char & 0x3FF));
+      } else {
+        writeIntoTwoByteString(result, j++, char);
+      }
+    } else if (isErrorState(state)) {
+      _state = state;
+      _charOrIndex = end - 1;
+      return -1;
+    }
+
+    _state = state;
+    _charOrIndex = char;
+    // TODO(XXX) implement this assertion
+    // Output size must match, unless we are doing single conversion and are
+    // inside an unfinished sequence (which will trigger an error later).
+    // assert(_bomIndex == 0 && _state != accept
+    //    ? (j == result.length - 1 || j == result.length - 2)
+    //    : (j == result.length));
+    return j;
   }
 
   String decode16(Uint8List bytes, int start, int end, int size) {

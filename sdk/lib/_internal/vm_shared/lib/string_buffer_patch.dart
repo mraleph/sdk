@@ -2,7 +2,13 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-import "dart:_internal" show patch;
+import "dart:_internal"
+    show
+        patch,
+        allocateOneByteString,
+        writeIntoOneByteString,
+        allocateTwoByteString,
+        writeIntoTwoByteString;
 
 import "dart:typed_data" show Uint16List;
 
@@ -199,6 +205,23 @@ class StringBuffer {
   /**
    * Create a [String] from the UFT-16 code units in buffer.
    */
-  @pragma("vm:external-name", "StringBuffer_createStringFromUint16Array")
-  external static String _create(Uint16List buffer, int length, bool isLatin1);
+  //@pragma("vm:external-name", "StringBuffer_createStringFromUint16Array")
+  @pragma('vm:unsafe:no-bounds-checks')
+  @pragma('vm:unsafe:no-interrupts')
+  static String _create(Uint16List buffer, int length, bool isLatin1) {
+    if (isLatin1) {
+      final result = allocateOneByteString(length);
+      for (int i = 0; i < length; i++) {
+        writeIntoOneByteString(result, i, buffer[i]);
+      }
+      return result;
+    } else {
+      // TODO(vegorov): this should be memory copy
+      final result = allocateTwoByteString(length);
+      for (int i = 0; i < length; i++) {
+        writeIntoTwoByteString(result, i, buffer[i]);
+      }
+      return result;
+    }
+  }
 }
