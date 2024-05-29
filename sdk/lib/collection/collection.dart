@@ -72,3 +72,5 @@ part 'maps.dart';
 part 'queue.dart';
 part 'set.dart';
 part 'splay_tree.dart';
+
+external Map<K, V> createMapFromList<K, V>(List<Object?> list);

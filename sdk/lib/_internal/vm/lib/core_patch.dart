@@ -102,3 +102,8 @@ class StackTrace {
   @pragma("vm:external-name", "StackTrace_current")
   external static StackTrace get current;
 }
+
+@patch
+@pragma("vm:recognized", "other")
+@pragma("vm:prefer-inline")
+external String? lookupLatin1Symbol(Uint8List bytes, int start, int end);

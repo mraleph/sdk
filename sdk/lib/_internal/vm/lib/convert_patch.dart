@@ -18,7 +18,10 @@ import "dart:_internal"
         unsafeCast,
         writeIntoOneByteString,
         writeIntoTwoByteString,
-        createOneByteStringFromCharacters;
+        createOneByteStringFromCharacters,
+        intern;
+
+import "dart:collection" as collection;
 
 import "dart:typed_data" show Uint8List, Uint16List, Int32List;
 
@@ -74,6 +77,11 @@ class _JsonUtf8Decoder extends Converter<List<int>, Object?> {
 
 // Simple API for JSON parsing.
 
+// class _JsonObject {
+//  List<Object?> kv = List.filled(length: 8, null, growable: false);
+//  int finger = 0;
+// }
+
 /**
  * A [_JsonListener] builds data objects from the parser events.
  *
@@ -94,6 +102,8 @@ class _JsonListener {
    */
   final List<Object?> stack = [];
 
+  // final List<Object?> map = [];
+
   /** The current [Map] or [List] being built, or null if not building a
   * container.
   */
@@ -107,7 +117,6 @@ class _JsonListener {
 
   /** Pushes the currently active container (and key, if a [Map]). */
   void pushContainer() {
-    if (currentContainer is Map) stack.add(key);
     stack.add(currentContainer);
   }
 
@@ -115,7 +124,6 @@ class _JsonListener {
   void popContainer() {
     value = currentContainer;
     currentContainer = stack.removeLast();
-    if (currentContainer is Map) key = unsafeCast<String>(stack.removeLast());
   }
 
   void handleString(String value) {
@@ -136,27 +144,31 @@ class _JsonListener {
 
   void beginObject() {
     pushContainer();
-    currentContainer = <String, dynamic>{};
+    currentContainer = <Object?>[];
   }
 
   void propertyName() {
-    key = unsafeCast<String>(value);
+    var kv = unsafeCast<List<Object?>>(currentContainer);
+    kv.add(unsafeCast<String>(value));
     value = null;
   }
 
   void propertyValue() {
-    var map = unsafeCast<Map>(currentContainer);
+    var kv = unsafeCast<List<Object?>>(currentContainer);
     var reviver = this.reviver;
     if (reviver != null) {
+      var key = kv[kv.length - 1];
       value = reviver(key, value);
     }
-    map[key] = value;
-    key = '';
+    kv.add(value);
     value = null;
   }
 
   void endObject() {
-    popContainer();
+    var kv = unsafeCast<List<Object?>>(currentContainer);
+    // print('endObject: $kv');
+    value = collection.createMapFromList<String, dynamic>(kv);
+    currentContainer = stack.removeLast();
   }
 
   void beginArray() {
@@ -400,6 +412,8 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
   // The current parsing state.
   int state = STATE_INITIAL;
   List<int> states = <int>[];
+
+  int isKey = 0;
 
   /**
    * Stores tokenizer state between chunks.
@@ -855,7 +869,9 @@ mixin _ChunkedJsonParser<T> on _JsonParserWithListener {
         case QUOTE:
           if ((state & ALLOW_STRING_MASK) != 0) fail(position);
           state |= VALUE_READ_BITS;
+          isKey = (state & 3);
           position = parseString(position + 1);
+          isKey = 0;
           break;
         case LBRACKET:
           if ((state & ALLOW_VALUE_MASK) != 0) fail(position);
@@ -1616,7 +1632,19 @@ class _JsonUtf8Parser extends _JsonParserWithListener
 
   String getString(int start, int end, int bits) {
     if (bits <= maxAsciiChar) {
-      return createOneByteStringFromCharacters(chunk, start, end);
+      if (isKey == _ChunkedJsonParser.INSIDE_OBJECT) {
+        String? key = lookupLatin1Symbol(chunk, start, end);
+        if (key != null) {
+          // print(
+          //    'got interned key: $key (should be ${createOneByteStringFromCharacters(chunk, start, end)})');
+          return key;
+        }
+        key = intern(createOneByteStringFromCharacters(chunk, start, end));
+        // print('created and interned key $key');
+        return key;
+      }
+      final str = createOneByteStringFromCharacters(chunk, start, end);
+      return str;
     }
     beginString(bits, start);
     if (start < end) addSliceToString(start, end, bits);

@@ -779,6 +779,10 @@ class Symbols : public AllStatic {
   template <typename StringType>
   static StringPtr Lookup(Thread* thread, const StringType& str);
 
+  static StringPtr LookupRawLatin1(Thread* thread,
+                                   const uint8_t* data,
+                                   intptr_t len);
+
   // Returns Symbol::Null if no symbol is found.
   static StringPtr LookupFromConcat(Thread* thread,
                                     const String& str1,

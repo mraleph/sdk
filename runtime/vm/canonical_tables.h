@@ -23,6 +23,7 @@ class CharArray {
     result.SetHash(hash_);
     return result.ptr();
   }
+
   bool Equals(const String& other) const {
     ASSERT(other.HasHash());
     if (other.Hash() != hash_) {
@@ -30,6 +31,15 @@ class CharArray {
     }
     return other.Equals(data_, len_);
   }
+
+  bool Equals(StringPtr other) const {
+    ASSERT(String::HasHash(other));
+    if (String::HashOf(other) != hash_) {
+      return false;
+    }
+    return String::Equals(other, data_, len_);
+  }
+
   uword Hash() const { return hash_; }
 
  private:

@@ -3173,7 +3173,8 @@ class StoreOptimizer : public LivenessAnalysis {
           continue;
         }
 
-        if (instr->IsThrow() || instr->IsReThrow() || instr->IsReturnBase() || instr->IsUnreachable()) {
+        if (instr->IsThrow() || instr->IsReThrow() || instr->IsReturnBase() ||
+            instr->IsUnreachable()) {
           // Initialize live-out for exit blocks since it won't be computed
           // otherwise during the fixed point iteration.
           live_out->CopyFrom(all_places);

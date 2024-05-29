@@ -221,3 +221,5 @@ part "symbol.dart";
 part "type.dart";
 part "uri.dart";
 part "weak.dart";
+
+external String? lookupLatin1Symbol(Uint8List bytes, int start, int end);

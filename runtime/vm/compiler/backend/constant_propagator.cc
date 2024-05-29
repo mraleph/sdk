@@ -156,7 +156,8 @@ void ConstantPropagator::VisitBlockEntry(BlockEntryInstr* block) {
       break;
     }
   }
-  if (last_instruction != nullptr && last_instruction != block->last_instruction()) {
+  if (last_instruction != nullptr &&
+      last_instruction != block->last_instruction()) {
     if (auto defn = last_instruction->AsDefinition()) {
       defn->ReplaceUsesWith(graph_->constant_dead());
     }

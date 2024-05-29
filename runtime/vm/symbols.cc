@@ -409,6 +409,64 @@ StringPtr Symbols::Lookup(Thread* thread, const StringType& str) {
   return symbol.ptr();
 }
 
+namespace {
+
+ObjectPtr GetKey(WeakArrayPtr data, intptr_t entry) {
+  static constexpr intptr_t kFirstKeyIndex = 2;
+  static constexpr intptr_t kEntrySize = 1;
+  const intptr_t index = kFirstKeyIndex + (kEntrySize * entry);
+  return data.untag()->element(index);
+}
+
+ObjectPtr UnusedMarker() {
+  return Object::transition_sentinel().ptr();
+}
+ObjectPtr DeletedMarker() {
+  return Object::null_object().ptr();
+}
+
+intptr_t NumEntries(WeakArrayPtr data) {
+  return Smi::Value(data.untag()->length()) - 2;
+}
+
+StringPtr LookupRawLatin1In(WeakArrayPtr data, const Latin1Array& key) {
+  const intptr_t num_entries = NumEntries(data);
+  uword hash = SymbolTraits::Hash(key);
+  ASSERT(Utils::IsPowerOfTwo(num_entries));
+  intptr_t probe = hash & (num_entries - 1);
+  int probe_distance = 1;
+  while (true) {
+    ObjectPtr probe_key = GetKey(data, probe);
+    if (probe_key == UnusedMarker()) {
+      return String::null();
+    } else if (probe_key != DeletedMarker()) {
+      if (key.Equals(static_cast<StringPtr>(probe_key))) {
+        return static_cast<StringPtr>(probe_key);
+      }
+    }
+    // Advance probe.  See ArrayLengthForNumOccupied comment for
+    // explanation of how we know this hits all slots.
+    probe = (probe + probe_distance) & (num_entries - 1);
+    probe_distance++;
+  }
+  UNREACHABLE();
+  return String::null();
+}
+}  // namespace
+
+StringPtr Symbols::LookupRawLatin1(Thread* thread,
+                                   const uint8_t* data,
+                                   intptr_t len) {
+  const Latin1Array key(data, len);
+  StringPtr symbol = LookupRawLatin1In(
+      Dart::vm_isolate_group()->object_store()->symbol_table(), key);
+  if (symbol == String::null()) {
+    symbol = LookupRawLatin1In(
+        thread->isolate_group()->object_store()->symbol_table(), key);
+  }
+  return symbol;
+}
+
 StringPtr Symbols::LookupFromConcat(Thread* thread,
                                     const String& str1,
                                     const String& str2) {

@@ -29,7 +29,7 @@ DEFINE_FLAG(bool,
 
 #define TRACE_ALLOC(statement)                                                 \
   do {                                                                         \
-    if (FLAG_trace_linearscan && CompilerState::ShouldTrace()) statement;   \
+    if (FLAG_trace_linearscan && CompilerState::ShouldTrace()) statement;      \
   } while (0)
 #else
 #define TRACE_ALLOC(statement)

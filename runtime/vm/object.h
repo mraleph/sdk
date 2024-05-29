@@ -10182,16 +10182,20 @@ class String : public Instance {
   }
   static intptr_t length_offset() { return OFFSET_OF(UntaggedString, length_); }
 
-  uword Hash() const {
-    uword result = GetCachedHash(ptr());
+  uword Hash() const { return HashOf(this->ptr()); }
+
+  static uword HashOf(StringPtr ptr) {
+    uword result = GetCachedHash(ptr);
     if (result != 0) {
       return result;
     }
-    result = String::Hash(*this, 0, this->Length());
-    uword set_hash = SetCachedHashIfNotSet(ptr(), result);
+    result = String::Hash(ptr);
+    uword set_hash = SetCachedHashIfNotSet(ptr, result);
     ASSERT(set_hash == result);
     return result;
   }
+
+  static bool HasHash(StringPtr ptr) { return GetCachedHash(ptr) != 0; }
 
   static uword Hash(StringPtr raw);
 
@@ -10243,6 +10247,10 @@ class String : public Instance {
   bool EqualsLatin1(const uint8_t* characters, intptr_t len) const {
     return Equals(characters, len);
   }
+
+  static bool Equals(StringPtr ptr, const uint8_t* characters, intptr_t len);
+
+  static bool Equals(StringPtr ptr, const uint16_t* characters, intptr_t len);
 
   // Compares to an array of UTF-16 encoded characters.
   bool Equals(const uint16_t* characters, intptr_t len) const;
@@ -10603,10 +10611,18 @@ class OneByteString : public AllStatic {
     return reinterpret_cast<const UntaggedOneByteString*>(str.untag());
   }
 
+  static const UntaggedOneByteString* untag(StringPtr ptr) {
+    return reinterpret_cast<const UntaggedOneByteString*>(ptr.untag());
+  }
+
   static uint8_t* CharAddr(const String& str, intptr_t index) {
     ASSERT((index >= 0) && (index < str.Length()));
     ASSERT(str.IsOneByteString());
     return &str.UnsafeMutableNonPointer(untag(str)->data())[index];
+  }
+
+  static uint8_t* CharAddr(StringPtr ptr, intptr_t index) {
+    return const_cast<uint8_t*>(&untag(ptr)->data()[index]);
   }
 
   static uint8_t* DataStart(const String& str) {
@@ -10724,10 +10740,18 @@ class TwoByteString : public AllStatic {
     return reinterpret_cast<const UntaggedTwoByteString*>(str.untag());
   }
 
+  static const UntaggedTwoByteString* untag(StringPtr str) {
+    return reinterpret_cast<const UntaggedTwoByteString*>(str.untag());
+  }
+
   static uint16_t* CharAddr(const String& str, intptr_t index) {
     ASSERT((index >= 0) && (index < str.Length()));
     ASSERT(str.IsTwoByteString());
     return &str.UnsafeMutableNonPointer(untag(str)->data())[index];
+  }
+
+  static uint16_t* CharAddr(StringPtr ptr, intptr_t index) {
+    return const_cast<uint16_t*>(&untag(ptr)->data()[index]);
   }
 
   // Use this instead of CharAddr(0).  It will not assert that the index is <
@@ -11536,6 +11560,10 @@ class TypedDataBase : public PointerBase {
     ASSERT((byte_offset == 0) ||
            ((byte_offset > 0) && (byte_offset < LengthInBytes())));
     return reinterpret_cast<void*>(Validate(untag()->data_) + byte_offset);
+  }
+
+  static void* DataAddr(TypedDataBasePtr ptr, intptr_t byte_offset) {
+    return reinterpret_cast<void*>(ptr.untag()->data_ + byte_offset);
   }
 
 #define TYPED_GETTER_SETTER(name, type)                                        \

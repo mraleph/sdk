@@ -70,3 +70,9 @@ class LinkedHashSet<E> {
   @patch
   factory LinkedHashSet.identity() => new _CompactLinkedIdentityHashSet<E>();
 }
+
+@pragma('vm:prefer-inline')
+@patch
+Map<K, V> createMapFromList<K, V>(List<Object?> list) {
+  return _Map<K, V>().._populateWith(list);
+}

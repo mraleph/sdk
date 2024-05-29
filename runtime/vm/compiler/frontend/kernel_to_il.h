@@ -169,6 +169,7 @@ class FlowGraphBuilder : public BaseFlowGraphBuilder {
                                                 classid_t cid);
   Fragment BuildTypedDataFactoryConstructor(const Function& function,
                                             classid_t cid);
+  Fragment BuildLookupLatin1Symbol(const Function& function);
 
   Fragment EnterScope(intptr_t kernel_offset,
                       const LocalScope** scope = nullptr);

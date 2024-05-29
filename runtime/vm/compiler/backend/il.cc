@@ -4778,7 +4778,8 @@ void LoadFieldInstr::EmitNativeCodeForInitializerCall(
   __ Bind(&no_call);
 }
 
-LocationSummary* UnreachableInstr::MakeLocationSummary(Zone* zone, bool opt) const {
+LocationSummary* UnreachableInstr::MakeLocationSummary(Zone* zone,
+                                                       bool opt) const {
   const intptr_t kNumInputs = 0;
   const intptr_t kNumTemps = 0;
   LocationSummary* summary = new (zone)

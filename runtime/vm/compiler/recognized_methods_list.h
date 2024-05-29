@@ -164,6 +164,7 @@ namespace dart {
   V(_TypedListBase, _memMove4, TypedData_memMove4, 0xcfd4eb46)                 \
   V(_TypedListBase, _memMove8, TypedData_memMove8, 0xd1ca5745)                 \
   V(_TypedListBase, _memMove16, TypedData_memMove16, 0x077790f5)               \
+  V(::, lookupLatin1Symbol, String_lookupLatin1Symbol, 0)                      \
   V(::, _typedDataIndexCheck, TypedDataIndexCheck, 0x7912cea9)                 \
   V(::, _byteDataByteOffsetCheck, ByteDataByteOffsetCheck, 0xbaf71484)         \
   V(::, copyRangeFromUint8ListToOneByteString,                                 \

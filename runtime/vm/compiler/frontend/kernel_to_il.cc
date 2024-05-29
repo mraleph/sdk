@@ -1007,6 +1007,7 @@ bool FlowGraphBuilder::IsRecognizedMethodForFlowGraph(
     case MethodRecognizer::kTypedData_memMove4:
     case MethodRecognizer::kTypedData_memMove8:
     case MethodRecognizer::kTypedData_memMove16:
+    case MethodRecognizer::kString_lookupLatin1Symbol:
     case MethodRecognizer::kTypedData_ByteDataView_factory:
     case MethodRecognizer::kTypedData_Int8ArrayView_factory:
     case MethodRecognizer::kTypedData_Uint8ArrayView_factory:
@@ -1381,6 +1382,9 @@ FlowGraph* FlowGraphBuilder::BuildGraphOfRecognizedMethod(
       break;
     case MethodRecognizer::kTypedData_memMove16:
       body += BuildTypedDataMemMove(function, kTypedDataInt32x4ArrayCid);
+      break;
+    case MethodRecognizer::kString_lookupLatin1Symbol:
+      body += BuildLookupLatin1Symbol(function);
       break;
 #define CASE(name)                                                             \
   case MethodRecognizer::kTypedData_##name##_factory:                          \
@@ -2145,6 +2149,54 @@ Fragment FlowGraphBuilder::BuildTypedListSet(const Function& function,
   }
   return body;
 }
+
+Fragment FlowGraphBuilder::BuildLookupLatin1Symbol(const Function& function) {
+  ASSERT_EQUAL(parsed_function_->function().NumParameters(), 5);
+  LocalVariable* arg_data = parsed_function_->RawParameterVariable(0);
+  LocalVariable* arg_start = parsed_function_->RawParameterVariable(1);
+  LocalVariable* arg_end = parsed_function_->RawParameterVariable(2);
+
+  Fragment body;
+  auto* const arg_reps =
+      new (zone_) ZoneGrowableArray<Representation>(zone_, 3);
+
+  // First unbox the arguments to avoid any boxes being inserted between unsafe
+  // untagged loads and their uses. Also adjust the length to be in bytes, since
+  // that's what memmove expects.
+  body += LoadLocal(arg_start);
+  body += UnboxTruncate(kUnboxedIntPtr);
+  LocalVariable* start_unboxed = MakeTemporary("start_unboxed");
+
+  body += LoadLocal(arg_end);
+  body += UnboxTruncate(kUnboxedIntPtr);
+  LocalVariable* end_unboxed = MakeTemporary("end_unboxed");
+
+  // bytes: uint8_t*
+  body += LoadLocal(arg_data);
+  body += LoadNativeField(Slot::PointerBase_data(),
+                                  InnerPointerAccess::kMayBeInnerPointer);
+  arg_reps->Add(kUntagged);
+
+  // start: intptr_t
+  body += LoadLocal(start_unboxed);
+  arg_reps->Add(kUnboxedIntPtr);
+
+  // end: intptr_t
+  body += LoadLocal(end_unboxed);
+  arg_reps->Add(kUnboxedIntPtr);
+
+  body += LoadThread();
+  arg_reps->Add(kUntagged);
+
+  // LookupLatin1Symbol(bytes, start, end, thread)
+  body +=
+      CallLeafRuntimeEntry(kLookupLatin1SymbolRuntimeEntry, kTagged, *arg_reps);
+  body.current->AsLeafRuntimeCall()->mark_can_return_null();
+  body += DropTempsPreserveTop(2);
+
+  return body;
+}
+
 
 Fragment FlowGraphBuilder::BuildTypedDataMemMove(const Function& function,
                                                  classid_t cid) {

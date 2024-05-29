@@ -9175,6 +9175,7 @@ bool Function::RecognizedKindForceOptimize() const {
     case MethodRecognizer::kTypedData_memMove8:
     case MethodRecognizer::kTypedData_memMove16:
     case MethodRecognizer::kMemCopy:
+    case MethodRecognizer::kString_lookupLatin1Symbol:
     // Prevent the GC from running so that the operation is atomic from
     // a GC point of view. Always double check implementation in
     // kernel_to_il.cc that no GC can happen in between the relevant IL
@@ -23555,6 +23556,33 @@ bool String::Equals(const char* cstr) const {
     len -= consumed;
   }
   return *cstr == '\0';
+}
+
+bool String::Equals(StringPtr ptr, const uint8_t* latin1_array, intptr_t len) {
+  if (len != String::LengthOf(ptr)) {
+    // Lengths don't match.
+    return false;
+  }
+
+  if (!ptr->IsOneByteString()) {
+    return false;
+  }
+
+  return memcmp(OneByteString::CharAddr(ptr, 0), latin1_array, len) == 0;
+}
+
+bool String::Equals(StringPtr ptr, const uint16_t* utf16_array, intptr_t len) {
+  if (len != String::LengthOf(ptr)) {
+    // Lengths don't match.
+    return false;
+  }
+
+  if (!ptr->IsTwoByteString()) {
+    return false;
+  }
+
+  return memcmp(TwoByteString::CharAddr(ptr, 0), utf16_array,
+                len * sizeof(uint16_t)) == 0;
 }
 
 bool String::Equals(const uint8_t* latin1_array, intptr_t len) const {

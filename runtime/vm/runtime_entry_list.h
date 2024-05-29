@@ -117,7 +117,8 @@ namespace dart {
   V(void, TsanLoadAcquire, void*)                                              \
   V(void, TsanStoreRelease, void*)                                             \
   V(bool, TryDoubleAsInteger, Thread*)                                         \
-  V(void*, MemoryMove, void*, const void*, size_t)
+  V(void*, MemoryMove, void*, const void*, size_t)                             \
+  V(uword, LookupLatin1Symbol, uint8_t*, intptr_t, intptr_t, Thread*)          \
 
 }  // namespace dart
 

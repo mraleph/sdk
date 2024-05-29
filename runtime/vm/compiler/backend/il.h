@@ -424,7 +424,7 @@ struct InstrAttrs {
   M(MoveArgument, kNoGC)                                                       \
   M(DartReturn, kNoGC)                                                         \
   M(NativeReturn, kNoGC)                                                       \
-  M(Unreachable, kNoGC) \
+  M(Unreachable, kNoGC)                                                        \
   M(Throw, kNoGC)                                                              \
   M(ReThrow, kNoGC)                                                            \
   M(Stop, kNoGC)                                                               \
@@ -3582,8 +3582,8 @@ class NativeReturnInstr : public ReturnBaseInstr {
 
 class UnreachableInstr : public TemplateInstruction<0, NoThrow> {
  public:
-  explicit UnreachableInstr() : TemplateInstruction(InstructionSource(), DeoptId::kNone) {
-  }
+  explicit UnreachableInstr()
+      : TemplateInstruction(InstructionSource(), DeoptId::kNone) {}
 
   DECLARE_INSTRUCTION(Unreachable)
   DECLARE_EMPTY_SERIALIZATION(UnreachableInstr, TemplateInstruction)
@@ -6188,6 +6188,10 @@ class LeafRuntimeCallInstr : public VariadicDefinition {
       const ZoneGrowableArray<Representation>& argument_representations,
       InputsArray&& inputs);
 
+  void mark_can_return_null() {
+    can_return_null_ = true;
+  }
+
   DECLARE_INSTRUCTION(LeafRuntimeCall)
 
   LocationSummary* MakeLocationSummaryInternal(Zone* zone,
@@ -6236,7 +6240,7 @@ class LeafRuntimeCallInstr : public VariadicDefinition {
   virtual CompileType ComputeType() const {
     return RepresentationUtils::IsUnboxed(representation())
                ? CompileType::FromUnboxedRepresentation(representation())
-               : CompileType::Object();
+               : can_return_null_ ? CompileType::Dynamic() : CompileType::Object();
   }
 
   void EmitParamMoves(FlowGraphCompiler* compiler,
@@ -6259,6 +6263,7 @@ class LeafRuntimeCallInstr : public VariadicDefinition {
   const ZoneGrowableArray<Representation>& argument_representations_;
   // Not serialized.
   const compiler::ffi::NativeCallingConvention& native_calling_convention_;
+  bool can_return_null_ = false;
   DISALLOW_COPY_AND_ASSIGN(LeafRuntimeCallInstr);
 };
 

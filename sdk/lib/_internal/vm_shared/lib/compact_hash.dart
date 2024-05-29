@@ -427,6 +427,39 @@ mixin _LinkedHashMapMixin<K, V> on _HashBase, _EqualsAndHashCode {
     }
   }
 
+  static int _roundUpToPowerOfTwo(int x) {
+    x = x - 1;
+    x = x | (x >> 1);
+    x = x | (x >> 2);
+    x = x | (x >> 4);
+    x = x | (x >> 8);
+    x = x | (x >> 16);
+    x = x | (x >> 32);
+    return x + 1;
+  }
+
+  // Allocate _index and _data, and optionally copy existing contents.
+  void _populateWith(List<Object?> data) {
+    // Compute size - it should be the closes power of two.
+    int size = _roundUpToPowerOfTwo(data.length);
+    if (size < _HashBase._INITIAL_INDEX_SIZE) {
+      size = _HashBase._INITIAL_INDEX_SIZE;
+    }
+    int hashMask = _HashBase._indexSizeToHashMask(size);
+
+    assert(size & (size - 1) == 0);
+    assert(_HashBase._UNUSED_PAIR == 0);
+    _index = new Uint32List(size);
+    _hashMask = hashMask;
+    _data = new List.filled(size, null);
+    _usedData = 0;
+    _deletedKeys = 0;
+    for (int i = 0; i < data.length; i += 2) {
+      this[internal.unsafeCast<K>(data[i])] =
+          internal.unsafeCast<V>(data[i + 1]);
+    }
+  }
+
   // Allocate _index and _data, and optionally copy existing contents.
   void _init(int size, int hashMask, List? oldData, int oldUsed) {
     if (size < _HashBase._INITIAL_INDEX_SIZE) {

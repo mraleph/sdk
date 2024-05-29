@@ -555,6 +555,20 @@ DEFINE_RUNTIME_ENTRY(AllocateObject, 2) {
 }
 
 DEFINE_LEAF_RUNTIME_ENTRY(uword /*ObjectPtr*/,
+                          LookupLatin1Symbol,
+                          4,
+                          uint8_t* /* ObjectPtr */ array,
+                          intptr_t start,
+                          intptr_t end,
+                          Thread* thread) {
+  return static_cast<uword>(Symbols::LookupRawLatin1(
+      thread,
+      array + start,
+      end - start));
+}
+END_LEAF_RUNTIME_ENTRY
+
+DEFINE_LEAF_RUNTIME_ENTRY(uword /*ObjectPtr*/,
                           EnsureRememberedAndMarkingDeferred,
                           2,
                           uword /*ObjectPtr*/ object_in,
