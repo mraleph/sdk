@@ -171,8 +171,8 @@ mixin _HashBase on _HashAbstractBase {
   static const int _UNINITIALIZED_HASH_MASK = 0;
 
   // Unused and deleted entries are marked by 0 and 1, respectively.
-  static const int _UNUSED_PAIR = 0;
-  static const int _DELETED_PAIR = 1;
+  static const int _UNUSED_PAIR = 0x80000000;
+  static const int _DELETED_PAIR = 0xFFFFFFFF;
 
   // On 32-bit, the top bits are wasted to avoid Mint allocation.
   // TODO(koda): Reclaim the bits by making the compiler treat hash patterns
@@ -190,10 +190,9 @@ mixin _HashBase on _HashAbstractBase {
         : (1 << (30 - indexBits)) - 1;
   }
 
-  static int _hashPattern(int fullHash, int hashMask, int size) {
-    final int maskedHash = fullHash & hashMask;
-    // TODO(koda): Consider keeping bit length and use left shift.
-    return (maskedHash == 0) ? (size >> 1) : maskedHash * (size >> 1);
+  static int _hashPattern(int fullHash, int size) {
+    final int hashTop = (fullHash & ~(size - 1) & 0xFFFFFFFF) >> 1;
+    return hashTop;
   }
 
   // Linear probing.
@@ -284,7 +283,9 @@ mixin _CustomEqualsAndHashCode<K> implements _EqualsAndHashCode {
   bool _equals(Object? e1, Object? e2) => (_equality as Function)(e1, e2);
 }
 
-final _uninitializedIndex = new Uint32List(_HashBase._UNINITIALIZED_INDEX_SIZE);
+// Note: should be filled with _UNUSED_PAIR
+final _uninitializedIndex = new Uint32List(_HashBase._UNINITIALIZED_INDEX_SIZE)
+  ..[0] = _HashBase._UNUSED_PAIR;
 // Note: not const. Const arrays are made immutable by having a different class
 // than regular arrays that throws on element assignment. We want the data field
 // in maps and sets to be monomorphic.
@@ -364,7 +365,7 @@ mixin _ImmutableLinkedHashMapMixin<K, V>
       final key = _data[j] as K;
 
       final fullHash = _hashCode(key);
-      final hashPattern = _HashBase._hashPattern(fullHash, hashMask, size);
+      final hashPattern = _HashBase._hashPattern(fullHash, size);
       final d =
           _findValueOrInsertPoint(key, fullHash, hashPattern, size, newIndex);
       // We just allocated the index, so we should not find this key in it yet.
@@ -435,7 +436,7 @@ mixin _LinkedHashMapMixin<K, V> on _HashBase, _EqualsAndHashCode {
     }
     assert(size & (size - 1) == 0);
     assert(_HashBase._UNUSED_PAIR == 0);
-    _index = new Uint32List(size);
+    _index = new Uint32List(size)..fillRange(0, size, _HashBase._UNUSED_PAIR);
     _hashMask = hashMask;
     _data = new List.filled(size, null);
     _usedData = 0;
@@ -517,7 +518,7 @@ mixin _LinkedHashMapMixin<K, V> on _HashBase, _EqualsAndHashCode {
 
   void _set(K key, V value, int fullHash) {
     final int size = _index.length;
-    final int hashPattern = _HashBase._hashPattern(fullHash, _hashMask, size);
+    final int hashPattern = _HashBase._hashPattern(fullHash, size);
     final int d =
         _findValueOrInsertPoint(key, fullHash, hashPattern, size, _index);
     if (d > 0) {
@@ -531,7 +532,7 @@ mixin _LinkedHashMapMixin<K, V> on _HashBase, _EqualsAndHashCode {
   V putIfAbsent(K key, V ifAbsent()) {
     final int size = _index.length;
     final int fullHash = _hashCode(key);
-    final int hashPattern = _HashBase._hashPattern(fullHash, _hashMask, size);
+    final int hashPattern = _HashBase._hashPattern(fullHash, size);
     final int d =
         _findValueOrInsertPoint(key, fullHash, hashPattern, size, _index);
     if (d > 0) {
@@ -555,22 +556,20 @@ mixin _LinkedHashMapMixin<K, V> on _HashBase, _EqualsAndHashCode {
     final int sizeMask = size - 1;
     final int maxEntries = size >> 1;
     final int fullHash = _hashCode(key);
-    final int hashPattern = _HashBase._hashPattern(fullHash, _hashMask, size);
+    final int hashPattern = _HashBase._hashPattern(fullHash, size);
     int i = _HashBase._firstProbe(fullHash, sizeMask);
     int pair = _index[i];
     while (pair != _HashBase._UNUSED_PAIR) {
-      if (pair != _HashBase._DELETED_PAIR) {
-        final int entry = hashPattern ^ pair;
-        if (entry < maxEntries) {
-          final int d = entry << 1;
-          if (_equals(key, _data[d])) {
-            _index[i] = _HashBase._DELETED_PAIR;
-            _HashBase._setDeletedAt(_data, d);
-            V value = _data[d + 1] as V;
-            _HashBase._setDeletedAt(_data, d + 1);
-            ++_deletedKeys;
-            return value;
-          }
+      final int entry = hashPattern ^ pair;
+      if (entry < maxEntries) {
+        final int d = entry << 1;
+        if (_equals(key, _data[d])) {
+          _index[i] = _HashBase._DELETED_PAIR;
+          _HashBase._setDeletedAt(_data, d);
+          V value = _data[d + 1] as V;
+          _HashBase._setDeletedAt(_data, d + 1);
+          ++_deletedKeys;
+          return value;
         }
       }
       i = _HashBase._nextProbe(i, sizeMask);
@@ -585,17 +584,15 @@ mixin _LinkedHashMapMixin<K, V> on _HashBase, _EqualsAndHashCode {
     final int sizeMask = size - 1;
     final int maxEntries = size >> 1;
     final int fullHash = _hashCode(key);
-    final int hashPattern = _HashBase._hashPattern(fullHash, _hashMask, size);
+    final int hashPattern = _HashBase._hashPattern(fullHash, size);
     int i = _HashBase._firstProbe(fullHash, sizeMask);
     int pair = _index[i];
     while (pair != _HashBase._UNUSED_PAIR) {
-      if (pair != _HashBase._DELETED_PAIR) {
-        final int entry = hashPattern ^ pair;
-        if (entry < maxEntries) {
-          final int d = entry << 1;
-          if (_equals(key, _data[d])) {
-            return _data[d + 1];
-          }
+      final int entry = hashPattern ^ pair;
+      if (entry < maxEntries) {
+        final int d = entry << 1;
+        if (_equals(key, _data[d])) {
+          return _data[d + 1];
         }
       }
       i = _HashBase._nextProbe(i, sizeMask);
@@ -851,7 +848,7 @@ mixin _LinkedHashSetMixin<E> on _HashBase, _EqualsAndHashCode {
     final int size = _index.length;
     final int sizeMask = size - 1;
     final int maxEntries = size >> 1;
-    final int hashPattern = _HashBase._hashPattern(fullHash, _hashMask, size);
+    final int hashPattern = _HashBase._hashPattern(fullHash, size);
     int i = _HashBase._firstProbe(fullHash, sizeMask);
     int firstDeleted = -1;
     int pair = _index[i];
@@ -888,7 +885,7 @@ mixin _LinkedHashSetMixin<E> on _HashBase, _EqualsAndHashCode {
     final int sizeMask = size - 1;
     final int maxEntries = size >> 1;
     final int fullHash = _hashCode(key);
-    final int hashPattern = _HashBase._hashPattern(fullHash, _hashMask, size);
+    final int hashPattern = _HashBase._hashPattern(fullHash, size);
     int i = _HashBase._firstProbe(fullHash, sizeMask);
     int pair = _index[i];
     while (pair != _HashBase._UNUSED_PAIR) {
@@ -916,7 +913,7 @@ mixin _LinkedHashSetMixin<E> on _HashBase, _EqualsAndHashCode {
     final int sizeMask = size - 1;
     final int maxEntries = size >> 1;
     final int fullHash = _hashCode(key);
-    final int hashPattern = _HashBase._hashPattern(fullHash, _hashMask, size);
+    final int hashPattern = _HashBase._hashPattern(fullHash, size);
     int i = _HashBase._firstProbe(fullHash, sizeMask);
     int pair = _index[i];
     while (pair != _HashBase._UNUSED_PAIR) {
@@ -1039,7 +1036,7 @@ mixin _ImmutableLinkedHashSetMixin<E>
       final key = _data[j];
 
       final fullHash = _hashCode(key);
-      final hashPattern = _HashBase._hashPattern(fullHash, hashMask, size);
+      final hashPattern = _HashBase._hashPattern(fullHash, size);
 
       int i = _HashBase._firstProbe(fullHash, sizeMask);
       int pair = index[i];

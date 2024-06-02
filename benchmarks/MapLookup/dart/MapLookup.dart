@@ -116,10 +116,10 @@ class Final100 extends MapLookupBenchmark {
 
 void main() {
   final benchmarks = [
-    () => const Constant1(),
-    () => const Constant5(),
-    () => const Constant10(),
-    () => const Constant100(),
+//    () => const Constant1(),
+//    () => const Constant5(),
+//    () => const Constant10(),
+//    () => const Constant100(),
     () => const Final1(),
     () => const Final5(),
     () => const Final10(),
