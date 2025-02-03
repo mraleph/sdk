@@ -24,8 +24,7 @@ const Map<Type, int> _knownSizes = {
 // Keep consistent with pkg/vm/lib/transformations/ffi/abi.dart.
 @pragma("vm:prefer-inline")
 @pragma("wasm:prefer-inline")
-int get _intPtrSize =>
-    (const [
+int get _intPtrSize => (const [
       4, // androidArm,
       8, // androidArm64,
       4, // androidIA32,
@@ -189,9 +188,9 @@ external Pointer<NS> _createNativeCallableListener<NS extends NativeFunction>(
 );
 
 @pragma("vm:external-name", "Ffi_createNativeCallableIsolateLocal")
-external Pointer<NS> _createNativeCallableIsolateLocal<
-  NS extends NativeFunction
->(dynamic trampoline, dynamic target, bool keepIsolateAlive);
+external Pointer<NS>
+    _createNativeCallableIsolateLocal<NS extends NativeFunction>(
+        dynamic trampoline, dynamic target, bool keepIsolateAlive);
 
 @pragma("vm:external-name", "Ffi_deleteNativeCallable")
 external void _deleteNativeCallable<NS extends NativeFunction>(
@@ -199,9 +198,9 @@ external void _deleteNativeCallable<NS extends NativeFunction>(
 );
 
 @pragma("vm:external-name", "Ffi_updateNativeCallableKeepIsolateAliveCounter")
-external void _updateNativeCallableKeepIsolateAliveCounter<
-  NS extends NativeFunction
->(int delta);
+external void
+    _updateNativeCallableKeepIsolateAliveCounter<NS extends NativeFunction>(
+        int delta);
 
 @pragma("vm:recognized", "other")
 @pragma("vm:external-name", "Ffi_nativeIsolateLocalCallbackFunction")
@@ -215,6 +214,22 @@ external dynamic _nativeIsolateLocalCallbackFunction<NS extends Function>(
 final class Pointer<T extends NativeType> implements SizedNativeType {
   @patch
   factory Pointer.fromAddress(int ptr) => _fromAddress(ptr);
+
+  @patch
+  static ({int address, Uint8List array}) buffer(int size) {
+    final ptr = malloc(size);
+    return (
+      address: ptr.address,
+      array: ptr.cast<Uint8>().asTypedList(size, finalizer: _nativeFree)
+    );
+  }
+
+  @patch
+  static Pointer<T> malloc<T extends NativeType>(int size) =>
+      _malloc(size).cast();
+
+  @patch
+  static void free(Pointer ptr) => _free(ptr);
 
   // All static calls to this method are replaced by the FE into
   // _nativeCallbackFunction + _pointerFromFunction.
@@ -309,11 +324,11 @@ final class _NativeCallableListener<T extends Function>
   final RawReceivePort _port;
 
   _NativeCallableListener(void Function(List) handler, String portDebugName)
-    : _port = RawReceivePort(
-        Zone.current.bindUnaryCallbackGuarded(handler),
-        portDebugName,
-      ),
-      super(nullptr);
+      : _port = RawReceivePort(
+          Zone.current.bindUnaryCallbackGuarded(handler),
+          portDebugName,
+        ),
+        super(nullptr);
 
   @override
   void _close() {
@@ -1283,7 +1298,8 @@ extension StructPointer<T extends Struct> on Pointer<T> {
   T refWithFinalizer(
     Pointer<NativeFinalizerFunction> finalizer, {
     Pointer<Void>? token,
-  }) => throw "UNREACHABLE: This case should have been rewritten in the CFE.";
+  }) =>
+      throw "UNREACHABLE: This case should have been rewritten in the CFE.";
 
   @patch
   T operator [](int index) =>
@@ -1320,7 +1336,8 @@ extension UnionPointer<T extends Union> on Pointer<T> {
   T refWithFinalizer(
     Pointer<NativeFinalizerFunction> finalizer, {
     Pointer<Void>? token,
-  }) => throw "UNREACHABLE: This case should have been rewritten in the CFE.";
+  }) =>
+      throw "UNREACHABLE: This case should have been rewritten in the CFE.";
 
   @patch
   T operator [](int index) =>
@@ -1463,20 +1480,17 @@ external int _dartApiMinorVersion();
 abstract final class NativeApi {
   @patch
   static Pointer<NativeFunction<Int8 Function(Int64, Pointer<Dart_CObject>)>>
-  get postCObject =>
-      Pointer.fromAddress(_nativeApiFunctionPointer("Dart_PostCObject"));
+      get postCObject =>
+          Pointer.fromAddress(_nativeApiFunctionPointer("Dart_PostCObject"));
 
   @patch
   static Pointer<
-    NativeFunction<
-      Int64 Function(
-        Pointer<Uint8>,
-        Pointer<NativeFunction<Dart_NativeMessageHandler>>,
-        Int8,
-      )
-    >
-  >
-  get newNativePort =>
+      NativeFunction<
+          Int64 Function(
+            Pointer<Uint8>,
+            Pointer<NativeFunction<Dart_NativeMessageHandler>>,
+            Int8,
+          )>> get newNativePort =>
       Pointer.fromAddress(_nativeApiFunctionPointer("Dart_NewNativePort"));
 
   @patch
@@ -1564,17 +1578,14 @@ class Native<T> {
   // up the FFI resolver.
   @pragma('vm:external-name', 'Ffi_GetFfiNativeResolver')
   external static Pointer<
-    NativeFunction<IntPtr Function(Handle, Handle, IntPtr)>
-  >
-  _get_ffi_native_resolver<T extends NativeFunction>();
+          NativeFunction<IntPtr Function(Handle, Handle, IntPtr)>>
+      _get_ffi_native_resolver<T extends NativeFunction>();
 
   // Resolver for FFI Native C function pointers.
   @pragma('vm:entry-point')
-  static final _ffi_resolver =
-      _get_ffi_native_resolver<
-            NativeFunction<IntPtr Function(Handle, Handle, IntPtr)>
-          >()
-          .asFunction<int Function(Object, Object, int)>();
+  static final _ffi_resolver = _get_ffi_native_resolver<
+          NativeFunction<IntPtr Function(Handle, Handle, IntPtr)>>()
+      .asFunction<int Function(Object, Object, int)>();
 
   @pragma('vm:entry-point')
   static int _ffi_resolver_function(Object a, Object s, int n) =>

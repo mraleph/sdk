@@ -26409,6 +26409,7 @@ SendPortPtr SendPort::New(Dart_Port id,
   const auto& result = SendPort::Handle(Object::Allocate<SendPort>(space));
   result.StoreNonPointer(&result.untag()->id_, id);
   result.StoreNonPointer(&result.untag()->origin_id_, origin_id);
+  result.StoreNonPointer(&result.untag()->handler_, nullptr);;
   return result.ptr();
 }
 

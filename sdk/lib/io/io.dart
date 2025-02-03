@@ -201,6 +201,7 @@ import 'dart:_http' show HttpClient, HttpProfiler, ServerSocketBase;
 import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
+import 'dart:ffi' as ffi;
 
 export 'dart:_http'
     show

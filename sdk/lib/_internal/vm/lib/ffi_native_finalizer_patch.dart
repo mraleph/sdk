@@ -108,7 +108,7 @@ final class _NativeFinalizer extends FinalizerBase implements NativeFinalizer {
   symbol: 'Pointer_asTypedListFinalizerCallbackPointer',
 )
 external Pointer<NativeFinalizerFunction>
-_asTypedListFinalizerCallbackPointer();
+    _asTypedListFinalizerCallbackPointer();
 
 final Pointer<NativeFinalizerFunction> _asTypedListFinalizerCallback =
     _asTypedListFinalizerCallbackPointer();
@@ -136,6 +136,26 @@ void _attachAsTypedListFinalizer(
     externalSize: externalSize,
   );
 }
+
+@Native<Pointer<Void> Function(Size)>(
+  symbol: 'Pointer_Malloc',
+  isLeaf: true,
+)
+external Pointer<Void> _malloc(int sizeInBytes);
+
+@Native<Void Function(Pointer)>(
+  symbol: 'Pointer_Free',
+  isLeaf: true,
+)
+external void _free(Pointer ptr);
+
+@Native<Pointer<NativeFinalizerFunction> Function()>(
+  symbol: 'Pointer_GetFree',
+  isLeaf: true,
+)
+external Pointer<NativeFinalizerFunction> _getNativeFree();
+
+final Pointer<NativeFinalizerFunction> _nativeFree = _getNativeFree();
 
 // Ensure we use the `malloc` that corresponds to the `free` used inside
 // `_asTypedListFinalizerCallback` in the VM.

@@ -39,6 +39,10 @@ void Builtin_DummyNative(Dart_NativeArguments args) {
   UNREACHABLE();
 }
 
+void* Builtin::FfiNativeLookup(const char* name, uintptr_t argument_count) {
+  return IONativeLookupFfiNative(name, argument_count);
+}
+
 /**
  * Looks up native functions in both libdart_builtin and libdart_io.
  */

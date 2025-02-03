@@ -3473,6 +3473,8 @@ ObjectPtr ReadObjectGraphCopyMessage(Thread* thread, PersistentHandle* handle) {
 ObjectPtr ReadMessage(Thread* thread, Message* message) {
   if (message->IsRaw()) {
     return message->raw_obj();
+  } else if (message->IsSimpleInt64Message()) {
+    return Integer::New(message->simple_int64());
   } else if (message->IsFinalizerInvocationRequest()) {
     PersistentHandle* handle = message->persistent_handle();
     Object& msg_obj = Object::Handle(thread->zone(), handle->ptr());
@@ -3496,6 +3498,11 @@ Dart_CObject* ReadApiMessage(Zone* zone, Message* message) {
   if (message->IsRaw()) {
     Dart_CObject* result = zone->Alloc<Dart_CObject>(1);
     ApiObjectConverter::Convert(message->raw_obj(), result);
+    return result;
+  } else if (message->IsSimpleInt64Message()) {
+    auto result = zone->Alloc<Dart_CObject>(1);
+    result->type = Dart_CObject_kInt64;
+    result->value.as_int64 = message->simple_int64();
     return result;
   } else {
     RELEASE_ASSERT(message->IsSnapshot());

@@ -65,8 +65,14 @@ class DartApiCallScope : public ValueObject {
 
 static bool PostCObjectHelper(Dart_Port port_id, Dart_CObject* message) {
   AllocOnlyStackZone zone;
-  std::unique_ptr<Message> msg = WriteApiMessage(
-      zone.GetZone(), message, port_id, Message::kNormalPriority);
+
+  std::unique_ptr<Message> msg;
+  if (message->type == Dart_CObject_kInt64 || message->type == Dart_CObject_kInt32) {
+    msg = std::make_unique<Message>(port_id, message->type == Dart_CObject_kInt64 ? message->value.as_int64 : message->value.as_int32, Message::kNormalPriority);
+  } else {
+    msg = WriteApiMessage(
+        zone.GetZone(), message, port_id, Message::kNormalPriority);
+  }
 
   if (msg == nullptr) {
     return false;

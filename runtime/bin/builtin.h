@@ -47,6 +47,8 @@ class Builtin {
                                           int argument_count,
                                           bool* auto_setup_scope);
 
+  static void* FfiNativeLookup(const char* name, uintptr_t argument_count);
+
   static const uint8_t* NativeSymbol(Dart_NativeFunction nf);
 
   static const int num_libs_;
@@ -54,6 +56,7 @@ class Builtin {
   typedef struct {
     const char* url_;
     bool has_natives_;
+    bool has_ffi_natives_;
   } builtin_lib_props;
   static builtin_lib_props builtin_libraries_[];
 

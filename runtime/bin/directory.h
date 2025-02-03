@@ -15,6 +15,24 @@
 namespace dart {
 namespace bin {
 
+struct IORequest {
+  int64_t message_id;
+  int64_t reply_port;
+  int64_t request_id;
+};
+
+struct DirectoryExistsRequest : public IORequest {
+  Namespace* namespc;
+
+  const char* path() const {
+    return reinterpret_cast<const char*>(this) + sizeof(*this);
+  }
+};
+
+struct DirectoryExistsResponse : public IORequest {
+  int64_t result;
+};
+
 enum ListType {
   kListFile = 0,
   kListDirectory = 1,
@@ -276,6 +294,8 @@ class Directory {
   static CObject* ListNextRequest(const CObjectArray& request);
   static CObject* ListStopRequest(const CObjectArray& request);
   static CObject* RenameRequest(const CObjectArray& request);
+
+  static CObject* ExistsRequest(DirectoryExistsRequest* request);
 
  private:
   static char* system_temp_path_override_;

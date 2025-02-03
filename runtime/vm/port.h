@@ -43,6 +43,12 @@ class PortMap : public AllStatic {
   static bool PostMessage(std::unique_ptr<Message> message,
                           bool before_events = false);
 
+  static bool PostMessage(void* handler,
+                          std::unique_ptr<Message> message,
+                          bool before_events = false);
+
+  static void* FindPortHandler(Dart_Port id);
+
   // Returns the owning Isolate for port 'id'.
   static Isolate* GetIsolate(Dart_Port id);
 

@@ -28,9 +28,42 @@ namespace bin {
     response = type::method##Request(data);                                    \
     break;
 
+// static void DisposeResponse(void* isolate_callback_data, void* peer) {
+//  free(peer);
+// }
+
+
 void IOServiceCallback(Dart_Port dest_port_id, Dart_CObject* message) {
   Dart_Port reply_port_id = ILLEGAL_PORT;
   CObject* response = CObject::IllegalArgumentError();
+  if ((message->type == Dart_CObject_kInt32) || (message->type == Dart_CObject_kInt64)) {
+    IORequest* request = reinterpret_cast<IORequest*>(message->type == Dart_CObject_kInt32 ? message->value.as_int32 : message->value.as_int64);
+    switch (request->request_id) {
+      case IOService::kDirectoryExistsRequest:
+        response = Directory::ExistsRequest(reinterpret_cast<DirectoryExistsRequest*>(request));
+        if (response == nullptr) {
+          Dart_CObject obj;
+          obj.type = Dart_CObject_kInt64;
+          obj.value.as_int64 = reinterpret_cast<intptr_t>(request);
+          // obj.value.as_native_pointer.ptr = request;
+          // obj.value.as_native_pointer.size = sizeof(DirectoryExistsResponse);
+          // obj.value.as_native_pointer.callback = DisposeResponse;
+          Dart_PostCObject(request->reply_port, &obj);
+          return;
+        }
+        break;
+      default:
+        UNREACHABLE();
+    }
+    const auto reply_port_id = request->reply_port;
+    CObject message_id(CObject::NewInt64(request->message_id));
+    CObjectArray result(CObject::NewArray(2));
+    result.SetAt(0, &message_id);
+    result.SetAt(1, response);
+    ASSERT(reply_port_id != ILLEGAL_PORT);
+    Dart_PostCObject(reply_port_id, result.AsApiCObject());
+    return;
+  }
   CObjectArray request(message);
   if ((message->type == Dart_CObject_kArray) && (request.Length() == 4) &&
       request[0]->IsInt32() && request[1]->IsSendPort() &&

@@ -234,6 +234,21 @@ CObject* Directory::DeleteRequest(const CObjectArray& request) {
              : CObject::NewOSError();
 }
 
+CObject* Directory::ExistsRequest(DirectoryExistsRequest* request) {
+  RefCntReleaseScope<Namespace> rs(request->namespc);
+  Directory::ExistsResult result =
+      Directory::Exists(request->namespc, request->path());
+  if (result == Directory::EXISTS) {
+    reinterpret_cast<DirectoryExistsResponse*>(request)->result = 1;
+    return nullptr;
+  } else if (result == Directory::DOES_NOT_EXIST) {
+    reinterpret_cast<DirectoryExistsResponse*>(request)->result = 0;
+    return nullptr;
+  } else {
+    return CObject::NewOSError();
+  }
+}
+
 CObject* Directory::ExistsRequest(const CObjectArray& request) {
   const int kExists = 1;
   const int kDoesNotExist = 0;

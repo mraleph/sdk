@@ -4,19 +4,58 @@
 
 part of dart.io;
 
+final class _IORequest extends ffi.Struct {
+  @ffi.Int64()
+  external int requestId;
+
+  @ffi.Int64()
+  external int responsePort;
+
+  @ffi.Int64()
+  external int actionId;
+}
+
+final class _DirectoryExistsRequest extends ffi.Struct {
+  @ffi.Int64()
+  external int requestId;
+
+  @ffi.Int64()
+  external int responsePort;
+
+  @ffi.Int64()
+  external int actionId;
+
+  @ffi.Int64()
+  external int namespacePtr;
+}
+
+final class _DirectoryExistsResponse extends ffi.Struct {
+  @ffi.Int64()
+  external int requestId;
+
+  @ffi.Int64()
+  external int responsePort;
+
+  @ffi.Int64()
+  external int actionId;
+
+  @ffi.Int64()
+  external int result;
+}
+
 class _Directory extends FileSystemEntity implements Directory {
   final String _path;
   final Uint8List _rawPath;
 
   _Directory(String path)
-    : _path = _checkNotNull(path, "path"),
-      _rawPath = FileSystemEntity._toUtf8Array(path);
+      : _path = _checkNotNull(path, "path"),
+        _rawPath = FileSystemEntity._toUtf8Array(path);
 
   _Directory.fromRawPath(Uint8List rawPath)
-    : _rawPath = FileSystemEntity._toNullTerminatedUtf8Array(
-        _checkNotNull(rawPath, "rawPath"),
-      ),
-      _path = FileSystemEntity._toStringFromUtf8Array(rawPath);
+      : _rawPath = FileSystemEntity._toNullTerminatedUtf8Array(
+          _checkNotNull(rawPath, "rawPath"),
+        ),
+        _path = FileSystemEntity._toStringFromUtf8Array(rawPath);
 
   String get path => _path;
 
@@ -64,8 +103,7 @@ class _Directory extends FileSystemEntity implements Directory {
       // Fall back to the String-based path.
       Directory d => FileSystemEntity._toUtf8Array(d.path),
       String s => FileSystemEntity._toUtf8Array(s),
-      _ =>
-        throw ArgumentError(
+      _ => throw ArgumentError(
           '${Error.safeToString(path)} is not a String or'
           ' Directory',
         ),
@@ -92,12 +130,27 @@ class _Directory extends FileSystemEntity implements Directory {
   }
 
   Future<bool> exists() {
-    return _File._dispatchWithNamespace(_IOService.directoryExists, [
-      null,
-      _rawPath,
-    ]).then((response) {
-      _checkForErrorResponse(response, "Exists failed", path);
-      return response == 1;
+    final structSize = ffi.sizeOf<_DirectoryExistsRequest>();
+    final rq = ffi.Pointer.malloc<_DirectoryExistsRequest>(
+        structSize + _rawPath.length);
+
+    rq.ref.actionId = _IOService.directoryExists;
+    rq.ref.namespacePtr = _File._namespacePointer();
+    ffi.Pointer<ffi.Uint8>.fromAddress(rq.address + structSize)
+        .asTypedList(_rawPath.length)
+        .setRange(0, _rawPath.length, _rawPath);
+
+    return _IOService._dispatchFfi(rq.cast()).then((response) {
+      if (response is ffi.Pointer) {
+        final result =
+            response.cast<_DirectoryExistsResponse>().ref.result == 1;
+        ffi.Pointer.free(response);
+        return result;
+      } else {
+        // Can only be failed response.
+        _checkForErrorResponse(response, "Exists failed", path);
+        throw StateError('Unreachable');
+      }
     });
   }
 

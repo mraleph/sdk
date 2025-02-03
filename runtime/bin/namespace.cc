@@ -91,12 +91,10 @@ void FUNCTION_NAME(Namespace_GetDefault)(Dart_NativeArguments args) {
   Dart_SetIntegerReturnValue(args, Namespace::Default());
 }
 
-void FUNCTION_NAME(Namespace_GetPointer)(Dart_NativeArguments args) {
-  Namespace* namespc = Namespace::GetNamespace(args, 0);
-  ASSERT(namespc != nullptr);
+intptr_t FUNCTION_NAME(Namespace_GetPointer)(Namespace* namespc) {
   namespc->Retain();
-  Dart_SetIntegerReturnValue(args, reinterpret_cast<intptr_t>(namespc));
-}
+  return reinterpret_cast<intptr_t>(namespc);
+};
 
 Namespace* Namespace::GetNamespace(Dart_NativeArguments args, intptr_t index) {
   Namespace* namespc;

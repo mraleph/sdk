@@ -92,7 +92,6 @@ namespace bin {
   V(IOService_NewServicePort, 0)                                               \
   V(Namespace_Create, 2)                                                       \
   V(Namespace_GetDefault, 0)                                                   \
-  V(Namespace_GetPointer, 1)                                                   \
   V(OSError_inProgressErrorCode, 0)                                            \
   V(Platform_NumberOfProcessors, 0)                                            \
   V(Platform_OperatingSystem, 0)                                               \
@@ -206,13 +205,27 @@ namespace bin {
   V(X509_StartValidity, 1)                                                     \
   V(X509_EndValidity, 1)
 
+#define IO_FFI_NATIVE_LIST(V) V(Namespace_GetPointer, intptr_t, (Namespace*))
+
+#define DECLARE_FFI_NATIVE(name, return_type, argument_types) return_type FUNCTION_NAME(name) argument_types;
+
 IO_NATIVE_LIST(DECLARE_FUNCTION);
+IO_FFI_NATIVE_LIST(DECLARE_FFI_NATIVE);
 
 static const struct NativeEntries {
   const char* name_;
   Dart_NativeFunction function_;
   int argument_count_;
 } IOEntries[] = {IO_NATIVE_LIST(REGISTER_FUNCTION)};
+
+#define REGISTER_FFI_NATIVE_ENTRY(name, return_type, argument_types)           \
+  {"" #name, reinterpret_cast<void*>(FUNCTION_NAME(name))},
+
+static const struct FfiNativeEntries {
+  const char* const name_;
+  void* const function_;
+} IoFfiEntries[] = {
+    IO_FFI_NATIVE_LIST(REGISTER_FFI_NATIVE_ENTRY)};
 
 Dart_NativeFunction IONativeLookup(Dart_Handle name,
                                    int argument_count,
@@ -229,6 +242,18 @@ Dart_NativeFunction IONativeLookup(Dart_Handle name,
     if ((strcmp(function_name, entry->name_) == 0) &&
         (entry->argument_count_ == argument_count)) {
       return reinterpret_cast<Dart_NativeFunction>(entry->function_);
+    }
+  }
+  return nullptr;
+}
+
+void* IONativeLookupFfiNative(const char* name, uintptr_t argument_count) {
+  int num_entries =
+      sizeof(IoFfiEntries) / sizeof(struct FfiNativeEntries);
+  for (int i = 0; i < num_entries; i++) {
+    const struct FfiNativeEntries* entry = &(IoFfiEntries[i]);
+    if (strcmp(name, entry->name_) == 0) {
+      return entry->function_;
     }
   }
   return nullptr;

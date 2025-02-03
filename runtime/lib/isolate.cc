@@ -110,6 +110,12 @@ static bool InSameGroup(Isolate* sender, const SendPort& receiver) {
   return sender->origin_id() == receiver.origin_id();
 }
 
+DEFINE_NATIVE_ENTRY(SendPort_bind, 0, 1) {
+  GET_NON_NULL_NATIVE_ARGUMENT(SendPort, port, arguments->NativeArgAt(0));
+  port.set_handler(PortMap::FindPortHandler(port.Id()));
+  return Object::null();
+}
+
 DEFINE_NATIVE_ENTRY(SendPort_sendInternal_, 0, 2) {
   GET_NON_NULL_NATIVE_ARGUMENT(SendPort, port, arguments->NativeArgAt(0));
   GET_NON_NULL_NATIVE_ARGUMENT(Instance, obj, arguments->NativeArgAt(1));
@@ -124,8 +130,8 @@ DEFINE_NATIVE_ENTRY(SendPort_sendInternal_, 0, 2) {
 #endif
 
   // TODO(turnidge): Throw an exception when the return value is false?
-  PortMap::PostMessage(WriteMessage(same_group, obj, destination_port_id,
-                                    Message::kNormalPriority));
+  PortMap::PostMessage(port.handler(), WriteMessage(same_group, obj, destination_port_id,
+                                    Message::kNormalPriority), false);
   return Object::null();
 }
 

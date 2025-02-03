@@ -66,6 +66,8 @@ class Message {
   // A message sent from GC to run a finalizer.
   Message(PersistentHandle* handle, Priority priority);
 
+  Message(Dart_Port dest_port, int64_t value, Priority priority);
+
   ~Message();
 
   template <typename... Args>
@@ -91,6 +93,10 @@ class Message {
     return size;
   }
 
+  int64_t simple_int64() const {
+    return payload_.int64_value_;
+  }
+
   ObjectPtr raw_obj() const {
     ASSERT(IsRaw());
     return payload_.raw_obj_;
@@ -106,7 +112,7 @@ class Message {
   // vm-service requests.
   bool IsOOB() const { return priority_ == Message::kOOBPriority; }
   bool IsSnapshot() const {
-    return !IsRaw() && !IsPersistentHandle() && !IsFinalizerInvocationRequest();
+    return snapshot_length_ > 0;
   }
   // A message whose object is an immortal object from the vm-isolate's heap.
   bool IsRaw() const { return snapshot_length_ == 0; }
@@ -118,6 +124,10 @@ class Message {
   // A message sent from GC to run a finalizer.
   bool IsFinalizerInvocationRequest() const {
     return snapshot_length_ == kFinalizerSnapshotLen;
+  }
+
+  bool IsSimpleInt64Message() const {
+    return snapshot_length_ == kSimpleInt64MessageLen;
   }
 
   void DropFinalizers() {
@@ -133,6 +143,7 @@ class Message {
  private:
   static intptr_t const kPersistentHandleSnapshotLen = -1;
   static intptr_t const kFinalizerSnapshotLen = -2;
+  static intptr_t const kSimpleInt64MessageLen = -3;
 
   friend class MessageQueue;
 
@@ -143,10 +154,12 @@ class Message {
     Payload(ObjectPtr raw_obj) : raw_obj_(raw_obj) {}
     Payload(PersistentHandle* persistent_handle)
         : persistent_handle_(persistent_handle) {}
+    Payload(int64_t value) : int64_value_(value) {}
 
     uint8_t* snapshot_;
     ObjectPtr raw_obj_;
     PersistentHandle* persistent_handle_;
+    int64_t int64_value_;
   } payload_;
   intptr_t snapshot_length_ = 0;
   MessageFinalizableData* finalizable_data_ = nullptr;

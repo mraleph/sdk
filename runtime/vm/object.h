@@ -12570,6 +12570,11 @@ class SendPort : public Instance {
     StoreNonPointer(&(untag()->origin_id_), id);
   }
 
+  void* handler() const { return untag()->handler_; }
+  void set_handler(void* handler) const {
+    StoreNonPointer(&(untag()->handler_), handler);
+  }
+
   static intptr_t InstanceSize() {
     return RoundedAllocationSize(sizeof(UntaggedSendPort));
   }

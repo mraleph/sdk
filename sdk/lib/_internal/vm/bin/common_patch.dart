@@ -35,6 +35,8 @@ import "dart:nativewrappers" show NativeFieldWrapperClass1;
 
 import "dart:typed_data" show Uint8List, BytesBuilder;
 
+import "dart:ffi" as ffi;
+
 /// These are the additional parts of this patch library:
 part "directory_patch.dart";
 part "eventhandler_patch.dart";

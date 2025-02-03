@@ -14,11 +14,11 @@ namespace bin {
 
 Builtin::builtin_lib_props Builtin::builtin_libraries_[] = {
     /* { url_, has_natives_ } */
-    {DartUtils::kBuiltinLibURL, true},
-    {DartUtils::kIOLibURL, true},
-    {DartUtils::kHttpLibURL, false},
-    {DartUtils::kCLILibURL, true},
-    {DartUtils::kConcurrentLibURL, true},
+    {DartUtils::kBuiltinLibURL, true, false},
+    {DartUtils::kIOLibURL, true, true},
+    {DartUtils::kHttpLibURL, false, false},
+    {DartUtils::kCLILibURL, true, false},
+    {DartUtils::kConcurrentLibURL, true, true},
 
     // End marker.
     {nullptr, false}};
@@ -37,6 +37,16 @@ void Builtin::SetNativeResolver(BuiltinLibraryId id) {
     // Setup the native resolver for built in library functions.
     Dart_Handle result =
         Dart_SetNativeResolver(library, NativeLookup, NativeSymbol);
+    ASSERT(!Dart_IsError(result));
+  }
+
+  if (builtin_libraries_[id].has_natives_) {
+    Dart_Handle url = DartUtils::NewString(builtin_libraries_[id].url_);
+    Dart_Handle library = Dart_LookupLibrary(url);
+    ASSERT(!Dart_IsError(library));
+    // Setup the native resolver for built in library functions.
+    Dart_Handle result =
+        Dart_SetFfiNativeResolver(library, FfiNativeLookup);
     ASSERT(!Dart_IsError(result));
   }
 }

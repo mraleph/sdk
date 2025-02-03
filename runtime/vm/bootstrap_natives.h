@@ -62,6 +62,7 @@ namespace dart {
   V(RawReceivePort_getActive, 1)                                               \
   V(SendPort_get_id, 1)                                                        \
   V(SendPort_get_hashcode, 1)                                                  \
+  V(SendPort_bind, 1)                                                          \
   V(SendPort_sendInternal_, 2)                                                 \
   V(Smi_bitNegate, 1)                                                          \
   V(Smi_bitLength, 1)                                                          \
@@ -376,6 +377,9 @@ namespace dart {
   V(Mutex_Lock, void, (Dart_Handle))                                           \
   V(Mutex_Unlock, void, (Dart_Handle))                                         \
   V(Pointer_asTypedListFinalizerAllocateData, void*, ())                       \
+  V(Pointer_Malloc, void*, (size_t))                 \
+  V(Pointer_Free, void, (void*))                 \
+  V(Pointer_GetFree, void*, ())                 \
   V(Pointer_asTypedListFinalizerCallbackPointer, void*, ())
 
 class BootstrapNatives : public AllStatic {

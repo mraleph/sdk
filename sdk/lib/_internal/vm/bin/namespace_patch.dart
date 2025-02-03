@@ -11,10 +11,12 @@ base class _NamespaceImpl extends NativeFieldWrapperClass1
 
   @pragma("vm:external-name", "Namespace_Create")
   external static _NamespaceImpl _create(_NamespaceImpl namespace, var n);
-  @pragma("vm:external-name", "Namespace_GetPointer")
-  external static int _getPointer(_NamespaceImpl namespace);
   @pragma("vm:external-name", "Namespace_GetDefault")
   external static int _getDefault();
+
+  @ffi.Native<ffi.IntPtr Function(ffi.Pointer<ffi.Void>)>(
+      symbol: 'Namespace_GetPointer', isLeaf: true)
+  external int _getPointer();
 
   // If the platform supports "namespaces", this method is called by the
   // embedder with the platform-specific namespace information.
@@ -32,7 +34,7 @@ base class _NamespaceImpl extends NativeFieldWrapperClass1
     return _cachedNamespace!;
   }
 
-  static int get _namespacePointer => _getPointer(_namespace);
+  static int get _namespacePointer => _namespace._getPointer();
 }
 
 @patch

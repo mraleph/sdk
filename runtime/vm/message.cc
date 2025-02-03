@@ -45,6 +45,15 @@ Message::Message(Dart_Port dest_port,
   ASSERT(IsPersistentHandle());
 }
 
+Message::Message(Dart_Port dest_port,
+                 int64_t value,
+                 Priority priority)
+    : dest_port_(dest_port),
+      payload_(value),
+      snapshot_length_(kSimpleInt64MessageLen),
+      priority_(priority) {
+}
+
 Message::Message(PersistentHandle* handle, Priority priority)
     : dest_port_(ILLEGAL_PORT),
       payload_(handle),

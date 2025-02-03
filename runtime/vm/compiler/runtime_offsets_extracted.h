@@ -1427,7 +1427,7 @@ static constexpr dart::compiler::target::word ReceivePort_InstanceSize = 0x30;
 static constexpr dart::compiler::target::word RecordType_InstanceSize = 0x38;
 static constexpr dart::compiler::target::word RegExp_InstanceSize = 0x58;
 static constexpr dart::compiler::target::word Script_InstanceSize = 0x50;
-static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word SingleTargetCache_InstanceSize =
     0x20;
@@ -2872,7 +2872,7 @@ static constexpr dart::compiler::target::word ReceivePort_InstanceSize = 0x30;
 static constexpr dart::compiler::target::word RecordType_InstanceSize = 0x38;
 static constexpr dart::compiler::target::word RegExp_InstanceSize = 0x58;
 static constexpr dart::compiler::target::word Script_InstanceSize = 0x50;
-static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word SingleTargetCache_InstanceSize =
     0x20;
@@ -3595,7 +3595,7 @@ static constexpr dart::compiler::target::word ReceivePort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word RecordType_InstanceSize = 0x28;
 static constexpr dart::compiler::target::word RegExp_InstanceSize = 0x40;
 static constexpr dart::compiler::target::word Script_InstanceSize = 0x38;
-static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word SingleTargetCache_InstanceSize =
     0x20;
@@ -4320,7 +4320,7 @@ static constexpr dart::compiler::target::word ReceivePort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word RecordType_InstanceSize = 0x28;
 static constexpr dart::compiler::target::word RegExp_InstanceSize = 0x40;
 static constexpr dart::compiler::target::word Script_InstanceSize = 0x38;
-static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word SingleTargetCache_InstanceSize =
     0x20;
@@ -5766,7 +5766,7 @@ static constexpr dart::compiler::target::word ReceivePort_InstanceSize = 0x30;
 static constexpr dart::compiler::target::word RecordType_InstanceSize = 0x38;
 static constexpr dart::compiler::target::word RegExp_InstanceSize = 0x58;
 static constexpr dart::compiler::target::word Script_InstanceSize = 0x50;
-static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word SingleTargetCache_InstanceSize =
     0x20;
@@ -7194,7 +7194,7 @@ static constexpr dart::compiler::target::word ReceivePort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word RecordType_InstanceSize = 0x38;
 static constexpr dart::compiler::target::word RegExp_InstanceSize = 0x58;
 static constexpr dart::compiler::target::word Script_InstanceSize = 0x50;
-static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word SingleTargetCache_InstanceSize =
     0x20;
@@ -8623,7 +8623,7 @@ static constexpr dart::compiler::target::word ReceivePort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word RecordType_InstanceSize = 0x38;
 static constexpr dart::compiler::target::word RegExp_InstanceSize = 0x58;
 static constexpr dart::compiler::target::word Script_InstanceSize = 0x50;
-static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word SingleTargetCache_InstanceSize =
     0x20;
@@ -9338,7 +9338,7 @@ static constexpr dart::compiler::target::word ReceivePort_InstanceSize = 0x18;
 static constexpr dart::compiler::target::word RecordType_InstanceSize = 0x28;
 static constexpr dart::compiler::target::word RegExp_InstanceSize = 0x40;
 static constexpr dart::compiler::target::word Script_InstanceSize = 0x38;
-static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word SingleTargetCache_InstanceSize =
     0x20;
@@ -10055,7 +10055,7 @@ static constexpr dart::compiler::target::word ReceivePort_InstanceSize = 0x18;
 static constexpr dart::compiler::target::word RecordType_InstanceSize = 0x28;
 static constexpr dart::compiler::target::word RegExp_InstanceSize = 0x40;
 static constexpr dart::compiler::target::word Script_InstanceSize = 0x38;
-static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word SingleTargetCache_InstanceSize =
     0x20;
@@ -11485,7 +11485,7 @@ static constexpr dart::compiler::target::word ReceivePort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word RecordType_InstanceSize = 0x38;
 static constexpr dart::compiler::target::word RegExp_InstanceSize = 0x58;
 static constexpr dart::compiler::target::word Script_InstanceSize = 0x50;
-static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word SingleTargetCache_InstanceSize =
     0x20;
@@ -13075,7 +13075,7 @@ static constexpr dart::compiler::target::word AOT_RecordType_InstanceSize =
     0x38;
 static constexpr dart::compiler::target::word AOT_RegExp_InstanceSize = 0x58;
 static constexpr dart::compiler::target::word AOT_Script_InstanceSize = 0x48;
-static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word AOT_Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word
     AOT_SingleTargetCache_InstanceSize = 0x20;
@@ -13884,7 +13884,7 @@ static constexpr dart::compiler::target::word AOT_RecordType_InstanceSize =
     0x38;
 static constexpr dart::compiler::target::word AOT_RegExp_InstanceSize = 0x58;
 static constexpr dart::compiler::target::word AOT_Script_InstanceSize = 0x48;
-static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word AOT_Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word
     AOT_SingleTargetCache_InstanceSize = 0x20;
@@ -14687,7 +14687,7 @@ static constexpr dart::compiler::target::word AOT_RecordType_InstanceSize =
     0x28;
 static constexpr dart::compiler::target::word AOT_RegExp_InstanceSize = 0x40;
 static constexpr dart::compiler::target::word AOT_Script_InstanceSize = 0x30;
-static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word AOT_Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word
     AOT_SingleTargetCache_InstanceSize = 0x20;
@@ -15492,7 +15492,7 @@ static constexpr dart::compiler::target::word AOT_RecordType_InstanceSize =
     0x28;
 static constexpr dart::compiler::target::word AOT_RegExp_InstanceSize = 0x40;
 static constexpr dart::compiler::target::word AOT_Script_InstanceSize = 0x30;
-static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word AOT_Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word
     AOT_SingleTargetCache_InstanceSize = 0x20;
@@ -17094,7 +17094,7 @@ static constexpr dart::compiler::target::word AOT_RecordType_InstanceSize =
     0x38;
 static constexpr dart::compiler::target::word AOT_RegExp_InstanceSize = 0x58;
 static constexpr dart::compiler::target::word AOT_Script_InstanceSize = 0x48;
-static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word AOT_Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word
     AOT_SingleTargetCache_InstanceSize = 0x20;
@@ -18676,7 +18676,7 @@ static constexpr dart::compiler::target::word AOT_RecordType_InstanceSize =
     0x38;
 static constexpr dart::compiler::target::word AOT_RegExp_InstanceSize = 0x58;
 static constexpr dart::compiler::target::word AOT_Script_InstanceSize = 0x48;
-static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word AOT_Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word
     AOT_SingleTargetCache_InstanceSize = 0x20;
@@ -19476,7 +19476,7 @@ static constexpr dart::compiler::target::word AOT_RecordType_InstanceSize =
     0x38;
 static constexpr dart::compiler::target::word AOT_RegExp_InstanceSize = 0x58;
 static constexpr dart::compiler::target::word AOT_Script_InstanceSize = 0x48;
-static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word AOT_Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word
     AOT_SingleTargetCache_InstanceSize = 0x20;
@@ -20270,7 +20270,7 @@ static constexpr dart::compiler::target::word AOT_RecordType_InstanceSize =
     0x28;
 static constexpr dart::compiler::target::word AOT_RegExp_InstanceSize = 0x40;
 static constexpr dart::compiler::target::word AOT_Script_InstanceSize = 0x30;
-static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word AOT_Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word
     AOT_SingleTargetCache_InstanceSize = 0x20;
@@ -21066,7 +21066,7 @@ static constexpr dart::compiler::target::word AOT_RecordType_InstanceSize =
     0x28;
 static constexpr dart::compiler::target::word AOT_RegExp_InstanceSize = 0x40;
 static constexpr dart::compiler::target::word AOT_Script_InstanceSize = 0x30;
-static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word AOT_Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word
     AOT_SingleTargetCache_InstanceSize = 0x20;
@@ -22650,7 +22650,7 @@ static constexpr dart::compiler::target::word AOT_RecordType_InstanceSize =
     0x38;
 static constexpr dart::compiler::target::word AOT_RegExp_InstanceSize = 0x58;
 static constexpr dart::compiler::target::word AOT_Script_InstanceSize = 0x48;
-static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x18;
+static constexpr dart::compiler::target::word AOT_SendPort_InstanceSize = 0x20;
 static constexpr dart::compiler::target::word AOT_Sentinel_InstanceSize = 0x8;
 static constexpr dart::compiler::target::word
     AOT_SingleTargetCache_InstanceSize = 0x20;

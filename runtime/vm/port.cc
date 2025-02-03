@@ -138,6 +138,29 @@ void PortMap::ClosePorts(MessageHandler* handler) {
   handler->OnAllPortsClosed();
 }
 
+bool PortMap::PostMessage(void* handler,
+                          std::unique_ptr<Message> message,
+                          bool before_events) {
+  if (handler != nullptr) {
+    static_cast<MessageHandler*>(handler)->PostMessage(std::move(message), before_events);
+    return true;
+  }
+  return PostMessage(std::move(message), before_events);
+}
+
+void* PortMap::FindPortHandler(Dart_Port id) {
+  MutexLocker ml(mutex_);
+  if (ports_ == nullptr) {
+    return nullptr;
+  }
+  auto it = ports_->TryLookup(id);
+  if (it == ports_->end()) {
+    return nullptr;
+  }
+  auto handler = (*it).handler;
+  return handler;
+}
+
 bool PortMap::PostMessage(std::unique_ptr<Message> message,
                           bool before_events) {
   MutexLocker ml(mutex_);

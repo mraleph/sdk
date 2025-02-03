@@ -43,6 +43,12 @@ final class Pointer<T extends NativeType> implements SizedNativeType {
   /// Construction from raw integer.
   external factory Pointer.fromAddress(int ptr);
 
+  external static ({int address, Uint8List array}) buffer(int size);
+
+  external static Pointer<T> malloc<T extends NativeType>(int size);
+
+  external static void free(Pointer ptr);
+
   /// Convert Dart function to a C function pointer, automatically marshalling
   /// the arguments and return value
   ///
@@ -293,25 +299,25 @@ final class _ArraySize<T extends NativeType> implements Array<T> {
     this.dimension3,
     this.dimension4,
     this.dimension5,
-  ]) : dimensions = null,
-       variableDimension = null;
+  ])  : dimensions = null,
+        variableDimension = null;
 
   const _ArraySize.multi(this.dimensions)
-    : dimension1 = null,
-      dimension2 = null,
-      dimension3 = null,
-      dimension4 = null,
-      dimension5 = null,
-      variableDimension = null;
+      : dimension1 = null,
+        dimension2 = null,
+        dimension3 = null,
+        dimension4 = null,
+        dimension5 = null,
+        variableDimension = null;
 
   const _ArraySize.variable([
     this.dimension2,
     this.dimension3,
     this.dimension4,
     this.dimension5,
-  ]) : dimension1 = 0,
-       dimensions = null,
-       variableDimension = 0;
+  ])  : dimension1 = 0,
+        dimensions = null,
+        variableDimension = 0;
 
   const _ArraySize.variableWithVariableDimension([
     this.dimension1,
@@ -319,20 +325,20 @@ final class _ArraySize<T extends NativeType> implements Array<T> {
     this.dimension3,
     this.dimension4,
     this.dimension5,
-  ]) : dimensions = null,
-       variableDimension = dimension1;
+  ])  : dimensions = null,
+        variableDimension = dimension1;
 
   const _ArraySize.variableMulti(
     List<int> nestedDimensions, {
     int variableDimension = 0,
-  }) : // Should be `[variableDimension, ...nestedDimensions]`.
-       dimensions = nestedDimensions,
-       dimension1 = null,
-       dimension2 = null,
-       dimension3 = null,
-       dimension4 = null,
-       dimension5 = null,
-       variableDimension = variableDimension;
+  })  : // Should be `[variableDimension, ...nestedDimensions]`.
+        dimensions = nestedDimensions,
+        dimension1 = null,
+        dimension2 = null,
+        dimension3 = null,
+        dimension4 = null,
+        dimension5 = null,
+        variableDimension = variableDimension;
 }
 
 /// Extension on [Pointer] specialized for the type argument [NativeFunction].
@@ -2320,9 +2326,8 @@ abstract final class NativeApi {
   /// `bool Dart_PostCObject(Dart_Port port_id, Dart_CObject* message)`
   /// in `dart_native_api.h`.
   external static Pointer<
-    NativeFunction<Int8 Function(Int64, Pointer<Dart_CObject>)>
-  >
-  get postCObject;
+          NativeFunction<Int8 Function(Int64, Pointer<Dart_CObject>)>>
+      get postCObject;
 
   /// A function pointer to
   /// ```c
@@ -2332,21 +2337,18 @@ abstract final class NativeApi {
   /// ```
   /// in `dart_native_api.h`.
   external static Pointer<
-    NativeFunction<
-      Int64 Function(
-        Pointer<Uint8>,
-        Pointer<NativeFunction<Dart_NativeMessageHandler>>,
-        Int8,
-      )
-    >
-  >
-  get newNativePort;
+      NativeFunction<
+          Int64 Function(
+            Pointer<Uint8>,
+            Pointer<NativeFunction<Dart_NativeMessageHandler>>,
+            Int8,
+          )>> get newNativePort;
 
   /// A function pointer to
   /// `bool Dart_CloseNativePort(Dart_Port native_port_id)`
   /// in `dart_native_api.h`.
   external static Pointer<NativeFunction<Int8 Function(Int64)>>
-  get closeNativePort;
+      get closeNativePort;
 
   /// Pass this to `Dart_InitializeApiDL` in your native code to enable using the
   /// symbols in `dart_api_dl.h`.

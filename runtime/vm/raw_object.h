@@ -3454,6 +3454,7 @@ class alignas(8) UntaggedSendPort : public UntaggedInstance {
   VISIT_NOTHING();
   Dart_Port id_;
   Dart_Port origin_id_;
+  void* handler_;
 
   friend class ReceivePort;
 };

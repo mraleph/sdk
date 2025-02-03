@@ -135,6 +135,22 @@ DEFINE_FFI_NATIVE_ENTRY(FinalizerEntry_SetExternalSize,
   }
 };
 
+DEFINE_FFI_NATIVE_ENTRY(Pointer_Malloc, void*, (size_t sz)) {
+  auto* result = malloc(sz);
+  // Initialized with FFI stores.
+  MSAN_UNPOISON(result, sz);
+  return result;
+}
+
+DEFINE_FFI_NATIVE_ENTRY(Pointer_Free, void, (void* p)) {
+  free(p);
+}
+
+DEFINE_FFI_NATIVE_ENTRY(Pointer_GetFree, void*, ()) {
+  return reinterpret_cast<void*>(&free);
+}
+
+
 namespace {
 struct AsTypedListFinalizerData {
   void (*callback)(void*);

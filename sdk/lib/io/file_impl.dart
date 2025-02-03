@@ -49,8 +49,8 @@ class _FileStream extends Stream<List<int>> {
   _FileStream.forStdin() : _position = 0;
 
   _FileStream.forRandomAccessFile(RandomAccessFile f)
-    : _position = 0,
-      _openedFile = f;
+      : _position = 0,
+        _openedFile = f;
 
   StreamSubscription<Uint8List> listen(
     void onData(Uint8List event)?, {
@@ -112,40 +112,37 @@ class _FileStream extends Stream<List<int>> {
         return;
       }
     }
-    _openedFile!
-        .read(readBytes)
-        .then((block) {
-          _readInProgress = false;
-          if (_unsubscribed) {
-            _closeFile();
-            return;
-          }
-          _position += block.length;
-          // read() may return less than `readBytes` if `_openFile` is a pipe or
-          // terminal or if a signal is received. Only a empty return indicates
-          // that the write side of the pipe is closed or that we are at the end
-          // of a file.
-          // See https://man7.org/linux/man-pages/man2/read.2.html
-          if (block.length == 0 || (_end != null && _position == _end)) {
-            _atEnd = true;
-          }
-          if (!_atEnd && !_controller.isPaused) {
-            _readBlock();
-          }
-          if (block.length > 0) {
-            _controller.add(block);
-          }
-          if (_atEnd) {
-            _closeFile();
-          }
-        })
-        .catchError((e, s) {
-          if (!_unsubscribed) {
-            _controller.addError(e, s);
-            _closeFile();
-            _unsubscribed = true;
-          }
-        });
+    _openedFile!.read(readBytes).then((block) {
+      _readInProgress = false;
+      if (_unsubscribed) {
+        _closeFile();
+        return;
+      }
+      _position += block.length;
+      // read() may return less than `readBytes` if `_openFile` is a pipe or
+      // terminal or if a signal is received. Only a empty return indicates
+      // that the write side of the pipe is closed or that we are at the end
+      // of a file.
+      // See https://man7.org/linux/man-pages/man2/read.2.html
+      if (block.length == 0 || (_end != null && _position == _end)) {
+        _atEnd = true;
+      }
+      if (!_atEnd && !_controller.isPaused) {
+        _readBlock();
+      }
+      if (block.length > 0) {
+        _controller.add(block);
+      }
+      if (_atEnd) {
+        _closeFile();
+      }
+    }).catchError((e, s) {
+      if (!_unsubscribed) {
+        _controller.addError(e, s);
+        _closeFile();
+        _unsubscribed = true;
+      }
+    });
   }
 
   void _start() {
@@ -164,16 +161,14 @@ class _FileStream extends Stream<List<int>> {
 
     void onOpenFile(RandomAccessFile file) {
       if (_position > 0) {
-        file
-            .setPosition(_position)
-            .then(
-              onReady,
-              onError: (e, s) {
-                _controller.addError(e, s);
-                _readInProgress = false;
-                _closeFile();
-              },
-            );
+        file.setPosition(_position).then(
+          onReady,
+          onError: (e, s) {
+            _controller.addError(e, s);
+            _readInProgress = false;
+            _closeFile();
+          },
+        );
       } else {
         onReady(file);
       }
@@ -208,45 +203,43 @@ class _FileStreamConsumer implements StreamConsumer<List<int>> {
   Future<RandomAccessFile> _openFuture;
 
   _FileStreamConsumer(File file, FileMode mode)
-    : _file = file,
-      _openFuture = file.open(mode: mode);
+      : _file = file,
+        _openFuture = file.open(mode: mode);
 
   _FileStreamConsumer.fromStdio(int fd)
-    : _openFuture = new Future.value(_File._openStdioSync(fd));
+      : _openFuture = new Future.value(_File._openStdioSync(fd));
 
   _FileStreamConsumer.fromRandomAccessFile(RandomAccessFile f)
-    : _openFuture = Future.value(f);
+      : _openFuture = Future.value(f);
 
   Future<File?> addStream(Stream<List<int>> stream) {
     Completer<File?> completer = new Completer<File?>.sync();
-    _openFuture
-        .then((openedFile) {
-          late StreamSubscription<List<int>> _subscription;
-          void error(e, StackTrace stackTrace) {
-            _subscription.cancel();
-            openedFile.close();
-            completer.completeError(e, stackTrace);
-          }
+    _openFuture.then((openedFile) {
+      late StreamSubscription<List<int>> _subscription;
+      void error(e, StackTrace stackTrace) {
+        _subscription.cancel();
+        openedFile.close();
+        completer.completeError(e, stackTrace);
+      }
 
-          _subscription = stream.listen(
-            (d) {
-              _subscription.pause();
-              try {
-                openedFile
-                    .writeFrom(d, 0, d.length)
-                    .then((_) => _subscription.resume(), onError: error);
-              } catch (e, stackTrace) {
-                error(e, stackTrace);
-              }
-            },
-            onDone: () {
-              completer.complete(_file);
-            },
-            onError: error,
-            cancelOnError: true,
-          );
-        })
-        .catchError(completer.completeError);
+      _subscription = stream.listen(
+        (d) {
+          _subscription.pause();
+          try {
+            openedFile
+                .writeFrom(d, 0, d.length)
+                .then((_) => _subscription.resume(), onError: error);
+          } catch (e, stackTrace) {
+            error(e, stackTrace);
+          }
+        },
+        onDone: () {
+          completer.complete(_file);
+        },
+        onError: error,
+        cancelOnError: true,
+      );
+    }).catchError(completer.completeError);
     return completer.future;
   }
 
@@ -260,14 +253,14 @@ class _File extends FileSystemEntity implements File {
   final Uint8List _rawPath;
 
   _File(String path)
-    : _path = _checkNotNull(path, "path"),
-      _rawPath = FileSystemEntity._toUtf8Array(path);
+      : _path = _checkNotNull(path, "path"),
+        _rawPath = FileSystemEntity._toUtf8Array(path);
 
   _File.fromRawPath(Uint8List rawPath)
-    : _rawPath = FileSystemEntity._toNullTerminatedUtf8Array(
-        _checkNotNull(rawPath, "rawPath"),
-      ),
-      _path = FileSystemEntity._toStringFromUtf8Array(rawPath);
+      : _rawPath = FileSystemEntity._toNullTerminatedUtf8Array(
+          _checkNotNull(rawPath, "rawPath"),
+        ),
+        _path = FileSystemEntity._toStringFromUtf8Array(rawPath);
 
   String get path => _path;
 
@@ -307,16 +300,16 @@ class _File extends FileSystemEntity implements File {
         recursive ? parent.create(recursive: true) : new Future.value(null);
     return result
         .then(
-          (_) => _dispatchWithNamespace(_IOService.fileCreate, [
-            null,
-            _rawPath,
-            exclusive,
-          ]),
-        )
+      (_) => _dispatchWithNamespace(_IOService.fileCreate, [
+        null,
+        _rawPath,
+        exclusive,
+      ]),
+    )
         .then((response) {
-          _checkForErrorResponse(response, "Cannot create file", path);
-          return this;
-        });
+      _checkForErrorResponse(response, "Cannot create file", path);
+      return this;
+    });
   }
 
   external static _create(
@@ -620,19 +613,22 @@ class _File extends FileSystemEntity implements File {
       return completer.future;
     }
 
-    Future<Uint8List> readSized(RandomAccessFile file, int length) {
-      var data = Uint8List(length);
+    Future<Uint8List> readSized(_RandomAccessFile file, int length) {
+      // var data = Uint8List(length);
+      var buffer = ffi.Pointer.buffer(length);
       var offset = 0;
       var completer = new Completer<Uint8List>();
       void read() {
-        file.readInto(data, offset, min(offset + _maxReadSize, length)).then((
-          readSize,
-        ) {
+        file
+            .readIntoBuffer(
+                buffer.address, offset, min(offset + _maxReadSize, length))
+            .then((readSize) {
           if (readSize > 0) {
             offset += readSize;
             read();
           } else {
             assert(readSize == 0);
+            var data = buffer.array;
             if (offset < length) {
               data = Uint8List.sublistView(data, 0, offset);
             }
@@ -646,16 +642,13 @@ class _File extends FileSystemEntity implements File {
     }
 
     return open().then((file) {
-      return file
-          .length()
-          .then((length) {
-            if (length == 0) {
-              // May be character device, try to read it in chunks.
-              return readUnsized(file);
-            }
-            return readSized(file, length);
-          })
-          .whenComplete(file.close);
+      return file.length().then((length) {
+        if (length == 0) {
+          // May be character device, try to read it in chunks.
+          return readUnsized(file);
+        }
+        return readSized(file as _RandomAccessFile, length);
+      }).whenComplete(file.close);
     });
   }
 
@@ -729,13 +722,10 @@ class _File extends FileSystemEntity implements File {
     bool flush = false,
   }) {
     return open(mode: mode).then((file) {
-      return file
-          .writeFrom(bytes, 0, bytes.length)
-          .then<File>((_) {
-            if (flush) return file.flush().then((_) => this);
-            return this;
-          })
-          .whenComplete(file.close);
+      return file.writeFrom(bytes, 0, bytes.length).then<File>((_) {
+        if (flush) return file.flush().then((_) => this);
+        return this;
+      }).whenComplete(file.close);
     });
   }
 
@@ -822,7 +812,7 @@ class _RandomAccessFile implements RandomAccessFile {
 
   @pragma("vm:entry-point")
   _RandomAccessFile(int pointer, this.path)
-    : _ops = new _RandomAccessFileOps(pointer) {
+      : _ops = new _RandomAccessFileOps(pointer) {
     _resourceInfo = new _FileResourceInfo(this);
     _maybeConnectHandler();
   }
@@ -915,7 +905,21 @@ class _RandomAccessFile implements RandomAccessFile {
     return result;
   }
 
+  Future<int> readIntoBuffer(int bufferAddress, int start, int end) {
+    final int length = end - start;
+    return _dispatch(
+            _IOService.fileReadInto, [null, length, bufferAddress + start])
+        .then((response) {
+      _checkForErrorResponse(response, "readInto failed", path);
+      var responseList = response as List<Object?>;
+      var bytesRead = responseList[1] as int;
+      _resourceInfo.addRead(bytesRead);
+      return bytesRead;
+    });
+  }
+
   Future<int> readInto(List<int> buffer, [int start = 0, int? end]) {
+    throw 'Unsupported';
     // TODO(40614): Remove once non-nullability is sound.
     ArgumentError.checkNotNull(buffer, "buffer");
     end = RangeError.checkValidRange(start, end, buffer.length);
@@ -1253,8 +1257,8 @@ class _ReadPipe extends _FileStream implements ReadPipe {
 class _WritePipe extends _IOSinkImpl implements WritePipe {
   RandomAccessFile _file;
   _WritePipe(file)
-    : this._file = file,
-      super(_FileStreamConsumer.fromRandomAccessFile(file), utf8);
+      : this._file = file,
+        super(_FileStreamConsumer.fromRandomAccessFile(file), utf8);
 }
 
 class _Pipe implements Pipe {
