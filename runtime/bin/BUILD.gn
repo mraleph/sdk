@@ -1018,6 +1018,28 @@ executable("abstract_socket_test") {
   include_dirs = [ ".." ]
 }
 
+executable("async_file_io_benchmark") {
+  configs += [
+    "..:dart_arch_config",
+    "..:dart_config",
+    "..:dart_os_config",
+    "..:dart_maybe_product_config",
+  ]
+  sources = [ "async_file_io_benchmark.cc" ]
+  include_dirs = [ ".." ]
+  deps = [
+    ":crashpad",
+    ":dart_kernel_platform_cc",
+    ":dart_snapshot_cc",
+    #":run_vm_tests_set",
+    ":standalone_dart_io",
+    "..:libdart_precompiler_testing",
+    "../vm:libprotozero",  # for timeline_test
+    "//third_party/boringssl",  # for secure_socket_utils_test
+    "//third_party/zlib",
+  ]
+}
+
 source_set("run_vm_tests_set") {
   if (target_os == "fuchsia") {
     testonly = true
