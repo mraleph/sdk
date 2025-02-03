@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:path/path.dart' as p;
 
 void main(List<String> args) async {
   final allFiles = Directory('${args[0]}/tests')
@@ -11,7 +12,7 @@ void main(List<String> args) async {
   final RandomAccessFile raf =
       new File('input.list').openSync(mode: FileMode.write);
   try {
-    for (var p in allFiles) raf.writeStringSync('$p\n');
+    for (var path in allFiles) raf.writeStringSync('${p.relative(path)}\n');
   } finally {
     raf.closeSync();
   }

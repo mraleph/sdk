@@ -581,6 +581,8 @@ abstract interface class File implements FileSystemEntity {
   /// is the contents of the file.
   Future<Uint8List> readAsBytes();
 
+  Future<Uint8List> readAsBytesWhole();
+
   /// Synchronously reads the entire file contents as a list of bytes.
   ///
   /// Throws a [FileSystemException] if the operation fails.

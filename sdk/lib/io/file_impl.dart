@@ -594,6 +594,27 @@ class _File extends FileSystemEntity implements File {
     return new IOSink(consumer, encoding: encoding);
   }
 
+  Future<Uint8List> readAsBytesWhole() {
+    return _dispatchWithNamespace(_IOService.fileReadWhole, [null, _rawPath]).then(
+      (response) {
+        _checkForErrorResponse(response, "Cannot read bytes", path);
+        return (response as List<Object?>)[1] as Uint8List;
+      },
+    );
+
+/*
+    return open().then((file) {
+      return file.length().then((length) {
+        if (length == 0) {
+          // May be character device, try to read it in chunks.
+          return readUnsized(file);
+        }
+        return readSized(file as _RandomAccessFile, length);
+      }).whenComplete(file.close);
+    });
+*/
+  }
+
   Future<Uint8List> readAsBytes() {
     Future<Uint8List> readUnsized(RandomAccessFile file) {
       var builder = new BytesBuilder(copy: false);

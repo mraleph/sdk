@@ -180,5 +180,6 @@ ${BUILD_DIR}/${GEN_SNAPSHOT}                                                   \
 
 # Step 3: Assemble the assembly file into an ELF object.
 if [ $BUILD_ASM -eq 1 ]; then
-    gcc -shared -o "$SNAPSHOT_FILE" "${SNAPSHOT_FILE}.S"
+    clang -g -c -o "${SNAPSHOT_FILE}.o" "${SNAPSHOT_FILE}.S"
+    clang -g -shared -o "$SNAPSHOT_FILE" "${SNAPSHOT_FILE}.o"
 fi

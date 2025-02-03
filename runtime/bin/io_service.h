@@ -60,7 +60,8 @@ namespace bin {
   V(Directory, ListNext, 40)                                                   \
   V(Directory, ListStop, 41)                                                   \
   V(Directory, Rename, 42)                                                     \
-  V(SSLFilter, ProcessFilter, 43)
+  V(SSLFilter, ProcessFilter, 43) \
+  V(File, ReadWhole, 44)                                                        \
 
 #define DECLARE_REQUEST(type, method, id) k##type##method##Request = id,
 

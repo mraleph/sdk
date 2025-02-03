@@ -305,6 +305,7 @@ class File : public ReferenceCounted<File> {
   static FileOpenMode DartModeToFileMode(DartFileOpenMode mode);
 
   static CObject* ExistsRequest(const CObjectArray& request);
+  static CObject* ReadWholeRequest(const CObjectArray& request);
   static CObject* CreateRequest(const CObjectArray& request);
   static CObject* CreatePipeRequest(const CObjectArray& request);
   static CObject* DeleteRequest(const CObjectArray& request);

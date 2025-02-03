@@ -1140,6 +1140,51 @@ CObject* File::WriteByteRequest(const CObjectArray& request) {
              : CObject::NewOSError();
 }
 
+CObject* File::ReadWholeRequest(const CObjectArray& request) {
+  if ((request.Length() < 1) || !request[0]->IsIntptr()) {
+    return CObject::IllegalArgumentError();
+  }
+  Namespace* namespc = CObjectToNamespacePointer(request[0]);
+  RefCntReleaseScope<Namespace> rs(namespc);
+  if ((request.Length() != 2) || !request[1]->IsUint8Array()) {
+    return CObject::IllegalArgumentError();
+  }
+  CObjectUint8Array filename(request[1]);
+  File* file = File::Open(
+      namespc, reinterpret_cast<const char*>(filename.Buffer()), File::kRead);
+  if (file == nullptr) {
+    return CObject::NewOSError();
+  }
+
+  const int64_t length = file->Length();
+  if (length == 0) {
+    UNREACHABLE();
+  }
+  Dart_CObject* io_buffer = CObject::NewIOBuffer(length);
+
+  if (io_buffer == nullptr) {
+    return CObject::NewOSError();
+  }
+  uint8_t* data = io_buffer->value.as_external_typed_data.data;
+  const int64_t bytes_read = file->Read(data, length);
+  if (bytes_read < 0) {
+    CObject* error = CObject::NewOSError();
+    CObject::FreeIOBufferData(io_buffer);
+    return error;
+  }
+
+  // Possibly shrink the used malloc() storage if the actual number of bytes is
+  // significantly lower.
+  CObject::ShrinkIOBuffer(io_buffer, bytes_read);
+  file->Release();
+
+  auto external_array = new CObjectExternalUint8Array(io_buffer);
+  CObjectArray* result = new CObjectArray(CObject::NewArray(2));
+  result->SetAt(0, new CObjectIntptr(CObject::NewInt32(0)));
+  result->SetAt(1, external_array);
+  return result;
+}
+
 CObject* File::ReadRequest(const CObjectArray& request) {
   if ((request.Length() < 1) || !request[0]->IsIntptr()) {
     return CObject::IllegalArgumentError();
