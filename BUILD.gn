@@ -467,3 +467,7 @@ if (is_fuchsia) {
     }
   }
 }
+
+group("parser_experiment") {
+  deps = [ "parser_experiment:all" ]
+}

@@ -1,0 +1,36 @@
+# Copyright (c) 2025, the Dart project authors.  Please see the AUTHORS file
+# for details. All rights reserved. Use of this source code is governed by a
+# BSD-style license that can be found in the LICENSE file.
+
+group("all") {
+  deps = [
+    ":scanner_benchmark",
+    ":simd_identifier_scanning_benchmark",
+  ]
+}
+
+executable("simd_identifier_scanning_benchmark") {
+  sources = [ "simd_identifier_scanning_benchmark.cc" ]
+  cflags = [ "-mavx2" ]
+
+  configs -= [ "//build/config/compiler:cxx_version_default" ]
+  configs += [ "//build/config/compiler:cxx_version_23" ]
+}
+
+executable("scanner_benchmark") {
+  sources = [
+    "characters.h",
+    "keyword_state.cc",
+    "keyword_state.h",
+    "scanner.cc",
+    "scanner.h",
+    "scanner_benchmark.cc",
+    "token.h",
+    "util.cc",
+    "util.h",
+  ]
+  cflags = [ "-mavx2" ]
+
+  configs -= [ "//build/config/compiler:cxx_version_default" ]
+  configs += [ "//build/config/compiler:cxx_version_23" ]
+}

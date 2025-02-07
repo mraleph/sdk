@@ -484,6 +484,18 @@ config("cxx_version_20") {
   cflags_objcc = cc_std
 }
 
+config("cxx_version_23") {
+  if (is_win) {
+    cflags_c = [ "/std:c17" ]
+    cc_std = [ "/std:c++23" ]
+  } else {
+    cflags_c = [ "-std=c17" ]
+    cc_std = [ "-std=c++23" ]
+  }
+  cflags_cc = cc_std
+  cflags_objcc = cc_std
+}
+
 # This is separate from :compiler_codegen (and not even a sub-config there)
 # so that some targets can remove it from the list with:
 #   configs -= [ "//build/config/compiler:clang_stackrealign" ]
