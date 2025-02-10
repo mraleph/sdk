@@ -15,15 +15,11 @@ class FileData {
   FileData(Uint8List data) : bytes = Uint8List.fromList(data);
 }
 
-final bannedFiles = {
-  'tests/standalone/io/snapshot_fail_script.dart',
-  'tests/language/regress/regress23051_test.dart',
-};
+final bannedFiles = {};
 
 final fileNames = File('parser_experiment/input.list')
     .readAsLinesSync()
     .map((v) => v.substring(3))
-    .where((v) => !bannedFiles.contains(v))
     .toList(growable: false);
 final inputData = [
   for (var path in fileNames) FileData(File(path).readAsBytesSync())
@@ -52,7 +48,8 @@ void main(List<String> args) {
       final cppResult =
           Process.runSync('out/ReleaseX64/scanner_benchmark', ['parse', path]);
       if (cppResult.exitCode != 0) {
-        print("FAILED: out/ReleaseX64/scanner_benchmark ${fileNames[idx]}");
+        print(
+            "FAILED: out/ReleaseX64/scanner_benchmark parse ${fileNames[idx]}");
         print(cppResult.stdout);
         print(cppResult.stderr);
         exit(1);

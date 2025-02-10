@@ -8,8 +8,8 @@
 #include <cstdint>
 #include <cstdlib>
 
-class Token;
+#include "token.h"
 
-Token* ScanUtf8(uint8_t* bytes, size_t length);
+TokenWriter ScanUtf8(uint8_t* bytes, size_t length);
 
 #endif

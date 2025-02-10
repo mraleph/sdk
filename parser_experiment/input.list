@@ -979,7 +979,6 @@
 ../tests/web/lax_runtime_type_closure_equals2_test.dart
 ../tests/web/inference_super_set_call_test.dart
 ../tests/web/method_signatures_strong_test.dart
-../tests/web/eof_line_ending_test.dart
 ../tests/web/async_catch_shadow_test.dart
 ../tests/web/function_typed_arguments_test.dart
 ../tests/web/closure6_test.dart
@@ -2692,7 +2691,6 @@
 ../tests/language/regress/regress18628_1_runtime_test.dart
 ../tests/language/regress/regress34636_test.dart
 ../tests/language/regress/regress33235_07_runtime_test.dart
-../tests/language/regress/regress1578_test.dart
 ../tests/language/regress/regress15702_test.dart
 ../tests/language/regress/regress33479_runtime_test.dart
 ../tests/language/regress/regress22728_test.dart
@@ -3600,6 +3598,8 @@
 ../tests/language/unsorted/refine_receiver_null_test.dart
 ../tests/language/unsorted/cast_test.dart
 ../tests/language/unsorted/check_member_static_runtime_test.dart
+../tests/language/regress/regress1578_test.dart
+../tests/web/eof_line_ending_test.dart
 ../tests/language/unsorted/disassemble_test.dart
 ../tests/language/unsorted/context_args_with_defaults_test.dart
 ../tests/language/unsorted/state_mangling3_test.dart

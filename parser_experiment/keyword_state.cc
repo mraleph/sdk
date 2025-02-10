@@ -52,19 +52,25 @@ KeywordState* KeywordState::ComputeKeywordStateTable(
   TokenType tok = isLeaf ? strings[offset].first : TokenType::kEOF;
   if (isLowercase) {
     std::array<KeywordState*, $z - $a + 1> lower_case_table;
-    std::copy(std::begin(table) + ($a - $A), std::end(table), std::begin(lower_case_table));
+    std::copy(std::begin(table) + ($a - $A), std::end(table),
+              std::begin(lower_case_table));
     return new RangeKeywordState<$a, $z>(std::move(lower_case_table), tok);
   } else {
     return new RangeKeywordState<$A, $z>(std::move(table), tok);
   }
 }
 
-void DumpTable(KeywordState* state, intptr_t indent, int A, int Z, KeywordState** table) {
-  std::print("({})", (void*) state);
+void DumpTable(KeywordState* state,
+               intptr_t indent,
+               int A,
+               int Z,
+               KeywordState** table) {
+  std::print("({})", (void*)state);
   for (int ch = A; ch <= Z; ch++) {
     if (table[ch - A] != nullptr) {
       std::print("\n");
-      for (intptr_t i = 0; i < indent; i++) std::print("  ");
+      for (intptr_t i = 0; i < indent; i++)
+        std::print("  ");
       std::print("{}:", (char)ch);
       table[ch - A]->Dump(indent + 1);
     }
@@ -75,12 +81,11 @@ void DumpTable(KeywordState* state, intptr_t indent, int A, int Z, KeywordState*
 }
 
 void LeafKeywordState::Dump(intptr_t indent) {
-  std::print("({}) {}", (void*) this, keyword);
+  std::print("({}) {}", (void*)this, keyword);
   if (indent == 0) {
     std::print("\n");
   }
 }
-
 
 void KeywordState::Init() {
   std::vector<std::pair<TokenType, std::string_view>> strings = {

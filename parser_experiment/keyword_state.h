@@ -53,7 +53,11 @@ class ArrayKeywordState : public KeywordState {
   const Table table_;
 };
 
-void DumpTable(KeywordState* state, intptr_t indent, int A, int Z, KeywordState** table);
+void DumpTable(KeywordState* state,
+               intptr_t indent,
+               int A,
+               int Z,
+               KeywordState** table);
 
 template <int A, int Z>
 class RangeKeywordState final : public ArrayKeywordState<Z - A + 1> {

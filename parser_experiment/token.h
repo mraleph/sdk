@@ -174,7 +174,7 @@
   SIMPLE_TOK(MULTI_LINE_COMMENT)                                               \
   KEYWORD_LIST(KEYWORD_TOK)                                                    \
   SIMPLE_TOK(SCRIPT_TAG)                                                       \
-  SIMPLE_TOK(LANGUAGE_VERSION)     \
+  SIMPLE_TOK(LANGUAGE_VERSION)                                                 \
   SIMPLE_TOK(UNMATCHED_TOKEN)                                                  \
   SIMPLE_TOK(UNSUPPORTED_OPERATOR)                                             \
   SIMPLE_TOK(UNTERMINATED_TOKEN)                                               \
@@ -193,8 +193,142 @@ enum class TokenType : uint16_t {
 #undef KEYWORD_TOK
 };
 
-class CommentToken;
+inline std::string_view TokenTypeName(TokenType kind) {
+  switch (kind) {
+#define SIMPLE_TOK(Name)                                                       \
+  case TokenType::k##Name:                                                     \
+    return #Name;
+#define PINNED_TOK(Name, Val)                                                  \
+  case TokenType::k##Name:                                                     \
+    return #Name;
+#define KEYWORD_TOK(Name, lexeme)                                              \
+  case TokenType::k##Name:                                                     \
+    return #Name;
+    TOKEN_LIST(SIMPLE_TOK, PINNED_TOK, KEYWORD_TOK)
+#undef SIMPLE_TOK
+#undef PINNED_TOK
+#undef KEYWORD_TOK
 
+    default:
+      return "<?>";
+  }
+}
+
+// class CommentToken;
+
+struct CommentToken {};
+struct DartDocToken : public CommentToken {};
+
+class TokenRef {
+ public:
+  TokenRef() : index_(0), type_(TokenType::kEOF) {}
+  TokenRef(uint32_t index, TokenType type) : index_(index), type_(type) {}
+
+  uint32_t index() const { return index_; }
+  TokenType type() const { return type_; }
+
+ private:
+  uint32_t index_;
+  TokenType type_;
+};
+
+static_assert(sizeof(TokenRef) <= sizeof(uintptr_t));
+
+class TokenWriter;
+
+struct AnchoredTokenRef {
+  const TokenWriter& writer;
+  TokenRef ref;
+};
+
+class TokenWriter {
+ public:
+  TokenWriter(size_t bytes) {
+    tokens_.reserve(bytes / 5);
+    payloads_.reserve(bytes / 5);
+  }
+
+  /*
+  [[clang::always_inline]] TokenType type_of(TokenRef ref) const {
+    assert(ref.type() == tokens_[ref.index()].type_);
+    return tokens_[ref.index()].type_;
+  }
+*/
+
+  TokenRef Add(TokenType type, int offset, CommentToken* comments) {
+    tokens_.emplace_back(BaseTokenInfo{offset, type, 0});
+    TokenPayload payload;
+    payloads_.emplace_back(std::move(payload));
+    return TokenRef{static_cast<uint32_t>(tokens_.size() - 1), type};
+  }
+
+  TokenRef AddStringToken(TokenType type,
+                          int offset,
+                          CommentToken* comments,
+                          const std::string_view& content,
+                          bool isAscii,
+                          bool allowLazy) {
+    uint8_t flags = isAscii ? 2 : 0;
+    tokens_.emplace_back(BaseTokenInfo{offset, type, flags});
+    TokenPayload payload;
+    payload.string_content = {reinterpret_cast<const uint8_t*>(content.data()),
+                              content.size()};
+    payloads_.emplace_back(std::move(payload));
+    return TokenRef{static_cast<uint32_t>(tokens_.size() - 1), type};
+  }
+
+  AnchoredTokenRef at(uint32_t index) const {
+    return {*this, TokenRef{index, tokens_[index].type_}};
+  }
+
+  void drop(intptr_t i) {
+    tokens_.resize(tokens_.size() - i);
+    payloads_.resize(payloads_.size() - i);
+  }
+
+  TokenRef last() const {
+    return TokenRef{static_cast<uint32_t>(tokens_.size() - 1),
+                    tokens_.back().type_};
+  }
+
+  uint32_t size() const { return static_cast<uint32_t>(tokens_.size()); }
+
+  void set_end_group_of(TokenRef begin, TokenRef end) {
+    payloads_[begin.index()].begin.end = end.index();
+  }
+
+  int32_t offset_of(TokenRef ref) const { return tokens_[ref.index()].offset_; }
+
+  std::string_view string_content_of(TokenRef ref) const {
+    const auto& payload = payloads_[ref.index()].string_content;
+    return std::string_view{reinterpret_cast<const char*>(payload.start),
+                            payload.length};
+  }
+
+ private:
+  struct BaseTokenInfo {
+    int32_t offset_;
+    TokenType type_;
+    uint8_t flags_ = 0;
+  };
+
+  union TokenPayload {
+    struct {
+      uint32_t end;
+    } begin;
+    struct {
+      const uint8_t* start;
+      size_t length;
+    } string_content;
+  };
+
+  static_assert(sizeof(BaseTokenInfo) <= sizeof(uintptr_t));
+
+  std::vector<BaseTokenInfo> tokens_;
+  std::vector<TokenPayload> payloads_;
+};
+
+#if 0
 class Token {
  public:
   static Token* NewToken(TokenType type,
@@ -238,43 +372,6 @@ class Token {
   int32_t offset_;
   TokenType type_;
   uint8_t flags_ = 0;
-};
-
-inline std::string_view TokenTypeName(TokenType kind) {
-  switch (kind) {
-#define SIMPLE_TOK(Name)                                                       \
-  case TokenType::k##Name:                                                     \
-    return #Name;
-#define PINNED_TOK(Name, Val)                                                  \
-  case TokenType::k##Name:                                                     \
-    return #Name;
-#define KEYWORD_TOK(Name, lexeme)                                              \
-  case TokenType::k##Name:                                                     \
-    return #Name;
-    TOKEN_LIST(SIMPLE_TOK, PINNED_TOK, KEYWORD_TOK)
-#undef SIMPLE_TOK
-#undef PINNED_TOK
-#undef KEYWORD_TOK
-
-    default:
-      return "<?>";
-  }
-}
-
-template <>
-struct std::formatter<TokenType, char> {
-  template <class ParseContext>
-  constexpr ParseContext::iterator parse(ParseContext& ctx) {
-    auto it = ctx.begin();
-    if (it == ctx.end() || *it == '}') return it;
-
-    throw std::format_error("Invalid format args for Token.");
-  }
-
-  template <class FmtContext>
-  FmtContext::iterator format(TokenType type, FmtContext& ctx) const {
-    return std::ranges::copy(TokenTypeName(type), ctx.out()).out;
-  }
 };
 
 class SimpleToken : public Token {
@@ -364,16 +461,23 @@ class SyntheticToken : public SimpleToken {
  private:
   Token* before_;
 };
+#endif
 
+class ErrorToken {
+ public:
+  ErrorToken(TokenType type, int offset, CommentToken* comments) {
+    UNIMPLEMENTED();
+  }
+};
 class UnmatchedToken : public ErrorToken {
  public:
-  UnmatchedToken(BeginToken* token)
+  UnmatchedToken(TokenRef token)
       : ErrorToken(TokenType::kUNMATCHED_TOKEN, -1, nullptr) {}
 };
 
 class UnsupportedOperator : public ErrorToken {
  public:
-  UnsupportedOperator(Token* token, int offset)
+  UnsupportedOperator(TokenRef token, int offset)
       : ErrorToken(TokenType::kUNSUPPORTED_OPERATOR, offset, nullptr) {}
 };
 
@@ -473,9 +577,8 @@ inline ErrorToken* buildUnexpectedCharacterToken(int character,
       return new NonAsciiIdentifierToken(character, charOffset);
   }
 }
-
 template <>
-struct std::formatter<Token, char> {
+struct std::formatter<AnchoredTokenRef, char> {
   template <class ParseContext>
   constexpr ParseContext::iterator parse(ParseContext& ctx) {
     auto it = ctx.begin();
@@ -485,16 +588,34 @@ struct std::formatter<Token, char> {
   }
 
   template <class FmtContext>
-  FmtContext::iterator format(const Token& tok, FmtContext& ctx) const {
+  FmtContext::iterator format(const AnchoredTokenRef& writer_and_tok,
+                              FmtContext& ctx) const {
+    auto& [writer, tok] = writer_and_tok;
     std::ostringstream out;
-    out << "Token {" << "offset: " << tok.charOffset()
-        << ", type: " << TokenTypeName(tok.kind());
-    if (tok.kind() == TokenType::kIDENTIFIER) {
-      out << ", content: " << static_cast<const StringToken&>(tok).content();
+    out << "Token {" << "offset: " << writer.offset_of(tok)
+        << ", type: " << TokenTypeName(tok.type());
+    if (tok.type() == TokenType::kIDENTIFIER) {
+      out << ", content: " << writer.string_content_of(tok);
     }
     out << "}";
 
     return std::ranges::copy(std::move(out).str(), ctx.out()).out;
+  }
+};
+
+template <>
+struct std::formatter<TokenType, char> {
+  template <class ParseContext>
+  constexpr ParseContext::iterator parse(ParseContext& ctx) {
+    auto it = ctx.begin();
+    if (it == ctx.end() || *it == '}') return it;
+
+    throw std::format_error("Invalid format args for Token.");
+  }
+
+  template <class FmtContext>
+  FmtContext::iterator format(TokenType type, FmtContext& ctx) const {
+    return std::ranges::copy(TokenTypeName(type), ctx.out()).out;
   }
 };
 

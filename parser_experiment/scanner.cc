@@ -19,8 +19,7 @@
 template <typename T>
 class AbstractScanner;
 
-typedef void (*LanguageVersionChanged)(void* scanner,
-                                       LanguageVersionToken* languageVersion);
+typedef void (*LanguageVersionChanged)(void* scanner, TokenRef languageVersion);
 
 /// [ScannerConfiguration] contains information for configuring which tokens
 /// the scanner produces based upon the Dart language level.
@@ -43,36 +42,6 @@ struct ScannerConfiguration {
         forAugmentationLibrary(forAugmentationLibrary) {}
 };
 
-template <typename T>
-class Link {
- public:
-  Link() : payload_(nullptr), next_(nullptr) {}
-  Link(T value, Link<T>* next = nullptr) : payload_(value), next_(next) {}
-
-  bool empty() const { return payload_ == nullptr; }
-
-  T& front() { return payload_; }
-  const T& front() const { return payload_; }
-
-  Link<T>* next() { return next_; }
-
-  Link<T>* prepend(T value) { return new Link<T>(value, this); }
-
-  int slowLength() const {
-    int result = 0;
-    for (auto n = this; n->payload_ != nullptr; n = n->next_) {
-      result++;
-    }
-    return result;
-  }
-
- private:
-  T payload_;
-  Link<T>* next_;
-};
-
-static Link<BeginToken*> emptyStack = {};
-
 constexpr std::array<TokenType, 256> ClosingBraceTable() {
   std::array<TokenType, 256> table{};
   table[(int)TokenType::kOPEN_PAREN] = TokenType::kCLOSE_PAREN;
@@ -83,11 +52,6 @@ constexpr std::array<TokenType, 256> ClosingBraceTable() {
   table[(int)TokenType::kSTRING_INTERPOLATION_EXPRESSION] =
       TokenType::kCLOSE_CURLY_BRACKET;
   return table;
-}
-
-TokenType closeBraceInfoFor(BeginToken* begin) {
-  constexpr auto table = ClosingBraceTable();
-  return table[(int)begin->kind()];
 }
 
 template <typename ConcreteScanner>
@@ -125,25 +89,6 @@ class AbstractScanner {
    */
   int tokenStart = -1;
 
-  /**
-   * A pointer to the token stream created by this scanner. The first token
-   * is a special token and not part of the source file. This is an
-   * implementation detail to avoids special cases in the scanner. This token
-   * is not exposed to clients of the scanner, which are expected to invoke
-   * [firstToken] to access the token stream.
-   */
-  Token* tokens = Token::NewEof(/* offset = */ -1);
-
-  /**
-   * A pointer to the last scanned token.
-   */
-  Token* tail;
-
-  /**
-   * A pointer to the last prepended error token.
-   */
-  Token* errorTail;
-
   bool hasErrors = false;
 
   /**
@@ -156,7 +101,7 @@ class AbstractScanner {
   /**
    * A pointer to the last scanned comment token or `null` if none.
    */
-  Token* commentsTail;
+  // Token* commentsTail;
 
   // TODO: LineStarts is optimized for size in Dart version.
   std::vector<int> lineStarts;
@@ -167,11 +112,20 @@ class AbstractScanner {
    * ends. This field is set when scanning the end group token.
    */
   // TODO: Link<BeginToken> groupingStack = const Link<BeginToken>();
-  Link<BeginToken*>* groupingStack = &emptyStack;
+  // Link<TokenRef>* groupingStack = &emptyStack;
+  std::vector<TokenRef> groupingStack{10};
+  uint32_t groupingStackLen = 0;
 
   const bool inRecoveryOption;
   int recoveryCount = 0;
   const bool allowLazyStrings;
+
+  TokenWriter tokens_;
+
+  [[clang::always_inline]] TokenType closeBraceInfoFor(TokenRef begin) {
+    constexpr auto table = ClosingBraceTable();
+    return table[static_cast<int>(begin.type())];
+  }
 
   AbstractScanner(ScannerConfiguration* config,
                   bool includeComments,
@@ -182,9 +136,10 @@ class AbstractScanner {
         languageVersionChanged(languageVersionChanged),
         lineStarts(numberOfBytesHint),
         inRecoveryOption(false),
-        allowLazyStrings(allowLazyStrings) {
-    tail = tokens;
-    errorTail = tokens;
+        allowLazyStrings(allowLazyStrings),
+        tokens_(numberOfBytesHint) {
+    // tail = tokens;
+    // errorTail = tokens;
     set_configuration(config);
   }
 
@@ -297,7 +252,7 @@ class AbstractScanner {
   /**
    * Returns the first token scanned by this [Scanner].
    */
-  Token* firstToken() { return tokens->next(); }
+  // Token* firstToken() { return tokens->next(); }
 
   /**
    * Notifies that a new token starts at current offset.
@@ -330,11 +285,11 @@ class AbstractScanner {
    * Note that [extraOffset] can only be used if the covered character(s) are
    * known to be ASCII.
    */
-  [[clang::always_inline]] StringToken* createSubstringToken(TokenType type,
-                                                             int start,
-                                                             bool asciiOnly,
-                                                             int extraOffset,
-                                                             bool allowLazy) {
+  [[clang::always_inline]] TokenRef createSubstringToken(TokenType type,
+                                                         int start,
+                                                         bool asciiOnly,
+                                                         int extraOffset,
+                                                         bool allowLazy) {
     return concrete_scanner()->createSubstringToken(type, start, asciiOnly,
                                                     extraOffset, allowLazy);
   }
@@ -361,7 +316,7 @@ class AbstractScanner {
    * literal's lexeme but the returned token's length will *not* include
    * those additional characters so as to be true to the original source.
    */
-  [[clang::always_inline]] StringToken* createSyntheticSubstringToken(
+  [[clang::always_inline]] TokenRef createSyntheticSubstringToken(
       TokenType type,
       int start,
       bool asciiOnly,
@@ -377,8 +332,8 @@ class AbstractScanner {
    * An operator token represent operators like ':', '.', ';', '&&', '==', '--',
    * '=>', etc.
    */
-  void appendPrecedenceToken(TokenType type) {
-    appendToken(Token::NewToken(type, tokenStart, comments));
+  TokenRef appendPrecedenceToken(TokenType type) {
+    return tokens_.Add(type, tokenStart, comments);
   }
 
   /**
@@ -407,17 +362,17 @@ class AbstractScanner {
     if (keyword == TokenType::kTHIS) {
       discardOpenLt();
     }
-    appendToken(new KeywordToken(keyword, tokenStart, comments));
+    tokens_.Add(keyword, tokenStart, comments);
   }
 
   void appendEofToken() {
     beginToken();
     discardOpenLt();
-    while (!groupingStack->empty()) {
-      unmatchedBeginGroup(groupingStack->front());
-      groupingStack = groupingStack->next();
+    while (groupingStackLen > 0) {
+      unmatchedBeginGroup(groupingStack[groupingStackLen - 1]);
+      groupingStackLen--;
     }
-    appendToken(Token::NewEof(tokenStart, comments));
+    tokens_.Add(TokenType::kEOF, tokenStart, comments);
   }
 
   /**
@@ -447,14 +402,17 @@ class AbstractScanner {
    * Group begin tokens are '{', '(', '[', '<' and '${'.
    */
   void appendBeginGroup(TokenType type) {
-    auto token = new BeginToken(type, tokenStart, comments);
-    appendToken(token);
+    auto token = tokens_.Add(type, tokenStart, comments);
 
     // { [ ${ cannot appear inside a type parameters / arguments.
     if (type != TokenType::kLT && type != TokenType::kOPEN_PAREN) {
       discardOpenLt();
     }
-    groupingStack = groupingStack->prepend(token);
+
+    if (groupingStackLen == groupingStack.size()) {
+      groupingStack.resize(groupingStackLen * 2);
+    }
+    groupingStack[groupingStackLen++] = token;
   }
 
   /**
@@ -482,21 +440,18 @@ class AbstractScanner {
       appendPrecedenceToken(type);
       return advance();
     }
-    appendPrecedenceToken(type);
-    Token* close = tail;
-    BeginToken* begin = groupingStack->front();
-    if (begin->kind() != openKind) {
-      assert(begin->kind() == TokenType::kSTRING_INTERPOLATION_EXPRESSION &&
+    TokenRef close = appendPrecedenceToken(type);
+    TokenRef begin = groupingStack[groupingStackLen - 1];
+    tokens_.set_end_group_of(begin, close);
+    groupingStackLen--;
+    if (begin.type() != openKind) {
+      assert(begin.type() == TokenType::kSTRING_INTERPOLATION_EXPRESSION &&
              openKind == TokenType::kOPEN_CURLY_BRACKET);
       // We're ending an interpolated expression.
-      begin->endGroup = close;
-      groupingStack = groupingStack->next();
       // Using "start-of-text" to signal that we're back in string
       // scanning mode.
       return $STX;
     }
-    begin->endGroup = close;
-    groupingStack = groupingStack->next();
     return advance();
   }
 
@@ -506,11 +461,12 @@ class AbstractScanner {
    * greater-than operator. It does not necessarily have to close a group.
    */
   void appendGt(TokenType type) {
-    appendPrecedenceToken(type);
-    if (groupingStack->empty()) return;
-    if (groupingStack->front()->kind() == TokenType::kLT) {
-      groupingStack->front()->endGroup = tail;
-      groupingStack = groupingStack->next();
+    auto close = appendPrecedenceToken(type);
+    if (groupingStackLen == 0) return;
+    auto front = groupingStack[groupingStackLen - 1];
+    if (front.type() == TokenType::kLT) {
+      tokens_.set_end_group_of(front, close);
+      groupingStackLen--;
     }
   }
 
@@ -520,17 +476,17 @@ class AbstractScanner {
    * shift operator. It does not necessarily have to close a group.
    */
   void appendGtGt(TokenType type) {
-    appendPrecedenceToken(type);
-    if (groupingStack->empty()) return;
-    if (groupingStack->front()->kind() == TokenType::kLT) {
+    auto close = appendPrecedenceToken(type);
+    if (groupingStackLen == 0) return;
+    if (groupingStack[groupingStackLen - 1].type() == TokenType::kLT) {
       // Don't assign endGroup: in "T<U<V>>", the '>>' token closes the outer
       // '<', the inner '<' is left without endGroup.
-      groupingStack = groupingStack->next();
+      groupingStackLen--;
     }
-    if (groupingStack->empty()) return;
-    if (groupingStack->front()->kind() == TokenType::kLT) {
-      groupingStack->front()->endGroup = tail;
-      groupingStack = groupingStack->next();
+    if (groupingStackLen == 0) return;
+    if (groupingStack[groupingStackLen - 1].type() == TokenType::kLT) {
+      tokens_.set_end_group_of(groupingStack[groupingStackLen - 1], close);
+      groupingStackLen--;
     }
   }
 
@@ -539,27 +495,29 @@ class AbstractScanner {
   /// This method does not issue unmatched errors, because >>> is also the
   /// triple shift operator. It does not necessarily have to close a group.
   void appendGtGtGt(TokenType type) {
-    appendPrecedenceToken(type);
-    if (groupingStack->empty()) return;
+    auto close = appendPrecedenceToken(type);
+    if (groupingStackLen == 0) return;
 
     // Don't assign endGroup: in "T<U<V<X>>>", the '>>>' token closes the
     // outer '<', all the inner '<' are left without endGroups.
-    if (groupingStack->front()->kind() == TokenType::kLT) {
-      groupingStack = groupingStack->next();
+    if (groupingStack[groupingStackLen - 1].type() == TokenType::kLT) {
+      groupingStackLen--;
     }
-    if (groupingStack->empty()) return;
-    if (groupingStack->front()->kind() == TokenType::kLT) {
-      groupingStack = groupingStack->next();
+    if (groupingStackLen == 0) return;
+    if (groupingStack[groupingStackLen - 1].type() == TokenType::kLT) {
+      groupingStackLen--;
     }
-    if (groupingStack->empty()) return;
-    if (groupingStack->front()->kind() == TokenType::kLT) {
-      groupingStack->front()->endGroup = tail;
-      groupingStack = groupingStack->next();
+    if (groupingStackLen == 0) return;
+    if (groupingStack[groupingStackLen - 1].type() == TokenType::kLT) {
+      tokens_.set_end_group_of(groupingStack[groupingStackLen - 1], close);
+      groupingStackLen--;
     }
   }
 
   /// Prepend [token] to the token stream.
-  void prependErrorToken(ErrorToken* token) {
+  void prependErrorToken(void* token) {
+    UNIMPLEMENTED();
+#if 0
     hasErrors = true;
     if (errorTail == tail) {
       appendToken(token);
@@ -571,6 +529,7 @@ class AbstractScanner {
       token->set_previous(errorTail);
       errorTail = errorTail->next();
     }
+#endif
   }
 
   /**
@@ -613,8 +572,9 @@ class AbstractScanner {
    * Returns a new language version token from the scan offset [start]
    * to the current [scan_offset()] similar to createCommentToken.
    */
-  [[clang::always_inline]] LanguageVersionToken*
-  createLanguageVersionToken(int start, int major, int minor) {
+  [[clang::always_inline]] TokenRef createLanguageVersionToken(int start,
+                                                               int major,
+                                                               int minor) {
     return concrete_scanner()->createLanguageVersionToken(start, major, minor);
   }
 
@@ -626,17 +586,17 @@ class AbstractScanner {
    * but not "foo(() {bar());});"
    */
   bool discardBeginGroupUntil(TokenType openKind) {
-    Link<BeginToken*>* originalStack = groupingStack;
+    // auto originalStackLen = groupingStackLen;
 
     bool first = true;
     do {
       // Don't report unmatched errors for <; it is also the less-than operator.
       discardOpenLt();
-      if (groupingStack->empty()) break;  // recover
-      BeginToken* begin = groupingStack->front();
-      if (openKind == begin->kind() ||
+      if (groupingStackLen == 0) break;  // recover
+      TokenRef begin = groupingStack[groupingStackLen - 1];
+      if (openKind == begin.type() ||
           (openKind == TokenType::kOPEN_CURLY_BRACKET &&
-           begin->kind() == TokenType::kSTRING_INTERPOLATION_EXPRESSION)) {
+           begin.type() == TokenType::kSTRING_INTERPOLATION_EXPRESSION)) {
         if (first) {
           // If the expected opener has been found on the first pass
           // then no recovery necessary.
@@ -645,16 +605,18 @@ class AbstractScanner {
         break;  // recover
       }
       first = false;
-      groupingStack = groupingStack->next();
-    } while (!groupingStack->empty());
+      groupingStackLen--;
+    } while (!(groupingStackLen == 0));
 
+    UNIMPLEMENTED();
+#if 0
     recoveryCount++;
 
     // If the stack does not have any opener of the given type,
     // then return without discarding anything.
     // This recovers nicely from situations like "{foo());}".
-    if (groupingStack->empty()) {
-      groupingStack = originalStack;
+    if (groupingStackLen == 0) {
+      groupingStackLen = originalStackLen;
       return false;
     }
 
@@ -684,34 +646,34 @@ class AbstractScanner {
       int option1Recoveries;
       {
         AbstractScanner option1 = createRecoveryOptionScanner();
-        option1.insertSyntheticClosers(originalStack, groupingStack);
+        option1.insertSyntheticClosers(originalStackLen, groupingStackLen);
         option1Recoveries =
             option1.recoveryOptionTokenizer(option1.appendEndGroupInternal(
                 /* foundMatchingBrace = */ true, type, openKind));
-        option1Recoveries += option1.groupingStack->slowLength();
+        option1Recoveries += option1.groupingStackLen;
       }
 
       // Option #2: ignore this token.
       int option2Recoveries;
       {
         AbstractScanner option2 = createRecoveryOptionScanner();
-        option2.groupingStack = originalStack;
+        option2.groupingStack = groupingStack;
+        option2.groupingStackLen = originalStackLen;
         option2Recoveries =
             option2.recoveryOptionTokenizer(option2.appendEndGroupInternal(
                 /* foundMatchingBrace = */ false, type, openKind));
         // We add 1 to make this option pay for ignoring this token.
-        option2Recoveries += option2.groupingStack->slowLength() + 1;
+        option2Recoveries += option2.groupingStackLen + 1;
       }
 
       // The option-runs might have set invalid endGroup pointers. Reset them.
-      for (Link<BeginToken*>* link = originalStack; !link->empty();
-           link = link->next()) {
-        link->front()->endGroup = nullptr;
+      for (uint32_t i = 0; i < originalStackLen; i++) {
+        groupingStack[i]->endGroup = nullptr;
       }
 
       if (option2Recoveries < option1Recoveries) {
         // Perform option #2 recovery.
-        groupingStack = originalStack;
+        groupingStackLen = originalStackLen;
         return false;
       }
       // option #1 is the default, so fall though.
@@ -719,21 +681,24 @@ class AbstractScanner {
 
     // Insert synthetic closers and report errors for any unbalanced openers.
     // This recovers nicely from situations like "{[}".
-    insertSyntheticClosers(originalStack, groupingStack);
+    insertSyntheticClosers(originalStackLen, groupingStackLen);
     return true;
+#endif
   }
 
-  void insertSyntheticClosers(Link<BeginToken*>* originalStack,
-                              Link<BeginToken*>* entryToUse) {
+  void insertSyntheticClosers(int32_t originalStackLen, int32_t currentLen) {
+    UNIMPLEMENTED();
+#if 0
     // Insert synthetic closers and report errors for any unbalanced openers.
     // This recovers nicely from situations like "{[}".
     while (originalStack != entryToUse) {
       // Don't report unmatched errors for <; it is also the less-than operator.
-      if (entryToUse->front()->kind() != TokenType::kLT) {
+      if (entryToUse->front().type() != TokenType::kLT) {
         unmatchedBeginGroup(originalStack->front());
       }
       originalStack = originalStack->next();
     }
+#endif
   }
 
   /**
@@ -748,9 +713,9 @@ class AbstractScanner {
    * list, like the '=' in the above example.
    */
   void discardOpenLt() {
-    while (!groupingStack->empty() &&
-           groupingStack->front()->kind() == TokenType::kLT) {
-      groupingStack = groupingStack->next();
+    while (!(groupingStackLen == 0) &&
+           groupingStack[groupingStackLen - 1].type() == TokenType::kLT) {
+      groupingStackLen--;
     }
   }
 
@@ -761,15 +726,18 @@ class AbstractScanner {
    * interpolation expression.
    */
   void discardInterpolation() {
-    while (!groupingStack->empty()) {
-      BeginToken* beginToken = groupingStack->front();
+    while (!(groupingStackLen == 0)) {
+      TokenRef beginToken = groupingStack[groupingStackLen - 1];
       unmatchedBeginGroup(beginToken);
-      groupingStack = groupingStack->next();
-      if (beginToken->kind() == TokenType::kSTRING_INTERPOLATION_EXPRESSION) break;
+      groupingStackLen--;
+      if (beginToken.type() == TokenType::kSTRING_INTERPOLATION_EXPRESSION)
+        break;
     }
   }
 
-  void unmatchedBeginGroup(BeginToken* begin) {
+  void unmatchedBeginGroup(TokenRef begin) {
+    UNIMPLEMENTED();
+#if 0
     // We want to ensure that unmatched BeginTokens are reported as
     // errors.  However, the diet parser assumes that groups are well-balanced
     // and will never look at the endGroup token.  This is a nice property that
@@ -819,6 +787,7 @@ class AbstractScanner {
     begin->endGroup = tail;
     prependErrorToken(new UnmatchedToken(begin));
     recoveryCount++;
+#endif
   }
 
   /// Return true when at EOF.
@@ -826,20 +795,24 @@ class AbstractScanner {
     return concrete_scanner()->atEndOfFile();
   }
 
-  Token* tokenize() {
+  void tokenize() {
     while (!atEndOfFile()) {
       int next = advance();
 
       // Scan the header looking for a language version
       if (next != $EOF) {
-        Token* oldTail = tail;
+        auto oldSize = tokens_.size();
         next = bigHeaderSwitch(next);
-        if (next != $EOF && tail->kind() == TokenType::kSCRIPT) {
-          oldTail = tail;
+        if (next != $EOF && tokens_.size() > 0 &&
+            tokens_.last().type() == TokenType::kSCRIPT) {
+          oldSize = tokens_.size();
           next = bigHeaderSwitch(next);
         }
-        while (next != $EOF && tail == oldTail) {
+        while (next != $EOF && oldSize == tokens_.size()) {
           next = bigHeaderSwitch(next);
+        }
+        if (tokens_.last().type() == TokenType::kLANGUAGE_VERSION) {
+          tokens_.drop(1);
         }
       }
 
@@ -855,8 +828,6 @@ class AbstractScanner {
 
     // Always pretend that there's a line at the end of the file.
     lineStarts.push_back(string_offset() + 1);
-
-    return firstToken();
   }
 
   /// Tokenize a (small) part of the data. Used for recovery "option testing".
@@ -1229,7 +1200,8 @@ class AbstractScanner {
       int next = advance();
       if (next == $EQ) {
         appendPrecedenceToken(TokenType::kBANG_EQ_EQ);
-        prependErrorToken(new UnsupportedOperator(tail, tokenStart));
+        UNIMPLEMENTED();
+        // prependErrorToken(new UnsupportedOperator(tail, tokenStart));
         return advance();
       } else {
         appendPrecedenceToken(TokenType::kBANG_EQ);
@@ -1254,7 +1226,8 @@ class AbstractScanner {
       int next = advance();
       if (next == $EQ) {
         appendPrecedenceToken(TokenType::kEQ_EQ_EQ);
-        prependErrorToken(new UnsupportedOperator(tail, tokenStart));
+        UNIMPLEMENTED();
+        // prependErrorToken(new UnsupportedOperator(tail, tokenStart));
         return advance();
       } else {
         appendPrecedenceToken(TokenType::kEQ_EQ);
@@ -1336,18 +1309,20 @@ class AbstractScanner {
       } else if (next == $e || next == $E) {
         if (previousWasSeparator) {
           // Not allowed.
-          prependErrorToken(
-              new UnterminatedToken(Message::messageUnexpectedSeparatorInNumber,
-                                    start, string_offset()));
+          UNIMPLEMENTED();
+          // prependErrorToken(
+          //    new UnterminatedToken(Message::messageUnexpectedSeparatorInNumber,
+          //                          start, string_offset()));
         }
         return tokenizeFractionPart(next, start, hasSeparators);
       } else {
         if (next == $PERIOD) {
           if (previousWasSeparator) {
             // Not allowed.
-            prependErrorToken(new UnterminatedToken(
-                Message::messageUnexpectedSeparatorInNumber, start,
-                string_offset()));
+            UNIMPLEMENTED();
+            // prependErrorToken(new UnterminatedToken(
+            //    Message::messageUnexpectedSeparatorInNumber, start,
+            //    string_offset()));
           }
           int nextnext = peek();
           if ($0 <= nextnext && nextnext <= $9) {
@@ -1362,9 +1337,10 @@ class AbstractScanner {
         }
         if (previousWasSeparator) {
           // End of the number is a separator; not allowed.
-          prependErrorToken(
-              new UnterminatedToken(Message::messageUnexpectedSeparatorInNumber,
-                                    start, string_offset()));
+          UNIMPLEMENTED();
+          // prependErrorToken(
+          //    new UnterminatedToken(Message::messageUnexpectedSeparatorInNumber,
+          //                          start, string_offset()));
         }
         TokenType tokenType =
             hasSeparators ? TokenType::kINT_WITH_SEPARATORS : TokenType::kINT;
@@ -1405,8 +1381,9 @@ class AbstractScanner {
         previousWasSeparator = true;
       } else {
         if (!hasDigits) {
-          prependErrorToken(new UnterminatedToken(
-              Message::messageExpectedHexDigit, start, string_offset()));
+          UNIMPLEMENTED();
+          // prependErrorToken(new UnterminatedToken(
+          //    Message::messageExpectedHexDigit, start, string_offset()));
           // Recovery
           appendSyntheticSubstringToken(TokenType::kHEXADECIMAL, start,
                                         /* asciiOnly = */ true, "0");
@@ -1414,9 +1391,10 @@ class AbstractScanner {
         }
         if (previousWasSeparator) {
           // End of the number is a separator; not allowed.
-          prependErrorToken(
-              new UnterminatedToken(Message::messageUnexpectedSeparatorInNumber,
-                                    start, string_offset()));
+          UNIMPLEMENTED();
+          // prependErrorToken(
+          //    new UnterminatedToken(Message::messageUnexpectedSeparatorInNumber,
+          //                          start, string_offset()));
         }
         TokenType tokenType = hasSeparators
                                   ? TokenType::kHEXADECIMAL_WITH_SEPARATORS
@@ -1653,14 +1631,14 @@ class AbstractScanner {
       return tokenizeSingleLineCommentRest(next, start, /* dartdoc = */ false);
     }
 
-    LanguageVersionToken* languageVersion =
-        createLanguageVersionToken(start, major, minor);
+    TokenRef languageVersion = createLanguageVersionToken(start, major, minor);
     if (languageVersionChanged != nullptr) {
       // TODO(danrubel): make this required and remove the languageVersion field
       languageVersionChanged(this, languageVersion);
     }
     if (includeComments) {
-      _appendToCommentStream(languageVersion);
+      UNIMPLEMENTED();
+      // _appendToCommentStream(languageVersion);
     }
     return next;
   }
@@ -1762,7 +1740,9 @@ class AbstractScanner {
   /**
    * Append the given token to the [tail] of the current stream of tokens.
    */
-  void appendToken(Token* token) {
+  [[clang::always_inline]] void appendToken(TokenRef token) {
+    assert(token.index() == (tokens_.size() - 1));
+#if 0
     tail->set_next(token);
     token->set_previous(tail);
     tail = token;
@@ -1775,9 +1755,12 @@ class AbstractScanner {
       assert(comments == nullptr || token->isSynthetic() ||
              token->isErrorToken());
     }
+#endif
   }
 
   void _appendToCommentStream(CommentToken* newComment) {
+    UNIMPLEMENTED();
+#if 0
     if (comments == nullptr) {
       comments = newComment;
       commentsTail = comments;
@@ -1786,6 +1769,7 @@ class AbstractScanner {
       commentsTail->next()->set_previous(commentsTail);
       commentsTail = commentsTail->next();
     }
+#endif
   }
 
   int tokenizeRawStringKeywordOrIdentifier(int next) {
@@ -2095,12 +2079,13 @@ class AbstractScanner {
   }
 
   int unexpected(int character) {
-    ErrorToken* errorToken =
-        buildUnexpectedCharacterToken(character, tokenStart);
-    if (errorToken->isNonAsciiIdentifierToken()) {
+    UNIMPLEMENTED();
+#if 0
+    auto errorToken = buildUnexpectedCharacterToken(character, tokenStart);
+    if (errorToken.isNonAsciiIdentifierToken()) {
       int charOffset;
       std::vector<int> codeUnits;
-      if (tail->kind() == TokenType::kIDENTIFIER &&
+      if (tail.type() == TokenType::kIDENTIFIER &&
           tail->charEnd() == tokenStart) {
         charOffset = tail->charOffset();
         // TODO: codeUnits.addAll(tail.lexeme.codeUnits);
@@ -2126,11 +2111,15 @@ class AbstractScanner {
       prependErrorToken(errorToken);
       return advanceAfterError();
     }
+#endif
   }
 
   void unexpectedEof() {
+    UNIMPLEMENTED();
+#if 0
     ErrorToken* errorToken = buildUnexpectedCharacterToken($EOF, tokenStart);
     prependErrorToken(errorToken);
+#endif
   }
 
   void unterminatedString(int quoteChar,
@@ -2358,20 +2347,24 @@ class Utf8BytesScanner : public AbstractScanner<Utf8BytesScanner> {
     return (code_unit & 0xC0) == 0x80;
   }
 
-  [[clang::always_inline]] static bool IsNonShortestForm(uint32_t code_point, size_t num_code_units) {
+  [[clang::always_inline]] static bool IsNonShortestForm(
+      uint32_t code_point,
+      size_t num_code_units) {
     // Minimum values of code points used to check shortest form.
     constexpr uint32_t kOverlongMinimum[7] = {0,  // Padding.
-                                                0x0,     0x80,       0x800,
-                                                0x10000, 0xFFFFFFFF, 0xFFFFFFFF};
+                                              0x0,     0x80,       0x800,
+                                              0x10000, 0xFFFFFFFF, 0xFFFFFFFF};
     return code_point < kOverlongMinimum[num_code_units];
   }
 
-  [[clang::always_inline]] static bool IsLatin1SequenceStart(uint8_t code_unit) {
+  [[clang::always_inline]] static bool IsLatin1SequenceStart(
+      uint8_t code_unit) {
     // Check if utf8 sequence is the start of a codepoint <= U+00FF
     return (code_unit <= 0xC3);
   }
 
-  [[clang::always_inline]] static bool IsSupplementarySequenceStart(uint8_t code_unit) {
+  [[clang::always_inline]] static bool IsSupplementarySequenceStart(
+      uint8_t code_unit) {
     // Check if utf8 sequence is the start of a codepoint >= U+10000.
     return (code_unit >= 0xF0);
   }
@@ -2379,8 +2372,7 @@ class Utf8BytesScanner : public AbstractScanner<Utf8BytesScanner> {
   // Returns the most restricted coding form in which the sequence of utf8
   // characters in 'utf8_array' can be represented in, and the number of
   // code units needed in that form.
-  static intptr_t CodeUnitCount(const uint8_t* utf8_array,
-                              intptr_t array_len) {
+  static intptr_t CodeUnitCount(const uint8_t* utf8_array, intptr_t array_len) {
     intptr_t len = 0;
     Type char_type = kLatin1;
     for (intptr_t i = 0; i < array_len; i++) {
@@ -2402,13 +2394,14 @@ class Utf8BytesScanner : public AbstractScanner<Utf8BytesScanner> {
 
   // @override
   void handleUnicode(int startScanOffset) {
-//    UNIMPLEMENTED();
-//#if 0
+    //    UNIMPLEMENTED();
+    //#if 0
     int end = byteOffset;
     // TODO(lry): this measurably slows down the scanner for files with unicode.
-    int codeUnits = CodeUnitCount(bytes_ + startScanOffset, end - startScanOffset);
+    int codeUnits =
+        CodeUnitCount(bytes_ + startScanOffset, end - startScanOffset);
     utf8Slack += (end - startScanOffset) - codeUnits;
-//#endif
+    //#endif
   }
 
   /**
@@ -2436,16 +2429,18 @@ class Utf8BytesScanner : public AbstractScanner<Utf8BytesScanner> {
   }
 
   // @override
-  StringToken* createSubstringToken(TokenType type,
-                                    int start,
-                                    bool asciiOnly,
-                                    int extraOffset,
-                                    bool allowLazy) {
+  TokenRef createSubstringToken(TokenType type,
+                                int start,
+                                bool asciiOnly,
+                                int extraOffset,
+                                bool allowLazy) {
     std::string_view content{
         reinterpret_cast<char*>(bytes_ + start),
         static_cast<size_t>(byteOffset + extraOffset - start)};
-    return new StringToken(type, tokenStart, comments, content, asciiOnly,
-                           allowLazy);
+    return tokens_.AddStringToken(type, tokenStart, comments, content,
+                                  asciiOnly, allowLazy);
+    // return new StringToken(type, tokenStart, comments, content, asciiOnly,
+    //                       allowLazy);
     UNIMPLEMENTED();
 #if 0
     return new StringTokenImpl.fromUtf8Bytes(
@@ -2455,7 +2450,7 @@ class Utf8BytesScanner : public AbstractScanner<Utf8BytesScanner> {
   }
 
   // @override
-  StringToken* createSyntheticSubstringToken(
+  TokenRef createSyntheticSubstringToken(
       TokenType type,
       int start,
       bool asciiOnly,
@@ -2497,13 +2492,11 @@ class Utf8BytesScanner : public AbstractScanner<Utf8BytesScanner> {
   }
 
   // @override
-  LanguageVersionToken* createLanguageVersionToken(int start,
-                                                   int major,
-                                                   int minor) {
-    std::string_view content{
-        reinterpret_cast<char*>(bytes_ + start),
-        static_cast<size_t>(byteOffset - start)};
-    return new LanguageVersionToken(content, tokenStart, major, minor);
+  TokenRef createLanguageVersionToken(int start, int major, int minor) {
+    std::string_view content{reinterpret_cast<char*>(bytes_ + start),
+                             static_cast<size_t>(byteOffset - start)};
+    return tokens_.AddStringToken(TokenType::kLANGUAGE_VERSION, tokenStart,
+                                  comments, content, true, true);
   }
 
   // @override
@@ -2522,10 +2515,12 @@ class Utf8BytesScanner : public AbstractScanner<Utf8BytesScanner> {
   const int bytesLengthMinusOne_;
 };
 
-Token* ScanUtf8(uint8_t* bytes, size_t length) {
+TokenWriter ScanUtf8(uint8_t* bytes, size_t length) {
   if (KeywordState::KEYWORD_STATE == nullptr) {
     KeywordState::Init();
   }
-  Utf8BytesScanner scanner(bytes, length, new ScannerConfiguration(/*enableTripleShift=*/ true));
-  return scanner.tokenize();
+  Utf8BytesScanner scanner(
+      bytes, length, new ScannerConfiguration(/*enableTripleShift=*/true));
+  scanner.tokenize();
+  return std::move(scanner.tokens_);
 }

@@ -5,9 +5,9 @@
 #include "util.h"
 
 #include <chrono>
+#include <cstring>
 #include <format>
 #include <print>
-#include <cstring>
 
 #include "scanner.h"
 #include "token.h"
@@ -17,10 +17,13 @@
 int main(int argc, char* argv[]) {
   if (argc == 3 && strcmp(argv[1], "parse") == 0) {
     auto data = LoadFileBytes(argv[2]);
-    auto tok = ScanUtf8(data.data.get(), data.size);
-    for (auto curr = tok; curr != nullptr; curr = curr->next()) {
-      std::print("{}\n", *curr);
+    auto tokens = ScanUtf8(data.data.get(), data.size);
+    for (uint32_t i = 0; i < tokens.size(); i++) {
+      std::print("{}\n", tokens.at(i));
     }
+    // for (auto curr = tok; curr != nullptr; curr = curr->next()) {
+    //
+    // }
     return 0;
   }
 
@@ -38,7 +41,6 @@ int main(int argc, char* argv[]) {
   }
   std::print("loaded {} bytes from {} files\n", total_bytes, count);
 
-
   const bool run_forever = argc == 2 && strcmp(argv[1], "forever") == 0;
   do {
     auto start = std::chrono::system_clock::now();
@@ -46,11 +48,14 @@ int main(int argc, char* argv[]) {
       ScanUtf8(buf.data.get(), buf.size);
     }
     auto end = std::chrono::system_clock::now();
-    auto ns = (double)std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    auto ns = (double)std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  end - start)
+                  .count();
     std::print(
-        "C++ took {} to scan {} bytes: {} ns/byte\n", std::chrono::duration_cast<std::chrono::microseconds>(end - start), total_bytes, ns/total_bytes);
+        "C++ took {} to scan {} bytes: {} ns/byte\n",
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start),
+        total_bytes, ns / total_bytes);
   } while (run_forever);
-
 
   return 0;
 }
