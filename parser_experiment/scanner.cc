@@ -799,6 +799,7 @@ class AbstractScanner {
     while (!atEndOfFile()) {
       int next = advance();
 
+#if 0
       // Scan the header looking for a language version
       if (next != $EOF) {
         auto oldSize = tokens_.size();
@@ -815,6 +816,7 @@ class AbstractScanner {
           tokens_.drop(1);
         }
       }
+#endif
 
       while (next != $EOF) {
         next = bigSwitch(next);
@@ -870,179 +872,346 @@ class AbstractScanner {
     return tokenizeLanguageVersionOrSingleLineComment(next);
   }
 
+  using NextCharacterHandler = int (*)(AbstractScanner& scanner, int next);
+
+  static constexpr size_t kNumHandlers = 257;
+  static NextCharacterHandler handlers_[kNumHandlers];
+
+  static void Init() {
+    for (uint32_t ch = 0; ch <= 256; ch++)
+      handlers_[1 + ch] = &HandleUnexpected;
+    handlers_[0] = handlers_[$STX + 1] = &HandleEof;
+
+    for (auto ws : {$SPACE, $TAB, $CR})
+      handlers_[1 + ws] = &HandleWhiteSpace;
+    handlers_[1 + $LF] = &HandleNewLine;
+
+    // $a - $z, $A-$Z, $_, $$ except $r
+    for (int ch = $a; ch <= $z; ch++)
+      handlers_[1 + ch] = &HandleKeywordOrIdentifier;
+    for (int ch = $A; ch <= $Z; ch++)
+      handlers_[1 + ch] = &HandleKeywordOrIdentifier;
+    handlers_[1 + $_] = &HandleKeywordOrIdentifier;
+    handlers_[1 + $$] = &HandleKeywordOrIdentifier;
+    handlers_[1 + $r] = &HandleRawStringKeywordOrIdentifier;
+    handlers_[1 + $OPEN_PAREN] = &HandleOpenParen;
+    handlers_[1 + $CLOSE_PAREN] = &HandleCloseParen;
+    handlers_[1 + $SEMICOLON] = &HandleSemicolon;
+    handlers_[1 + $PERIOD] = &HandlePeriod;
+    handlers_[1 + $COMMA] = &HandleComma;
+    handlers_[1 + $COLON] = &HandleColon;
+    handlers_[1 + $BACKPING] = &HandleBackping;
+    handlers_[1 + $BACKSLASH] = &HandleBackslash;
+    handlers_[1 + $EQ] = &HandleEquals;
+    handlers_[1 + $OPEN_CURLY_BRACKET] = &HandleOpenCurlyBracket;
+    handlers_[1 + $CLOSE_CURLY_BRACKET] = &HandleCloseCurlyBracket;
+    handlers_[1 + $SLASH] = &HandleSlash;
+    handlers_[1 + $DQ] = handlers_[1 + $SQ] = &HandleQuotes;
+    handlers_[1 + $LT] = &HandleLessThan;
+    handlers_[1 + $GT] = &HandleGreaterThan;
+    handlers_[1 + $BANG] = &HandleBang;
+    handlers_[1 + $OPEN_SQUARE_BRACKET] = &HandleOpenSquareBracket;
+    handlers_[1 + $CLOSE_SQUARE_BRACKET] = &HandleCloseSquareBracket;
+    handlers_[1 + $AT] = &HandleAt;
+    handlers_[1 + $0] = &HandleHexOrNumber;
+    for (uint8_t ch = $1; ch <= $9; ch++)
+      handlers_[1 + ch] = &HandleNumber;
+    handlers_[1 + $AMPERSAND] = &HandleAmpersand;
+    handlers_[1 + $QUESTION] = &HandleQuestion;
+    handlers_[1 + $BAR] = &HandleBar;
+    handlers_[1 + $PLUS] = &HandlePlus;
+    handlers_[1 + $MINUS] = &HandleMinus;
+    handlers_[1 + $STAR] = &HandleMultiply;
+    handlers_[1 + $CARET] = &HandleCaret;
+    handlers_[1 + $TILDE] = &HandleTilde;
+    handlers_[1 + $PERCENT] = &HandlePercent;
+    handlers_[1 + $HASH] = &HandleHash;
+  }
+
   int bigSwitch(int next) {
-    beginToken();
-    if (next == $SPACE || next == $TAB || next == $LF || next == $CR) {
-      appendWhiteSpace(next);
-      next = advance();
+    return handlers_[next + 1](*this, next);
+  }
+
+  [[clang::always_inline]] static int DispatchNext(AbstractScanner& scanner, int next) {
+    //std::print("@{}: {} ({})\n", scanner.scan_offset(), (char) next, next);
+    [[clang::musttail]] return handlers_[next + 1](scanner, next);
+  }
+
+  static int HandleEof(AbstractScanner& scanner, int next) {
+    return next;
+  }
+
+
+  // next == $SPACE || next == $TAB || next == $CR
+  static int HandleWhiteSpace(AbstractScanner& scanner, int next) {
+    next = scanner.advance();
+    // Sequences of spaces are common, so advance through them fast.
+    while (next == $SPACE) {
+      // We don't invoke [:appendWhiteSpace(next):] here for efficiency,
+      // assuming that it does not do anything for space characters.
+      next = scanner.advance();
+    }
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
+
+  // next == $LF
+  static int HandleNewLine(AbstractScanner& scanner, int next) {
+    do {
+      // +1, the line starts after the $LF.
+      scanner.lineStarts.push_back(scanner.string_offset() + 1);
+      next = scanner.advance();
       // Sequences of spaces are common, so advance through them fast.
       while (next == $SPACE) {
         // We don't invoke [:appendWhiteSpace(next):] here for efficiency,
         // assuming that it does not do anything for space characters.
-        next = advance();
+        next = scanner.advance();
       }
-      return next;
-    }
+    } while (next == $LF);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    int nextLower = next | 0x20;
+  // $a - $z, $A-$Z, $_, $$ except $r
+  static int HandleKeywordOrIdentifier(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeKeywordOrIdentifier(next, /* allowDollar = */ true);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if ($a <= nextLower && nextLower <= $z) {
-      if ($r == next) {
-        return tokenizeRawStringKeywordOrIdentifier(next);
-      }
-      return tokenizeKeywordOrIdentifier(next, /* allowDollar = */ true);
-    }
+  // $r
+  static int HandleRawStringKeywordOrIdentifier(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeRawStringKeywordOrIdentifier(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $CLOSE_PAREN) {
-      return appendEndGroup(TokenType::kCLOSE_PAREN, TokenType::kOPEN_PAREN);
-    }
+ // $OPEN_PAREN
+  static int HandleOpenParen(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    scanner.appendBeginGroup(TokenType::kOPEN_PAREN);
+    [[clang::musttail]] return DispatchNext(scanner, scanner.advance());
+  }
 
-    if (next == $OPEN_PAREN) {
-      appendBeginGroup(TokenType::kOPEN_PAREN);
-      return advance();
-    }
+  // $CLOSE_PAREN
+  static int HandleCloseParen(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.appendEndGroup(TokenType::kCLOSE_PAREN, TokenType::kOPEN_PAREN);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $SEMICOLON) {
-      appendPrecedenceToken(TokenType::kSEMICOLON);
-      // Type parameters and arguments cannot contain semicolon.
-      discardOpenLt();
-      return advance();
-    }
+  // $SEMICOLON
+  static int HandleSemicolon(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    scanner.appendPrecedenceToken(TokenType::kSEMICOLON);
+    // Type parameters and arguments cannot contain semicolon.
+    scanner.discardOpenLt();
+    [[clang::musttail]] return DispatchNext(scanner, scanner.advance());
+  }
 
-    if (next == $PERIOD) {
-      return tokenizeDotsOrNumber(next);
-    }
+  // $PERIOD
+  static int HandlePeriod(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeDotsOrNumber(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $COMMA) {
-      appendPrecedenceToken(TokenType::kCOMMA);
-      return advance();
-    }
+  // $COMMA
+  static int HandleComma(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    scanner.appendPrecedenceToken(TokenType::kCOMMA);
+    [[clang::musttail]] return DispatchNext(scanner, scanner.advance());
+  }
 
-    if (next == $EQ) {
-      return tokenizeEquals(next);
-    }
+  // $COLON
+  static int HandleColon(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    scanner.appendPrecedenceToken(TokenType::kCOLON);
+    [[clang::musttail]] return DispatchNext(scanner, scanner.advance());
+  }
 
-    if (next == $CLOSE_CURLY_BRACKET) {
-      return appendEndGroup(TokenType::kCLOSE_CURLY_BRACKET,
+  // $BACKPING
+  static int HandleBackping(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    scanner.appendPrecedenceToken(TokenType::kBACKPING);
+    [[clang::musttail]] return DispatchNext(scanner, scanner.advance());
+  }
+
+  // $BACKSLASH
+  static int HandleBackslash(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    scanner.appendPrecedenceToken(TokenType::kBACKSLASH);
+    [[clang::musttail]] return DispatchNext(scanner, scanner.advance());
+  }
+
+
+
+  // $EQ
+  static int HandleEquals(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeEquals(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
+
+  // $OPEN_CURLY_BRACKET
+  static int HandleOpenCurlyBracket(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    scanner.appendBeginGroup(TokenType::kOPEN_CURLY_BRACKET);
+    [[clang::musttail]] return DispatchNext(scanner, scanner.advance());
+  }
+
+
+  // $CLOSE_CURLY_BRACKET
+  static int HandleCloseCurlyBracket(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.appendEndGroup(TokenType::kCLOSE_CURLY_BRACKET,
                             TokenType::kOPEN_CURLY_BRACKET);
-    }
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $SLASH) {
-      return tokenizeSlashOrComment(next);
-    }
+  // $SLASH
+  static int HandleSlash(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeSlashOrComment(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $OPEN_CURLY_BRACKET) {
-      appendBeginGroup(TokenType::kOPEN_CURLY_BRACKET);
-      return advance();
-    }
+  // $DQ, $SQ
+  static int HandleQuotes(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeString(next, scanner.scan_offset(), /* raw = */ false);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $DQ || next == $SQ) {
-      return tokenizeString(next, scan_offset(), /* raw = */ false);
-    }
+  // $LT
+  static int HandleLessThan(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeLessThan(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $_) {
-      return tokenizeKeywordOrIdentifier(next, /* allowDollar = */ true);
-    }
+  // $GT
+  static int HandleGreaterThan(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeGreaterThan(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $COLON) {
-      appendPrecedenceToken(TokenType::kCOLON);
-      return advance();
-    }
+  // $BANG
+  static int HandleBang(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeExclamation(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $LT) {
-      return tokenizeLessThan(next);
-    }
+  // $OPEN_SQUARE_BRACKET
+  static int HandleOpenSquareBracket(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeOpenSquareBracket(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $GT) {
-      return tokenizeGreaterThan(next);
-    }
-
-    if (next == $BANG) {
-      return tokenizeExclamation(next);
-    }
-
-    if (next == $OPEN_SQUARE_BRACKET) {
-      return tokenizeOpenSquareBracket(next);
-    }
-
-    if (next == $CLOSE_SQUARE_BRACKET) {
-      return appendEndGroup(TokenType::kCLOSE_SQUARE_BRACKET,
+  // $CLOSE_SQUARE_BRACKET
+  static int HandleCloseSquareBracket(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.appendEndGroup(TokenType::kCLOSE_SQUARE_BRACKET,
                             TokenType::kOPEN_SQUARE_BRACKET);
-    }
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $AT) {
-      return tokenizeAt(next);
-    }
+  // $AT
+  static int HandleAt(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeAt(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next >= $1 && next <= $9) {
-      return tokenizeNumber(next);
-    }
+  // $0
+  static int HandleHexOrNumber(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeHexOrNumber(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $AMPERSAND) {
-      return tokenizeAmpersand(next);
-    }
+  // $1 .. $9
+  static int HandleNumber(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeNumber(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $0) {
-      return tokenizeHexOrNumber(next);
-    }
+  // $AMPERSAND
+  static int HandleAmpersand(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeAmpersand(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $QUESTION) {
-      return tokenizeQuestion(next);
-    }
+  // $QUESTION
+  static int HandleQuestion(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeQuestion(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $BAR) {
-      return tokenizeBar(next);
-    }
+  // $BAR
+  static int HandleBar(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeBar(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $PLUS) {
-      return tokenizePlus(next);
-    }
+  // $PLUS
+  static int HandlePlus(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizePlus(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $$) {
-      return tokenizeKeywordOrIdentifier(next, /* allowDollar = */ true);
-    }
+  // $MINUS
+  static int HandleMinus(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeMinus(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $MINUS) {
-      return tokenizeMinus(next);
-    }
+  // $STAR
+  static int HandleMultiply(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeMultiply(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $STAR) {
-      return tokenizeMultiply(next);
-    }
+  // $CARET
+  static int HandleCaret(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeCaret(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $CARET) {
-      return tokenizeCaret(next);
-    }
+  // $TILDE
+  static int HandleTilde(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeTilde(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $TILDE) {
-      return tokenizeTilde(next);
-    }
+  // $PERCENT
+  static int HandlePercent(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizePercent(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $PERCENT) {
-      return tokenizePercent(next);
-    }
+  // $HASH
+  static int HandleHash(AbstractScanner& scanner, int next) {
+    scanner.beginToken();
+    next = scanner.tokenizeTag(next);
+    [[clang::musttail]] return DispatchNext(scanner, next);
+  }
 
-    if (next == $BACKPING) {
-      appendPrecedenceToken(TokenType::kBACKPING);
-      return advance();
-    }
-
-    if (next == $BACKSLASH) {
-      appendPrecedenceToken(TokenType::kBACKSLASH);
-      return advance();
-    }
-
-    if (next == $HASH) {
-      return tokenizeTag(next);
-    }
-
-    if (next < 0x1f) {
-      return unexpected(next);
-    }
-
-    next = currentAsUnicode(next);
-
-    return unexpected(next);
+  // else
+  static int HandleUnexpected(AbstractScanner& scanner, int next) {
+    UNIMPLEMENTED();
+    // [[clang::musttail]] return scanner.tokenizeTag(next);
   }
 
   int tokenizeTag(int next) {
@@ -2148,6 +2317,16 @@ class AbstractScanner {
   }
 };
 
+class Utf8BytesScanner;
+
+template<typename T>
+AbstractScanner<T>::NextCharacterHandler  AbstractScanner<T>::handlers_[AbstractScanner<T>::kNumHandlers];
+
+/*
+template<>
+AbstractScanner<Utf8BytesScanner>::NextCharacterHandler  AbstractScanner<Utf8BytesScanner>::handlers_[256];
+*/
+
 /**
  * Scanner that reads from a UTF-8 encoded list of bytes and creates tokens
  * that points to substrings.
@@ -2518,6 +2697,7 @@ class Utf8BytesScanner : public AbstractScanner<Utf8BytesScanner> {
 TokenWriter ScanUtf8(uint8_t* bytes, size_t length) {
   if (KeywordState::KEYWORD_STATE == nullptr) {
     KeywordState::Init();
+    Utf8BytesScanner::Init();
   }
   Utf8BytesScanner scanner(
       bytes, length, new ScannerConfiguration(/*enableTripleShift=*/true));

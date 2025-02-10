@@ -38,13 +38,15 @@ Token scanWithoutRecovery(Uint8List bytes,
   return scanner.tokenize();
 }
 
+String pct(int i, int n) => '${(i * 100 / n).toStringAsFixed(2)} %';
+
 void main(List<String> args) {
   if (args case ["validate"]) {
     var totalBytes = 0;
-    for (var (idx, data) in inputData.indexed) {
+    for (var (idx, data) in inputData.indexed.take(3600)) {
       final path = fileNames[idx];
       totalBytes += data.bytes.length;
-      print('[$totalBytes] validating $path');
+      print('[${pct(idx, 3600)}] [$totalBytes] validating $path');
       final cppResult =
           Process.runSync('out/ReleaseX64/scanner_benchmark', ['parse', path]);
       if (cppResult.exitCode != 0) {
