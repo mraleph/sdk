@@ -12,6 +12,7 @@ import 'package:kernel/target/targets.dart';
 
 import '../transformations/call_site_annotator.dart' as callSiteAnnotator;
 import '../transformations/deeply_immutable.dart' as deeply_immutable;
+import '../transformations/konst.dart' as konst;
 import '../transformations/lowering.dart' as lowering
     show transformLibraries, transformProcedure;
 import '../transformations/mixin_full_resolution.dart' as transformMixins
@@ -82,6 +83,7 @@ class VmTarget extends Target {
         'dart:ffi',
         'dart:_internal',
         'dart:isolate',
+        'dart:metaprogramming',
         'dart:math',
 
         // The library dart:mirrors may be ignored by the VM, e.g. when built in
@@ -164,6 +166,17 @@ class VmTarget extends Target {
     transformMixins.transformLibraries(
         this, coreTypes, hierarchy, libraries, referenceFromIndex);
     logger?.call("Transformed mixin applications");
+
+    konst.transformLibraries(
+      targetInfo: this,
+      diagnosticReporter: diagnosticReporter,
+      component: component,
+      coreTypes: coreTypes,
+      hierarchy: hierarchy,
+      libraries: libraries,
+      referenceFromIndex: referenceFromIndex,
+    );
+    logger?.call("Transformed konst");
 
     List<Library>? transitiveImportingDartFfi = ffiHelper
         .calculateTransitiveImportsOfDartFfiIfUsed(component, libraries);
@@ -531,5 +544,7 @@ class VmTarget extends Target {
 
   @override
   bool isSupportedPragma(String pragmaName) =>
-      pragmaName.startsWith("vm:") || pragmaName.startsWith("dyn-module:");
+      pragmaName.startsWith("vm:") ||
+      pragmaName.startsWith("dyn-module:") ||
+      super.isSupportedPragma(pragmaName);
 }

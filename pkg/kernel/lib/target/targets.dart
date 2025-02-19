@@ -531,7 +531,7 @@ abstract class Target {
       const DefaultDartLibrarySupport();
 
   /// Should this target-specific pragma be recognized by annotation parsers?
-  bool isSupportedPragma(String pragmaName) => false;
+  bool isSupportedPragma(String pragmaName) => pragmaName == 'konst';
 }
 
 class NoneConstantsBackend extends ConstantsBackend {

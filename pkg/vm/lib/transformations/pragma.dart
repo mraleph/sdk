@@ -32,6 +32,8 @@ const kDynModuleCallablePragmaName = "dyn-module:callable";
 const kDynModuleImplicitlyCallablePragmaName = "dyn-module:implicitly-callable";
 const kDynModuleEntryPointPragmaName = "dyn-module:entry-point";
 
+const kKonstPragmaName = "konst";
+
 abstract class ParsedPragma {}
 
 enum PragmaEntryPointType {
@@ -83,6 +85,10 @@ class ParsedDynModuleEntryPointPragma implements ParsedPragma {
   const ParsedDynModuleEntryPointPragma();
 }
 
+class ParsedKonstPragma implements ParsedPragma {
+  const ParsedKonstPragma();
+}
+
 abstract class PragmaAnnotationParser {
   /// May return 'null' if the annotation does not represent a recognized
   /// @pragma.
@@ -130,6 +136,8 @@ class ConstantPragmaAnnotationParser implements PragmaAnnotationParser {
         pragmaConstant.fieldValues[coreTypes.pragmaOptions.fieldReference]!;
 
     switch (pragmaName) {
+      case kKonstPragmaName:
+        return const ParsedKonstPragma();
       case kVmEntryPointPragmaName:
         PragmaEntryPointType? type;
         if (options is NullConstant) {

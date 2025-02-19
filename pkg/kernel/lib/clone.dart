@@ -7,6 +7,11 @@ library kernel.clone;
 import 'ast.dart';
 import 'type_algebra.dart';
 
+abstract class VariableSubstitution {
+  TreeNode replaceVariableGet(VariableGet node);
+  TreeNode replaceVariableSet(VariableSet node);
+}
+
 /// Visitor that return a clone of a tree, maintaining references to cloned
 /// objects.
 ///
@@ -20,6 +25,8 @@ class CloneVisitorNotMembers implements TreeVisitor<TreeNode> {
   final Map<SwitchCase, SwitchCase> switchCases = <SwitchCase, SwitchCase>{};
   final Map<TypeParameter, DartType> typeSubstitution;
   final Map<TypeParameter, TypeParameter> typeParams;
+  final Set<TypeParameter> shouldDrop;
+  final Map<VariableDeclaration, VariableSubstitution> variableSubstitutions;
   bool cloneAnnotations;
 
   /// Creates an instance of the cloning visitor for Kernel ASTs.
@@ -28,7 +35,10 @@ class CloneVisitorNotMembers implements TreeVisitor<TreeNode> {
   /// outline elements in the source AST should be cloned to the target AST. The
   /// annotations in procedure bodies are cloned unconditionally.
   CloneVisitorNotMembers(
-      {Map<TypeParameter, DartType>? typeSubstitution,
+      {Set<TypeParameter> this.shouldDrop = const {},
+      Map<VariableDeclaration, VariableSubstitution>
+          this.variableSubstitutions = const {},
+      Map<TypeParameter, DartType>? typeSubstitution,
       Map<TypeParameter, TypeParameter>? typeParams,
       Map<StructuralParameter, StructuralParameter>? structuralParameters,
       this.cloneAnnotations = true})
@@ -190,13 +200,20 @@ class CloneVisitorNotMembers implements TreeVisitor<TreeNode> {
 
   @override
   TreeNode visitVariableGet(VariableGet node) {
-    return new VariableGet(
-        getVariableClone(node.variable)!, visitOptionalType(node.promotedType));
+    if (variableSubstitutions[node.variable] case final substitution?) {
+      return substitution.replaceVariableGet(node);
+    }
+    return new VariableGet(getVariableClone(node.variable) ?? node.variable,
+        visitOptionalType(node.promotedType));
   }
 
   @override
   TreeNode visitVariableSet(VariableSet node) {
-    return new VariableSet(getVariableClone(node.variable)!, clone(node.value));
+    if (variableSubstitutions[node.variable] case final substitution?) {
+      return substitution.replaceVariableSet(node);
+    }
+    return new VariableSet(
+        getVariableClone(node.variable) ?? node.variable, clone(node.value));
   }
 
   @override
@@ -623,6 +640,9 @@ class CloneVisitorNotMembers implements TreeVisitor<TreeNode> {
 
   void prepareTypeParameters(List<TypeParameter> typeParameters) {
     for (TypeParameter node in typeParameters) {
+      if (shouldDrop.contains(node)) {
+        continue;
+      }
       TypeParameter? newNode = typeParams[node];
       if (newNode == null) {
         newNode = new TypeParameter(node.name);
@@ -658,8 +678,10 @@ class CloneVisitorNotMembers implements TreeVisitor<TreeNode> {
   @override
   TreeNode visitFunctionNode(FunctionNode node) {
     prepareTypeParameters(node.typeParameters);
-    List<TypeParameter> typeParameters =
-        node.typeParameters.map(clone).toList();
+    List<TypeParameter> typeParameters = node.typeParameters
+        .where((tp) => !shouldDrop.contains(tp))
+        .map(clone)
+        .toList();
     List<VariableDeclaration> positional =
         node.positionalParameters.map(clone).toList();
     List<VariableDeclaration> named = node.namedParameters.map(clone).toList();
@@ -1071,6 +1093,7 @@ class CloneVisitorWithMembers extends CloneVisitorNotMembers {
   CloneVisitorWithMembers(
       {Map<TypeParameter, DartType>? typeSubstitution,
       Map<TypeParameter, TypeParameter>? typeParams,
+      super.shouldDrop,
       bool cloneAnnotations = true})
       : super(
             typeSubstitution: typeSubstitution,

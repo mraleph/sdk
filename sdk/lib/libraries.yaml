@@ -88,6 +88,9 @@ vm_common:
       patches:
         - "_internal/vm/lib/isolate_patch.dart"
 
+    metaprogramming:
+      uri: "metaprogramming/metaprogramming.dart"
+
     math:
       uri: "math/math.dart"
       patches: "_internal/vm/lib/math_patch.dart"

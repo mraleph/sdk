@@ -11515,6 +11515,18 @@ Message _withArgumentsJsInteropStaticInteropWithNonStaticSupertype(
 }
 
 // DO NOT EDIT. THIS FILE IS GENERATED. SEE TOP OF FILE.
+const Code<Null> codeKonstExpressionDoesNotEvaluateToACompileTimeConstant =
+    messageKonstExpressionDoesNotEvaluateToACompileTimeConstant;
+
+// DO NOT EDIT. THIS FILE IS GENERATED. SEE TOP OF FILE.
+const MessageCode messageKonstExpressionDoesNotEvaluateToACompileTimeConstant =
+    const MessageCode(
+  "KonstExpressionDoesNotEvaluateToACompileTimeConstant",
+  problemMessage:
+      r"""Expression does not evaluate to a compile time constant""",
+);
+
+// DO NOT EDIT. THIS FILE IS GENERATED. SEE TOP OF FILE.
 const Template<Message Function(String name)> templateLabelNotFound =
     const Template<Message Function(String name)>(
   "LabelNotFound",
