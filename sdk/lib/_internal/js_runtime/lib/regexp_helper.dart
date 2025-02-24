@@ -96,8 +96,9 @@ class JSSyntaxRegExp implements RegExp {
             } catch (e) {
               return e;
             }
-          })(#, # + # + # + # + #)''',
+          })(#, # + # + # + # + # + #)''',
         source,
+        'd',  // Always request indices.
         m,
         i,
         u,
@@ -228,6 +229,46 @@ class _MatchImplementation implements RegExpMatch {
       return SubListIterable(keys, 0, null);
     }
     return Iterable.empty();
+  }
+
+  List<({int start, int end})?> get captures {
+    var result = List<({int start, int end})?>.filled(_match.length, null);
+    JSExtendableArray indices = JS('JSExtendableArray', '#.indices', _match);
+    for (var i = 0; i <= groupCount; i++) {
+      JSExtendableArray? slice = JS('JSExtendableArray|Null', '#', indices[i]);
+      if (slice != null) {
+        result[i] = (
+          start: JS('int', '#', slice[0]),
+          end: JS('int', '#', slice[1]),
+        );
+      }
+    }
+    return List.unmodifiable(result);
+  }
+
+  Map<String, ({int start, int end})> get namedCaptures {
+    var result = <String, ({int start, int end})>{};
+    var groups = JS('=Object|Null', '#.indices.groups', _match);
+    if (groups != null) {
+      var names = JSArray<String>.markGrowable(
+        JS('returns:JSExtendableArray;new:true', 'Object.keys(#)', groups),
+      );
+      for (var i = 0; i < names.length; i++) {
+        JSExtendableArray? value = JS(
+          'JSExtendableArray|Null',
+          '#[#]',
+          groups,
+          names[i],
+        );
+        if (value != null) {
+          result[names[i]] = (
+            start: JS('int', '#', value[0]),
+            end: JS('int', '#', value[1]),
+          );
+        }
+      }
+    }
+    return Map.unmodifiable(result);
   }
 }
 

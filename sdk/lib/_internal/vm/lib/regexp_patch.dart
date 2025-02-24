@@ -135,7 +135,35 @@ class _RegExpMatch implements RegExpMatch {
     return _regexp._groupNames;
   }
 
-  final RegExp _regexp;
+  List<({int start, int end})?> get captures {
+    final result = List<({int start, int end})?>.filled(groupCount + 1, null);
+    for (var i = 0; i <= groupCount; i++) {
+      if (_start(i) != -1) {
+        result[i] = (start: _start(i), end: _end(i));
+      }
+    }
+    return List.unmodifiable(result);
+  }
+
+  Map<String, ({int start, int end})> get namedCaptures {
+    final nameList = _regexp._groupNameList;
+    final result = <String, ({int start, int end})>{};
+    if (nameList != null) {
+      for (int i = 0; i < nameList.length; i += 2) {
+        final groupName = nameList[i] as String;
+        final groupIdx = nameList[i+1] as int;
+
+        final groupStart = _start(groupIdx);
+        final groupEnd = _end(groupIdx);
+        if (groupStart != -1) {
+          result[groupName] = (start: groupStart, end: groupEnd);
+        }
+      }
+    }
+    return Map.unmodifiable(result);
+  }
+
+  final _RegExp _regexp;
   final String input;
   final List<int> _match;
   static const int _MATCH_PAIR = 2;

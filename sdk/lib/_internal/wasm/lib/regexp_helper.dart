@@ -33,6 +33,30 @@ extension type JSNativeMatch._(JSArray _) implements JSArray {
   external JSNumber get index;
   external JSObject? get groups;
   external JSAny? pop();
+  external JSIndices get indices;
+}
+
+extension type JSIndices._(JSArray _) implements JSArray {
+  external JSObject? get groups;
+}
+
+js_types.JSArrayImpl<JSAny> _namedGroupIndices(JSNativeMatch o) {
+  return js_types.JSArrayImpl<JSAny>(
+    JS<WasmExternRef>(r"""m => {
+    let result = [];
+    if (typeof m.indices !== 'undefined' &&
+        typeof m.indices.groups !== 'undefined') {
+      let groups = m.indices.groups;
+      for (let key of Object.keys(groups)) {
+        let indices = groups[key];
+        if (typeof indices !== 'undefined') {
+          result.push(key, indices[0], indices[1]);
+        }
+      }
+    }
+    return result;
+  }""", o.toExternRef),
+  );
 }
 
 extension type JSNativeRegExp._(JSObject _) implements JSObject {
@@ -117,7 +141,7 @@ class JSSyntaxRegExp implements RegExp {
     String u = unicode ? 'u' : '';
     String s = dotAll ? 's' : '';
     String g = global ? 'g' : '';
-    String modifiers = '$m$i$u$s$g';
+    String modifiers = 'd$m$i$u$s$g';
     // The call to create the regexp is wrapped in a try catch so we can
     // reformat the exception if need be.
     final result = JS<WasmExternRef?>(
@@ -237,6 +261,32 @@ class _MatchImplementation implements RegExpMatch {
       return JSArrayIterableAdapter<String>(objectKeys(groups));
     }
     return Iterable.empty();
+  }
+
+  List<({int start, int end})?> get captures {
+    final result = List<({int start, int end})?>.filled(_match.length, null);
+    for (var i = 0; i <= groupCount; i++) {
+      final slice = _match.indices[i] as JSArray?;
+      if (slice != null) {
+        result[i] = (
+          start: (slice[0] as JSNumber).toDartInt,
+          end: (slice[1] as JSNumber).toDartInt,
+        );
+      }
+    }
+    return List.unmodifiable(result);
+  }
+
+  Map<String, ({int start, int end})> get namedCaptures {
+    final result = <String, ({int start, int end})>{};
+    final groups = _namedGroupIndices(_match);
+    for (var i = 0; i < groups.length; i += 3) {
+      result[(groups[i] as JSString).toDart] = (
+        start: (groups[i + 1] as JSNumber).toDartInt,
+        end: (groups[i + 2] as JSNumber).toDartInt,
+      );
+    }
+    return Map.unmodifiable(result);
   }
 }
 
