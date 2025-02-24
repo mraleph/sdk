@@ -128,7 +128,7 @@ class JSSyntaxRegExp implements RegExp {
           '}'
           '})()',
       source,
-      'd',  // Always request indices.
+      'd', // Always request indices.
       m,
       i,
       u,

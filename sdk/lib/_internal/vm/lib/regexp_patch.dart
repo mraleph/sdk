@@ -151,7 +151,7 @@ class _RegExpMatch implements RegExpMatch {
     if (nameList != null) {
       for (int i = 0; i < nameList.length; i += 2) {
         final groupName = nameList[i] as String;
-        final groupIdx = nameList[i+1] as int;
+        final groupIdx = nameList[i + 1] as int;
 
         final groupStart = _start(groupIdx);
         final groupEnd = _end(groupIdx);
