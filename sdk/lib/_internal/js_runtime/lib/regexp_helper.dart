@@ -171,6 +171,10 @@ class JSSyntaxRegExp implements RegExp {
 
 class _MatchImplementation implements RegExpMatch {
   final RegExp pattern;
+  late final List<({int start, int end})?> captures = _computeCaptures();
+  late final Map<String, ({int start, int end})> namedCaptures =
+      _computeNamedCaptures();
+
   // Contains a JS RegExp match object.
   // It is an Array of String values with extra 'index' and 'input' properties.
   // If there were named capture groups, there will also be an extra 'groups'
@@ -231,8 +235,6 @@ class _MatchImplementation implements RegExpMatch {
     return Iterable.empty();
   }
 
-  late final List<({int start, int end})?> captures = _computeCaptures();
-
   List<({int start, int end})?> _computeCaptures() {
     var result = List<({int start, int end})?>.filled(_match.length, null);
     var indices = JS<JSExtendableArray>(
@@ -255,9 +257,6 @@ class _MatchImplementation implements RegExpMatch {
     }
     return makeFixedListUnmodifiable(result);
   }
-
-  late final Map<String, ({int start, int end})> namedCaptures =
-      _computeNamedCaptures();
 
   Map<String, ({int start, int end})> _computeNamedCaptures() {
     var result = <String, ({int start, int end})>{};

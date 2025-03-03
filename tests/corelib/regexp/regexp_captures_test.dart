@@ -90,6 +90,29 @@ void main() {
       'name': (start: 6, end: 7),
     },
   );
+  checkMatch(
+    r'z(?:ab(?<ab>..))*z',
+    'zabcdabidabbaz',
+    expectedCaptures: [(start: 0, end: 14), (start: 11, end: 13)],
+    expectedNamedCaptures: {'ab': (start: 11, end: 13)},
+  );
+  checkMatch(
+    r'z(?:ab(?<ab>..)|....)*z',
+    'zabcdabidquxiz',
+    expectedCaptures: [(start: 0, end: 14), null],
+    expectedNamedCaptures: {},
+  );
+  checkMatch(
+    r'((?<=ab(?<B>..))....(?=ab(?<A>..)))',
+    'zabcdabidabbaz',
+    expectedCaptures: [
+      (start: 5, end: 9),
+      (start: 5, end: 9),
+      (start: 3, end: 5),
+      (start: 11, end: 13),
+    ],
+    expectedNamedCaptures: {'B': (start: 3, end: 5), 'A': (start: 11, end: 13)},
+  );
 }
 
 final reFactories = [
@@ -108,18 +131,16 @@ void checkMatch(
 }) {
   for (var f in reFactories) {
     final re = f(pattern);
-    checkMatchImpl(
+    _checkMatch(
       re.firstMatch(input)!,
-      input,
       expectedCaptures: expectedCaptures,
       expectedNamedCaptures: expectedNamedCaptures,
     );
     for (var pos = 0; pos < input.length; pos++) {
       final m = re.matchAsPrefix(input.substring(pos));
       if (m is RegExpMatch) {
-        checkMatchImpl(
+        _checkMatch(
           m,
-          input,
           expectedCaptures: [
             for (var capture in expectedCaptures)
               capture == null ? null : translateRange(-pos, capture),
@@ -135,9 +156,8 @@ void checkMatch(
   }
 }
 
-void checkMatchImpl(
-  RegExpMatch match,
-  String input, {
+void _checkMatch(
+  RegExpMatch match, {
   List<({int start, int end})?> expectedCaptures = const [],
   Map<String, ({int start, int end})> expectedNamedCaptures = const {},
 }) {
@@ -153,6 +173,14 @@ void checkMatchImpl(
     } else {
       Expect.isNull(match[i]);
     }
+  }
+
+  for (var MapEntry(key: name, value: capture)
+      in expectedNamedCaptures.entries) {
+    Expect.equals(
+      match.namedGroup(name),
+      match.input.substring(capture.start, capture.end),
+    );
   }
 }
 

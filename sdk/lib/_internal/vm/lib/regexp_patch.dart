@@ -135,8 +135,6 @@ class _RegExpMatch implements RegExpMatch {
     return _regexp._groupNames;
   }
 
-  late final List<({int start, int end})?> captures = _computeCaptures();
-
   List<({int start, int end})?> _computeCaptures() {
     final result = List<({int start, int end})?>.filled(groupCount + 1, null);
     for (var i = 0; i <= groupCount; i++) {
@@ -147,9 +145,6 @@ class _RegExpMatch implements RegExpMatch {
     }
     return makeFixedListUnmodifiable(result);
   }
-
-  late final Map<String, ({int start, int end})> namedCaptures =
-      _computeNamedCaptures();
 
   Map<String, ({int start, int end})> _computeNamedCaptures() {
     final nameList = _regexp._groupNameList;
@@ -171,6 +166,10 @@ class _RegExpMatch implements RegExpMatch {
   final _RegExp _regexp;
   final String input;
   final List<int> _match;
+  late final List<({int start, int end})?> captures = _computeCaptures();
+  late final Map<String, ({int start, int end})> namedCaptures =
+      _computeNamedCaptures();
+
   static const int _MATCH_PAIR = 2;
 }
 
