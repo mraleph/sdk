@@ -263,9 +263,11 @@ class _MatchImplementation implements RegExpMatch {
     return Iterable.empty();
   }
 
-  List<({int start, int end})?> get captures {
+  late final List<({int start, int end})?> captures = _computeCaptures();
+
+  List<({int start, int end})?> _computeCaptures() {
     final result = List<({int start, int end})?>.filled(_match.length, null);
-    for (var i = 0; i <= groupCount; i++) {
+    for (var i = 0; i < _match.length; i++) {
       final slice = _match.indices[i] as JSArray?;
       if (slice != null) {
         result[i] = (
@@ -277,7 +279,10 @@ class _MatchImplementation implements RegExpMatch {
     return List.unmodifiable(result);
   }
 
-  Map<String, ({int start, int end})> get namedCaptures {
+  late final Map<String, ({int start, int end})> namedCaptures =
+      _computeNamedCaptures();
+
+  Map<String, ({int start, int end})> _computeNamedCaptures() {
     final result = <String, ({int start, int end})>{};
     final groups = _namedGroupIndices(_match);
     for (var i = 0; i < groups.length; i += 3) {
@@ -286,7 +291,7 @@ class _MatchImplementation implements RegExpMatch {
         end: (groups[i + 2] as JSNumber).toDartInt,
       );
     }
-    return Map.unmodifiable(result);
+    return UnmodifiableMapView(result);
   }
 }
 

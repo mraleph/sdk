@@ -135,17 +135,23 @@ class _RegExpMatch implements RegExpMatch {
     return _regexp._groupNames;
   }
 
-  List<({int start, int end})?> get captures {
+  late final List<({int start, int end})?> captures = _computeCaptures();
+
+  List<({int start, int end})?> _computeCaptures() {
     final result = List<({int start, int end})?>.filled(groupCount + 1, null);
     for (var i = 0; i <= groupCount; i++) {
-      if (_start(i) != -1) {
-        result[i] = (start: _start(i), end: _end(i));
+      final groupStart = _start(i);
+      if (groupStart != -1) {
+        result[i] = (start: groupStart, end: _end(i));
       }
     }
-    return List.unmodifiable(result);
+    return makeFixedListUnmodifiable(result);
   }
 
-  Map<String, ({int start, int end})> get namedCaptures {
+  late final Map<String, ({int start, int end})> namedCaptures =
+      _computeNamedCaptures();
+
+  Map<String, ({int start, int end})> _computeNamedCaptures() {
     final nameList = _regexp._groupNameList;
     final result = <String, ({int start, int end})>{};
     if (nameList != null) {
@@ -154,13 +160,12 @@ class _RegExpMatch implements RegExpMatch {
         final groupIdx = nameList[i + 1] as int;
 
         final groupStart = _start(groupIdx);
-        final groupEnd = _end(groupIdx);
         if (groupStart != -1) {
-          result[groupName] = (start: groupStart, end: groupEnd);
+          result[groupName] = (start: groupStart, end: _end(groupIdx));
         }
       }
     }
-    return Map.unmodifiable(result);
+    return UnmodifiableMapView(result);
   }
 
   final _RegExp _regexp;

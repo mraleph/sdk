@@ -485,7 +485,7 @@ abstract interface class RegExpMatch implements Match {
 
   /// The capture groups of this match.
   ///
-  /// An unmodifiable list of slices for each capture group of this
+  /// An unmodifiable list of ranges for each capture group of this
   /// regular expression which participated in the match.
   ///
   /// The list has length [groupCount] + 1, and has an entry for each
@@ -496,17 +496,12 @@ abstract interface class RegExpMatch implements Match {
   /// the entire match.
   List<({int start, int end})?> get captures;
 
-  /// The named capture groups of this match.
+  /// The participating named capture groups of this match.
   ///
-  /// An unmodifiable map containing slices for each named capture group
-  /// of this regular expression which participated in the match.
-  ///
-  /// The list has length [groupCount] + 1, and has an entry for each
-  /// capture group of the regular expression, plus an entry for the
-  /// entire match, treated as capture group zero.
-  ///
-  /// The entry for a capture is `null` if the capture did not participate in
-  /// the entire match.
+  /// An unmodifiable map containing an entry for each named capture group
+  /// of this regular expression which participated in the match. The
+  /// key of the entry is the name of the group and the value is the start
+  /// and end position of the group.
   Map<String, ({int start, int end})> get namedCaptures;
 
   RegExp get pattern;

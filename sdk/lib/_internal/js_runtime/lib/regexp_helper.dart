@@ -231,30 +231,47 @@ class _MatchImplementation implements RegExpMatch {
     return Iterable.empty();
   }
 
-  List<({int start, int end})?> get captures {
+  late final List<({int start, int end})?> captures = _computeCaptures();
+
+  List<({int start, int end})?> _computeCaptures() {
     var result = List<({int start, int end})?>.filled(_match.length, null);
-    JSExtendableArray indices = JS('JSExtendableArray', '#.indices', _match);
+    var indices = JS<JSExtendableArray>(
+      'JSExtendableArray',
+      '#.indices',
+      _match,
+    );
     for (var i = 0; i <= groupCount; i++) {
-      JSExtendableArray? slice = JS('JSExtendableArray|Null', '#', indices[i]);
+      var slice = JS<JSExtendableArray?>(
+        'JSExtendableArray|Null',
+        '#',
+        indices[i],
+      );
       if (slice != null) {
         result[i] = (
-          start: JS('int', '#', slice[0]),
-          end: JS('int', '#', slice[1]),
+          start: JS<int>('int', '#', slice[0]),
+          end: JS<int>('int', '#', slice[1]),
         );
       }
     }
-    return List.unmodifiable(result);
+    return makeFixedListUnmodifiable(result);
   }
 
-  Map<String, ({int start, int end})> get namedCaptures {
+  late final Map<String, ({int start, int end})> namedCaptures =
+      _computeNamedCaptures();
+
+  Map<String, ({int start, int end})> _computeNamedCaptures() {
     var result = <String, ({int start, int end})>{};
-    var groups = JS('=Object|Null', '#.indices.groups', _match);
+    var groups = JS<Object?>('=Object|Null', '#.indices.groups', _match);
     if (groups != null) {
       var names = JSArray<String>.markGrowable(
-        JS('returns:JSExtendableArray;new:true', 'Object.keys(#)', groups),
+        JS<JSExtendableArray>(
+          'returns:JSExtendableArray;new:true',
+          'Object.keys(#)',
+          groups,
+        ),
       );
       for (var i = 0; i < names.length; i++) {
-        JSExtendableArray? value = JS(
+        var value = JS<JSExtendableArray?>(
           'JSExtendableArray|Null',
           '#[#]',
           groups,
@@ -262,13 +279,13 @@ class _MatchImplementation implements RegExpMatch {
         );
         if (value != null) {
           result[names[i]] = (
-            start: JS('int', '#', value[0]),
-            end: JS('int', '#', value[1]),
+            start: JS<int>('int', '#', value[0]),
+            end: JS<int>('int', '#', value[1]),
           );
         }
       }
     }
-    return Map.unmodifiable(result);
+    return UnmodifiableMapView(result);
   }
 }
 

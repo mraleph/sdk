@@ -18,6 +18,7 @@ import 'dart:_internal'
         MappedIterable,
         IterableElementError,
         SubListIterable,
+        makeFixedListUnmodifiable,
         patch;
 
 import 'dart:_native_typed_data';

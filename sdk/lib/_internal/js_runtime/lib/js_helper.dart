@@ -54,6 +54,7 @@ import 'dart:_internal' as _symbol_dev;
 import 'dart:_internal'
     show
         checkNotNullable,
+        makeFixedListUnmodifiable,
         EfficientLengthIterable,
         HideEfficientLengthIterable,
         MappedIterable,

@@ -11,6 +11,7 @@ import 'dart:_js_annotations' as js;
 import 'dart:_js_types' as js_types;
 import 'dart:_string';
 import 'dart:_wasm';
+import 'dart:collection' show UnmodifiableMapView;
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 import 'dart:typed_data';

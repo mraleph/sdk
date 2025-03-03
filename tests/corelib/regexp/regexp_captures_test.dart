@@ -5,8 +5,35 @@
 import "package:expect/expect.dart";
 
 void main() {
+  checkMatch(r'abc', 'xxxabcxxx', expectedCaptures: [(start: 3, end: 6)]);
+
   checkMatch(
-    r'(?:(?<=[^\\])|^){{(\w*)}}',
+    r'abc|(d.*)',
+    'xxxabcxxx',
+    expectedCaptures: [(start: 3, end: 6), null],
+  );
+
+  checkMatch(
+    r'(?<foo>d.*)|abc',
+    'xxxabcxxx',
+    expectedCaptures: [(start: 3, end: 6), null],
+    expectedNamedCaptures: {},
+  );
+
+  checkMatch(
+    r'(?:(?:(\d+)|(\w+)),)+',
+    '--- aaa,111,bbb,222,---',
+    expectedCaptures: [(start: 4, end: 20), (start: 16, end: 19), null],
+  );
+
+  checkMatch(
+    r'(?:(?:(\d+)|(\w+)),)+',
+    '--- aaa,111,222,bbb,---',
+    expectedCaptures: [(start: 4, end: 20), null, (start: 16, end: 19)],
+  );
+
+  checkMatch(
+    r'(?<!\\)\{\{(\w*)\}\}',
     'A captured word I {{capture}}',
     expectedCaptures: [(start: 18, end: 29), (start: 20, end: 27)],
   );
@@ -65,22 +92,72 @@ void main() {
   );
 }
 
+final reFactories = [
+  (pattern) => RegExp(pattern),
+  (pattern) => RegExp(pattern, multiLine: true),
+  (pattern) => RegExp(pattern, caseSensitive: false),
+  (pattern) => RegExp(pattern, unicode: true),
+  (pattern) => RegExp(pattern, dotAll: true),
+];
+
 void checkMatch(
-  String re,
+  String pattern,
   String input, {
   List<({int start, int end})?> expectedCaptures = const [],
   Map<String, ({int start, int end})> expectedNamedCaptures = const {},
 }) {
-  final match = RegExp(re).firstMatch(input)!;
-  print(match.captures);
-  print(match.namedCaptures);
-  Expect.equals(expectedCaptures.length, match.captures.length);
-  for (var (i, expected) in expectedCaptures.indexed) {
-    Expect.equals(expected, match.captures[i]);
+  for (var f in reFactories) {
+    final re = f(pattern);
+    checkMatchImpl(
+      re.firstMatch(input)!,
+      input,
+      expectedCaptures: expectedCaptures,
+      expectedNamedCaptures: expectedNamedCaptures,
+    );
+    for (var pos = 0; pos < input.length; pos++) {
+      final m = re.matchAsPrefix(input.substring(pos));
+      if (m is RegExpMatch) {
+        checkMatchImpl(
+          m,
+          input,
+          expectedCaptures: [
+            for (var capture in expectedCaptures)
+              capture == null ? null : translateRange(-pos, capture),
+          ],
+          expectedNamedCaptures: {
+            for (var e in expectedNamedCaptures.entries)
+              e.key: translateRange(-pos, e.value),
+          },
+        );
+        break;
+      }
+    }
   }
-  for (final MapEntry(key: name, value: expected)
-      in expectedNamedCaptures.entries) {
-    Expect.equals(expected, match.namedCaptures[name]);
+}
+
+void checkMatchImpl(
+  RegExpMatch match,
+  String input, {
+  List<({int start, int end})?> expectedCaptures = const [],
+  Map<String, ({int start, int end})> expectedNamedCaptures = const {},
+}) {
+  Expect.listEquals(expectedCaptures, match.captures);
+  Expect.mapEquals(expectedNamedCaptures, match.namedCaptures);
+
+  for (var (i, capture) in match.captures.indexed) {
+    if (capture != null) {
+      Expect.equals(
+        match[i],
+        match.input.substring(capture.start, capture.end),
+      );
+    } else {
+      Expect.isNull(match[i]);
+    }
   }
-  Expect.equals(expectedNamedCaptures.length, match.namedCaptures.length);
+}
+
+typedef StringRange = ({int start, int end});
+
+StringRange translateRange(int diff, StringRange range) {
+  return (start: range.start + diff, end: range.end + diff);
 }
