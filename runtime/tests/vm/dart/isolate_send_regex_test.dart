@@ -9,7 +9,7 @@ import 'package:expect/expect.dart';
 f(List args) {
   final sendPort = args[0] as SendPort;
   final re = args[1] as RegExp;
-  Expect.stringEquals("RegExp: pattern=abc flags=", re.toString());
+  Expect.stringEquals("RegExp: pattern=abc flags=g", re.toString());
   sendPort.send(true);
 }
 
