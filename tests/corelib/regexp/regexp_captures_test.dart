@@ -7,8 +7,12 @@ import "package:expect/expect.dart";
 void main() {
   Expect.throws(() => RegExp(r'a').firstMatch('a')!.capture(0));
   Expect.throws(() => RegExp(r'(?<a>a)').firstMatch('a')!.namedCapture('a'));
-  Expect.throws(() => RegExp(r'(a)', indices: true).firstMatch('a')!.capture(2));
-  Expect.throws(() => RegExp(r'(?<a>a)', indices: true).firstMatch('a')!.namedCapture('b'));
+  Expect.throws(
+    () => RegExp(r'(a)', indices: true).firstMatch('a')!.capture(2),
+  );
+  Expect.throws(
+    () => RegExp(r'(?<a>a)', indices: true).firstMatch('a')!.namedCapture('b'),
+  );
 
   checkMatch(r'abc', 'xxxabcxxx', expectedCaptures: [(start: 3, end: 6)]);
 
@@ -202,7 +206,6 @@ extension on RegExpMatch {
 
   Map<String, StringRange> get namedCaptures => {
     for (var name in groupNames)
-      if (namedCapture(name) case final range?)
-        name: range,
+      if (namedCapture(name) case final range?) name: range,
   };
 }

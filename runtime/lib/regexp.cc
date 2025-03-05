@@ -109,7 +109,6 @@ DEFINE_NATIVE_ENTRY(RegExp_getHasIndices, 0, 1) {
   return Bool::Get(regexp.flags().HasIndices()).ptr();
 }
 
-
 DEFINE_NATIVE_ENTRY(RegExp_getIsCaseSensitive, 0, 1) {
   const RegExp& regexp = RegExp::CheckedHandle(zone, arguments->NativeArgAt(0));
   ASSERT(!regexp.IsNull());

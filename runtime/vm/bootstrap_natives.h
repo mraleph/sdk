@@ -107,7 +107,7 @@ namespace dart {
   V(RegExp_getIsCaseSensitive, 1)                                              \
   V(RegExp_getIsUnicode, 1)                                                    \
   V(RegExp_getIsDotAll, 1)                                                     \
-  V(RegExp_getHasIndices, 1) \
+  V(RegExp_getHasIndices, 1)                                                   \
   V(RegExp_getGroupCount, 1)                                                   \
   V(RegExp_getGroupNameMap, 1)                                                 \
   V(RegExp_ExecuteMatch, 3)                                                    \

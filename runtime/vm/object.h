@@ -12773,38 +12773,36 @@ class SuspendState : public Instance {
   friend class Interpreter;
 };
 
-#define REGEXP_FLAG_LIST(V) \
-  V(IsGlobal, g) \
-  V(IgnoreCase, i) \
-  V(IsMultiLine, m) \
-  V(IsUnicode, u) \
-  V(IsDotAll, s) \
+#define REGEXP_FLAG_LIST(V)                                                    \
+  V(IsGlobal, g)                                                               \
+  V(IgnoreCase, i)                                                             \
+  V(IsMultiLine, m)                                                            \
+  V(IsUnicode, u)                                                              \
+  V(IsDotAll, s)                                                               \
   V(HasIndices, d)
 
 class RegExpFlags {
  private:
 #define DECLARE_REGEXP_FLAG_BIT(Name, letter) k##Name##Bit,
-  enum {
-REGEXP_FLAG_LIST(DECLARE_REGEXP_FLAG_BIT)
-  };
+  enum { REGEXP_FLAG_LIST(DECLARE_REGEXP_FLAG_BIT) };
 #undef DECLARE_REGEXP_FLAG_BIT
 
  public:
   static constexpr int8_t kDefaultFlags = 0;
 
 #define COUNT_REGEXP_FLAG_BIT(Name, letter) +1
-  static constexpr intptr_t kNumBits = 0 REGEXP_FLAG_LIST(COUNT_REGEXP_FLAG_BIT);
+  static constexpr intptr_t kNumBits =
+      0 REGEXP_FLAG_LIST(COUNT_REGEXP_FLAG_BIT);
 #undef COUNT_REGEXP_FLAG_BIT
-
 
   RegExpFlags() : value_(kDefaultFlags) {}
   explicit RegExpFlags(int8_t value) : value_(value) {}
 
-#define DEFINE_REGEXP_FLAG_ACCESSORS(Name, flag) \
-  bool Name() const { return (value_ & (1 << k##Name##Bit)) != 0; } \
+#define DEFINE_REGEXP_FLAG_ACCESSORS(Name, flag)                               \
+  bool Name() const { return (value_ & (1 << k##Name##Bit)) != 0; }            \
   void Set##Name() { value_ |= 1 << k##Name##Bit; }
 
-REGEXP_FLAG_LIST(DEFINE_REGEXP_FLAG_ACCESSORS)
+  REGEXP_FLAG_LIST(DEFINE_REGEXP_FLAG_ACCESSORS)
 
 #undef DEFINE_REGEXP_FLAG_ACCESSORS
 
@@ -12846,10 +12844,8 @@ class RegExp : public Instance {
 
   // The portion of the bitfield container that contains all the above
   // bool bits, which is passed to the constructor for RegExFlags.
-  using FlagsBits = BitField<int8_t,
-                             int8_t,
-                             TypeBits::kNextBit,
-                             RegExpFlags::kNumBits>;
+  using FlagsBits =
+      BitField<int8_t, int8_t, TypeBits::kNextBit, RegExpFlags::kNumBits>;
 
   bool is_initialized() const { return (type() != kUninitialized); }
   bool is_simple() const { return (type() == kSimple); }

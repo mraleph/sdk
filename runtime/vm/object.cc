@@ -27314,7 +27314,9 @@ RegExpPtr RegExp::New(Zone* zone, Heap::Space space) {
 const char* RegExpFlags::ToCString() const {
 #define REGEXP_FLAG_FORMAT_SPECIFIER(Name, letter) "%s"
 #define REGEXP_FLAG_VALUE(Name, letter) , (Name() ? #letter : "")
-  return OS::SCreate(Thread::Current()->zone(), REGEXP_FLAG_LIST(REGEXP_FLAG_FORMAT_SPECIFIER) REGEXP_FLAG_LIST(REGEXP_FLAG_VALUE));
+  return OS::SCreate(Thread::Current()->zone(),
+                     REGEXP_FLAG_LIST(REGEXP_FLAG_FORMAT_SPECIFIER)
+                         REGEXP_FLAG_LIST(REGEXP_FLAG_VALUE));
 #undef REGEXP_FLAG_VALUE
 #undef REGEXP_FLAG_FORMAT_SPECIFIER
 }
