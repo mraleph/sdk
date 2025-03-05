@@ -120,7 +120,7 @@ class JSSyntaxRegExp implements RegExp {
     String i = caseSensitive ? '' : 'i';
     String u = unicode ? 'u' : '';
     String s = dotAll ? 's' : '';
-    String d = indices ? 'd': '';
+    String d = indices ? 'd' : '';
     String g = global ? 'g' : '';
     // We're using the JavaScript's try catch instead of the Dart one
     // to avoid dragging in Dart runtime support just because of using
@@ -308,7 +308,7 @@ class _MatchImplementation implements RegExpMatch {
         );
       }
       if (JS<bool>('!', '# in #', name, groups)) {
-        return null;  // Valid group name but not matched.
+        return null; // Valid group name but not matched.
       }
     }
     throw ArgumentError.value(name, "name", "Not a capture group name");
