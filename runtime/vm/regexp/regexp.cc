@@ -5577,12 +5577,12 @@ RegExpPtr RegExpEngine::CreateRegExp(Thread* thread,
   const RegExp& regexp = RegExp::Handle(RegExp::New(zone));
 
   regexp.set_pattern(pattern);
+  flags.SetIsGlobal();  // All dart regexps are global.
   regexp.set_flags(flags);
 
   // TODO(zerny): We might want to use normal string searching algorithms
   // for simple patterns.
   regexp.set_is_complex();
-  regexp.set_is_global();  // All dart regexps are global.
 
   if (!FLAG_interpret_irregexp) {
     const Library& lib = Library::Handle(zone, Library::CoreLibrary());

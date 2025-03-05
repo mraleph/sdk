@@ -231,6 +231,10 @@ abstract interface class RegExp implements Pattern {
   /// If your code enables `unicode`, then Dart treats the pattern as a
   /// Unicode pattern per the ECMAScript standard.
   ///
+  /// If your code enables `indices`, then the `RegExpMatch` object produced
+  /// by a match will contain position information for each capture group. See
+  /// [RegExpMatch.capture] and [RegExpMatch.namedCapture].
+  ///
   /// If your code enables `dotAll`, then the `.` pattern will match _all_
   /// characters, including line terminators.
   ///
@@ -273,6 +277,7 @@ abstract interface class RegExp implements Pattern {
     bool caseSensitive = true,
     bool unicode = false,
     bool dotAll = false,
+    bool indices = false,
   });
 
   /// Creates regular expression syntax that matches the input [text].
@@ -426,6 +431,12 @@ abstract interface class RegExp implements Pattern {
   /// of different pattern characters, so they can be used together or
   /// separately.
   bool get isDotAll;
+
+  /// Whether matching this regexp will produce ranges of capture groups.
+  ///
+  /// When false accessing [RegExpMatch.capture] and [RegExpMatch.namedCapture]
+  /// throws [ArgumentError].
+  bool get hasIndices;
 }
 
 /// A regular expression match.
@@ -483,26 +494,23 @@ abstract interface class RegExpMatch implements Match {
   /// The names of the named capture groups of [pattern].
   Iterable<String> get groupNames;
 
-  /// The capture groups of this match.
+  /// The range corresponding to the given capture [group].
   ///
-  /// An unmodifiable list of ranges for each capture group of this
-  /// regular expression which participated in the match.
-  ///
-  /// The list has length [groupCount] + 1, and has an entry for each
-  /// capture group of the regular expression, plus an entry for the
-  /// entire match, treated as capture group zero.
-  ///
-  /// The entry for a capture is `null` if the capture did not participate in
+  /// Returns `null` if the group did not participate in
   /// the entire match.
-  List<({int start, int end})?> get captures;
-
-  /// The participating named capture groups of this match.
   ///
-  /// An unmodifiable map containing an entry for each named capture group
-  /// of this regular expression which participated in the match. The
-  /// key of the entry is the name of the group and the value is the start
-  /// and end position of the group.
-  Map<String, ({int start, int end})> get namedCaptures;
+  /// [pattern] must have been constructed with [indices] set to `true` and
+  /// [group] must be a valid group index.
+  ({int start, int end})? capture(int group);
+
+  /// The range corresponding to the named capture group [name].
+  ///
+  /// Returns `null` if the group did not participate in
+  /// the entire match.
+  ///
+  /// [pattern] must have been constructed with [indices] set to `true` and
+  /// the name must be in [groupNames].
+  ({int start, int end})? namedCapture(String name);
 
   RegExp get pattern;
 }

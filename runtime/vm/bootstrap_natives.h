@@ -101,12 +101,13 @@ namespace dart {
   V(Double_toStringAsExponential, 2)                                           \
   V(Double_toStringAsPrecision, 2)                                             \
   V(Double_flipSignBit, 1)                                                     \
-  V(RegExp_factory, 6)                                                         \
+  V(RegExp_factory, 7)                                                         \
   V(RegExp_getPattern, 1)                                                      \
   V(RegExp_getIsMultiLine, 1)                                                  \
   V(RegExp_getIsCaseSensitive, 1)                                              \
   V(RegExp_getIsUnicode, 1)                                                    \
   V(RegExp_getIsDotAll, 1)                                                     \
+  V(RegExp_getHasIndices, 1) \
   V(RegExp_getGroupCount, 1)                                                   \
   V(RegExp_getGroupNameMap, 1)                                                 \
   V(RegExp_ExecuteMatch, 3)                                                    \

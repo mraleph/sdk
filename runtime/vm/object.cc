@@ -27312,41 +27312,11 @@ RegExpPtr RegExp::New(Zone* zone, Heap::Space space) {
 }
 
 const char* RegExpFlags::ToCString() const {
-  switch (value_ & ~kGlobal) {
-    case kIgnoreCase | kMultiLine | kDotAll | kUnicode:
-      return "imsu";
-    case kIgnoreCase | kMultiLine | kDotAll:
-      return "ims";
-    case kIgnoreCase | kMultiLine | kUnicode:
-      return "imu";
-    case kIgnoreCase | kUnicode | kDotAll:
-      return "ius";
-    case kMultiLine | kDotAll | kUnicode:
-      return "msu";
-    case kIgnoreCase | kMultiLine:
-      return "im";
-    case kIgnoreCase | kDotAll:
-      return "is";
-    case kIgnoreCase | kUnicode:
-      return "iu";
-    case kMultiLine | kDotAll:
-      return "ms";
-    case kMultiLine | kUnicode:
-      return "mu";
-    case kDotAll | kUnicode:
-      return "su";
-    case kIgnoreCase:
-      return "i";
-    case kMultiLine:
-      return "m";
-    case kDotAll:
-      return "s";
-    case kUnicode:
-      return "u";
-    default:
-      break;
-  }
-  return "";
+#define REGEXP_FLAG_FORMAT_SPECIFIER(Name, letter) "%s"
+#define REGEXP_FLAG_VALUE(Name, letter) , (Name() ? #letter : "")
+  return OS::SCreate(Thread::Current()->zone(), REGEXP_FLAG_LIST(REGEXP_FLAG_FORMAT_SPECIFIER) REGEXP_FLAG_LIST(REGEXP_FLAG_VALUE));
+#undef REGEXP_FLAG_VALUE
+#undef REGEXP_FLAG_FORMAT_SPECIFIER
 }
 
 bool RegExp::CanonicalizeEquals(const Instance& other) const {

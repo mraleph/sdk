@@ -13,12 +13,14 @@ class RegExp {
     bool caseSensitive = true,
     bool unicode = false,
     bool dotAll = false,
+    bool indices = false,
   }) => JSSyntaxRegExp(
     source,
     multiLine: multiLine,
     caseSensitive: caseSensitive,
     unicode: unicode,
     dotAll: dotAll,
+    indices: indices,
   );
 
   @patch

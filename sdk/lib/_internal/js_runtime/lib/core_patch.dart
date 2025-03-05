@@ -488,12 +488,14 @@ class RegExp {
           {bool multiLine = false,
           bool caseSensitive = true,
           bool unicode = false,
-          bool dotAll = false}) =>
+          bool dotAll = false,
+          bool indices = false}) =>
       JSSyntaxRegExp(source,
           multiLine: multiLine,
           caseSensitive: caseSensitive,
           unicode: unicode,
-          dotAll: dotAll);
+          dotAll: dotAll,
+          indices: indices);
 
   @patch
   static String escape(String text) => quoteStringForRegExp(text);

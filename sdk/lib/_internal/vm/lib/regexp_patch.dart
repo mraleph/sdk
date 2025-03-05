@@ -13,13 +13,15 @@ class RegExp {
     bool caseSensitive = true,
     bool unicode = false,
     bool dotAll = false,
+    bool indices = false,
   }) {
     return new _RegExp(
       source,
-      multiLine: multiLine,
-      caseSensitive: caseSensitive,
-      unicode: unicode,
-      dotAll: dotAll,
+      multiLine,
+      caseSensitive,
+      unicode,
+      dotAll,
+      indices,
     );
   }
 
@@ -126,7 +128,7 @@ class _RegExpMatch implements RegExpMatch {
   String? namedGroup(String name) {
     var idx = _regexp._groupNameIndex(name);
     if (idx < 0) {
-      throw ArgumentError("Not a capture group name: ${name}");
+      throw ArgumentError.value(name, 'name', 'Not a capture group name');
     }
     return group(idx);
   }
@@ -135,41 +137,33 @@ class _RegExpMatch implements RegExpMatch {
     return _regexp._groupNames;
   }
 
-  List<({int start, int end})?> _computeCaptures() {
-    final result = List<({int start, int end})?>.filled(groupCount + 1, null);
-    for (var i = 0; i <= groupCount; i++) {
-      final groupStart = _start(i);
-      if (groupStart != -1) {
-        result[i] = (start: groupStart, end: _end(i));
-      }
+  ({int start, int end})? capture(int group) {
+    if (!_regexp.hasIndices) {
+      throw StateError("$pattern was not constructed with indices set to true");
     }
-    return makeFixedListUnmodifiable(result);
+    IndexError.check(group, groupCount + 1, name: "group");
+
+    final groupStart = _start(group);
+    if (groupStart == -1) {
+      return null;
+    }
+    return (start: groupStart, end: _end(group));
   }
 
-  Map<String, ({int start, int end})> _computeNamedCaptures() {
-    final nameList = _regexp._groupNameList;
-    final result = <String, ({int start, int end})>{};
-    if (nameList != null) {
-      for (int i = 0; i < nameList.length; i += 2) {
-        final groupName = nameList[i] as String;
-        final groupIdx = nameList[i + 1] as int;
-
-        final groupStart = _start(groupIdx);
-        if (groupStart != -1) {
-          result[groupName] = (start: groupStart, end: _end(groupIdx));
-        }
-      }
+  ({int start, int end})? namedCapture(String name) {
+    if (!_regexp.hasIndices) {
+      throw StateError("$pattern was not constructed with indices set to true");
     }
-    return UnmodifiableMapView(result);
+    var idx = _regexp._groupNameIndex(name);
+    if (idx < 0) {
+      throw ArgumentError.value(name, 'name', 'Not a capture group name');
+    }
+    return capture(idx);
   }
 
   final _RegExp _regexp;
   final String input;
   final List<int> _match;
-  late final List<({int start, int end})?> captures = _computeCaptures();
-  late final Map<String, ({int start, int end})> namedCaptures =
-      _computeNamedCaptures();
-
   static const int _MATCH_PAIR = 2;
 }
 
@@ -179,12 +173,13 @@ const _initialBacktrackingStackSize = 128;
 class _RegExp implements RegExp {
   @pragma("vm:external-name", "RegExp_factory")
   external factory _RegExp(
-    String pattern, {
-    bool multiLine = false,
-    bool caseSensitive = true,
-    bool unicode = false,
-    bool dotAll = false,
-  });
+    String pattern,
+    bool multiLine,
+    bool caseSensitive,
+    bool unicode,
+    bool dotAll,
+    bool indices,
+  );
 
   RegExpMatch? firstMatch(String input) {
     // TODO: Remove these null checks once all code is opted into strong nonnullable mode.
@@ -249,6 +244,9 @@ class _RegExp implements RegExp {
 
   @pragma("vm:external-name", "RegExp_getIsDotAll")
   external bool get isDotAll;
+
+  @pragma("vm:external-name", "RegExp_getHasIndices")
+  external bool get hasIndices;
 
   @pragma("vm:external-name", "RegExp_getGroupCount")
   external int get _groupCount;

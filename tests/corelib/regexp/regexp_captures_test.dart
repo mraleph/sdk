@@ -5,6 +5,11 @@
 import "package:expect/expect.dart";
 
 void main() {
+  Expect.throws(() => RegExp(r'a').firstMatch('a')!.capture(0));
+  Expect.throws(() => RegExp(r'(?<a>a)').firstMatch('a')!.namedCapture('a'));
+  Expect.throws(() => RegExp(r'(a)', indices: true).firstMatch('a')!.capture(2));
+  Expect.throws(() => RegExp(r'(?<a>a)', indices: true).firstMatch('a')!.namedCapture('b'));
+
   checkMatch(r'abc', 'xxxabcxxx', expectedCaptures: [(start: 3, end: 6)]);
 
   checkMatch(
@@ -116,11 +121,11 @@ void main() {
 }
 
 final reFactories = [
-  (pattern) => RegExp(pattern),
-  (pattern) => RegExp(pattern, multiLine: true),
-  (pattern) => RegExp(pattern, caseSensitive: false),
-  (pattern) => RegExp(pattern, unicode: true),
-  (pattern) => RegExp(pattern, dotAll: true),
+  (pattern) => RegExp(pattern, indices: true),
+  (pattern) => RegExp(pattern, indices: true, multiLine: true),
+  (pattern) => RegExp(pattern, indices: true, caseSensitive: false),
+  (pattern) => RegExp(pattern, indices: true, unicode: true),
+  (pattern) => RegExp(pattern, indices: true, dotAll: true),
 ];
 
 void checkMatch(
@@ -188,4 +193,16 @@ typedef StringRange = ({int start, int end});
 
 StringRange translateRange(int diff, StringRange range) {
   return (start: range.start + diff, end: range.end + diff);
+}
+
+extension on RegExpMatch {
+  List<StringRange?> get captures => [
+    for (var i = 0; i <= groupCount; i++) capture(i),
+  ];
+
+  Map<String, StringRange> get namedCaptures => {
+    for (var name in groupNames)
+      if (namedCapture(name) case final range?)
+        name: range,
+  };
 }

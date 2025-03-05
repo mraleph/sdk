@@ -12773,43 +12773,46 @@ class SuspendState : public Instance {
   friend class Interpreter;
 };
 
-class RegExpFlags {
- public:
-  // Flags are passed to a regex object as follows:
-  // 'i': ignore case, 'g': do global matches, 'm': pattern is multi line,
-  // 'u': pattern is full Unicode, not just BMP, 's': '.' in pattern matches
-  // all characters including line terminators.
-  enum Flags {
-    kNone = 0,
-    kGlobal = 1,
-    kIgnoreCase = 2,
-    kMultiLine = 4,
-    kUnicode = 8,
-    kDotAll = 16,
-  };
+#define REGEXP_FLAG_LIST(V) \
+  V(IsGlobal, g) \
+  V(IgnoreCase, i) \
+  V(IsMultiLine, m) \
+  V(IsUnicode, u) \
+  V(IsDotAll, s) \
+  V(HasIndices, d)
 
-  static constexpr int kDefaultFlags = 0;
+class RegExpFlags {
+ private:
+#define DECLARE_REGEXP_FLAG_BIT(Name, letter) k##Name##Bit,
+  enum {
+REGEXP_FLAG_LIST(DECLARE_REGEXP_FLAG_BIT)
+  };
+#undef DECLARE_REGEXP_FLAG_BIT
+
+ public:
+  static constexpr int8_t kDefaultFlags = 0;
+
+#define COUNT_REGEXP_FLAG_BIT(Name, letter) +1
+  static constexpr intptr_t kNumBits = 0 REGEXP_FLAG_LIST(COUNT_REGEXP_FLAG_BIT);
+#undef COUNT_REGEXP_FLAG_BIT
+
 
   RegExpFlags() : value_(kDefaultFlags) {}
-  explicit RegExpFlags(int value) : value_(value) {}
+  explicit RegExpFlags(int8_t value) : value_(value) {}
 
-  inline bool IsGlobal() const { return (value_ & kGlobal) != 0; }
-  inline bool IgnoreCase() const { return (value_ & kIgnoreCase) != 0; }
-  inline bool IsMultiLine() const { return (value_ & kMultiLine) != 0; }
-  inline bool IsUnicode() const { return (value_ & kUnicode) != 0; }
-  inline bool IsDotAll() const { return (value_ & kDotAll) != 0; }
+#define DEFINE_REGEXP_FLAG_ACCESSORS(Name, flag) \
+  bool Name() const { return (value_ & (1 << k##Name##Bit)) != 0; } \
+  void Set##Name() { value_ |= 1 << k##Name##Bit; }
+
+REGEXP_FLAG_LIST(DEFINE_REGEXP_FLAG_ACCESSORS)
+
+#undef DEFINE_REGEXP_FLAG_ACCESSORS
 
   inline bool NeedsUnicodeCaseEquivalents() {
     // Both unicode and ignore_case flags are set. We need to use ICU to find
     // the closure over case equivalents.
     return IsUnicode() && IgnoreCase();
   }
-
-  void SetGlobal() { value_ |= kGlobal; }
-  void SetIgnoreCase() { value_ |= kIgnoreCase; }
-  void SetMultiLine() { value_ |= kMultiLine; }
-  void SetUnicode() { value_ |= kUnicode; }
-  void SetDotAll() { value_ |= kDotAll; }
 
   const char* ToCString() const;
 
@@ -12823,7 +12826,7 @@ class RegExpFlags {
   }
 
  private:
-  int value_;
+  int8_t value_;
 };
 
 // Internal JavaScript regular expression object.
@@ -12841,19 +12844,12 @@ class RegExp : public Instance {
 
   using TypeBits = BitField<int8_t, RegExType, 0, 2>;
 
-  // Must be kept in sync with RegExFlags::Flags.
-  using GlobalBit = BitField<int8_t, bool, TypeBits::kNextBit>;
-  using IgnoreCaseBit = BitField<int8_t, bool, GlobalBit::kNextBit>;
-  using MultiLineBit = BitField<int8_t, bool, IgnoreCaseBit::kNextBit>;
-  using UnicodeBit = BitField<int8_t, bool, MultiLineBit::kNextBit>;
-  using DotAllBit = BitField<int8_t, bool, UnicodeBit::kNextBit>;
-
   // The portion of the bitfield container that contains all the above
   // bool bits, which is passed to the constructor for RegExFlags.
   using FlagsBits = BitField<int8_t,
                              int8_t,
                              TypeBits::kNextBit,
-                             DotAllBit::kNextBit - TypeBits::kNextBit>;
+                             RegExpFlags::kNumBits>;
 
   bool is_initialized() const { return (type() != kUninitialized); }
   bool is_simple() const { return (type() == kSimple); }
@@ -12935,21 +12931,6 @@ class RegExp : public Instance {
   void set_num_bracket_expressions(const Smi& value) const;
   void set_num_bracket_expressions(intptr_t value) const;
   void set_capture_name_map(const Array& array) const;
-  void set_is_global() const {
-    untag()->type_flags_.UpdateBool<GlobalBit>(true);
-  }
-  void set_is_ignore_case() const {
-    untag()->type_flags_.UpdateBool<IgnoreCaseBit>(true);
-  }
-  void set_is_multi_line() const {
-    untag()->type_flags_.UpdateBool<MultiLineBit>(true);
-  }
-  void set_is_unicode() const {
-    untag()->type_flags_.UpdateBool<UnicodeBit>(true);
-  }
-  void set_is_dot_all() const {
-    untag()->type_flags_.UpdateBool<DotAllBit>(true);
-  }
   void set_is_simple() const { set_type(kSimple); }
   void set_is_complex() const { set_type(kComplex); }
   void set_num_registers(bool is_one_byte, intptr_t value) const {

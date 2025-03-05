@@ -40,25 +40,6 @@ extension type JSIndices._(JSArray _) implements JSArray {
   external JSObject? get groups;
 }
 
-js_types.JSArrayImpl<JSAny> _namedGroupIndices(JSNativeMatch o) {
-  return js_types.JSArrayImpl<JSAny>(
-    JS<WasmExternRef>(r"""m => {
-    let result = [];
-    if (typeof m.indices !== 'undefined' &&
-        typeof m.indices.groups !== 'undefined') {
-      let groups = m.indices.groups;
-      for (let key of Object.keys(groups)) {
-        let indices = groups[key];
-        if (typeof indices !== 'undefined') {
-          result.push(key, indices[0], indices[1]);
-        }
-      }
-    }
-    return result;
-  }""", o.toExternRef),
-  );
-}
-
 extension type JSNativeRegExp._(JSObject _) implements JSObject {
   external JSNativeMatch? exec(JSString string);
   external JSBoolean test(JSString string);
@@ -67,6 +48,7 @@ extension type JSNativeRegExp._(JSObject _) implements JSObject {
   external JSBoolean get ignoreCase;
   external JSBoolean get unicode;
   external JSBoolean get dotAll;
+  external JSBoolean get hasIndices;
   external set lastIndex(JSNumber start);
 }
 
@@ -84,6 +66,7 @@ class JSSyntaxRegExp implements RegExp {
     bool caseSensitive = true,
     bool unicode = false,
     bool dotAll = false,
+    bool indices = false,
   }) : this.pattern = source,
        this._nativeRegExp = makeNative(
          source,
@@ -91,6 +74,7 @@ class JSSyntaxRegExp implements RegExp {
          caseSensitive,
          unicode,
          dotAll,
+         indices,
          false,
        );
 
@@ -102,6 +86,7 @@ class JSSyntaxRegExp implements RegExp {
       isCaseSensitive,
       isUnicode,
       isDotAll,
+      hasIndices,
       true,
     );
   }
@@ -119,6 +104,7 @@ class JSSyntaxRegExp implements RegExp {
       isCaseSensitive,
       isUnicode,
       isDotAll,
+      hasIndices,
       true,
     );
   }
@@ -127,6 +113,7 @@ class JSSyntaxRegExp implements RegExp {
   bool get isCaseSensitive => !_nativeRegExp.ignoreCase.toDart;
   bool get isUnicode => _nativeRegExp.unicode.toDart;
   bool get isDotAll => _nativeRegExp.dotAll.toDart;
+  bool get hasIndices => _nativeRegExp.hasIndices.toDart;
 
   static JSNativeRegExp makeNative(
     String source,
@@ -134,14 +121,16 @@ class JSSyntaxRegExp implements RegExp {
     bool caseSensitive,
     bool unicode,
     bool dotAll,
+    bool indices,
     bool global,
   ) {
     String m = multiLine == true ? 'm' : '';
     String i = caseSensitive == true ? '' : 'i';
     String u = unicode ? 'u' : '';
     String s = dotAll ? 's' : '';
+    String d = indices ? 'd' : '';
     String g = global ? 'g' : '';
-    String modifiers = 'd$m$i$u$s$g';
+    String modifiers = '$d$m$i$u$s$g';
     // The call to create the regexp is wrapped in a try catch so we can
     // reformat the exception if need be.
     final result = JS<WasmExternRef?>(
@@ -210,9 +199,6 @@ class JSSyntaxRegExp implements RegExp {
 
 class _MatchImplementation implements RegExpMatch {
   final RegExp pattern;
-  late final List<({int start, int end})?> captures = _computeCaptures();
-  late final Map<String, ({int start, int end})> namedCaptures =
-      _computeNamedCaptures();
 
   // Contains a JS RegExp match object.
   // It is an Array of String values with extra 'index' and 'input' properties.
@@ -267,30 +253,41 @@ class _MatchImplementation implements RegExpMatch {
     return Iterable.empty();
   }
 
-  List<({int start, int end})?> _computeCaptures() {
-    final result = List<({int start, int end})?>.filled(_match.length, null);
-    for (var i = 0; i < _match.length; i++) {
-      final slice = _match.indices[i] as JSArray?;
+  ({int start, int end})? capture(int group) {
+    if (!pattern.hasIndices) {
+      throw StateError('$pattern was not constructed with indices set to true');
+    }
+    IndexErrorUtils.checkIndex(group, _match.length, 'group');
+
+    JSArray? slice = _match.indices[group] as JSArray?;
+    if (slice == null) {
+      return null;
+    }
+    return (
+      start: (slice[0] as JSNumber).toDartInt,
+      end: (slice[1] as JSNumber).toDartInt,
+    );
+  }
+
+  ({int start, int end})? namedCapture(String name) {
+    if (!pattern.hasIndices) {
+      throw StateError('$pattern was not constructed with indices set to true');
+    }
+
+    JSObject? groups = _match.indices.groups;
+    if (groups != null) {
+      JSArray? slice = groups[name] as JSArray?;
       if (slice != null) {
-        result[i] = (
+        return (
           start: (slice[0] as JSNumber).toDartInt,
           end: (slice[1] as JSNumber).toDartInt,
         );
       }
+      if (hasPropertyRaw(groups.toExternRef, name.toExternRef)) {
+        return null;
+      }
     }
-    return List.unmodifiable(result);
-  }
-
-  Map<String, ({int start, int end})> _computeNamedCaptures() {
-    final result = <String, ({int start, int end})>{};
-    final groups = _namedGroupIndices(_match);
-    for (var i = 0; i < groups.length; i += 3) {
-      result[(groups[i] as JSString).toDart] = (
-        start: (groups[i + 1] as JSNumber).toDartInt,
-        end: (groups[i + 2] as JSNumber).toDartInt,
-      );
-    }
-    return UnmodifiableMapView(result);
+    throw ArgumentError.value(name, "name", "Not a capture group name");
   }
 }
 

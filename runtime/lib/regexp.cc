@@ -21,7 +21,7 @@
 
 namespace dart {
 
-DEFINE_NATIVE_ENTRY(RegExp_factory, 0, 6) {
+DEFINE_NATIVE_ENTRY(RegExp_factory, 0, 7) {
   ASSERT(
       TypeArguments::CheckedHandle(zone, arguments->NativeArgAt(0)).IsNull());
   GET_NON_NULL_NATIVE_ARGUMENT(String, pattern, arguments->NativeArgAt(1));
@@ -30,13 +30,15 @@ DEFINE_NATIVE_ENTRY(RegExp_factory, 0, 6) {
   bool ignore_case = arguments->NativeArgAt(3) != Bool::True().ptr();
   bool unicode = arguments->NativeArgAt(4) == Bool::True().ptr();
   bool dot_all = arguments->NativeArgAt(5) == Bool::True().ptr();
+  bool indices = arguments->NativeArgAt(6) == Bool::True().ptr();
 
   RegExpFlags flags;
-  flags.SetGlobal();  // All dart regexps are global.
+  flags.SetIsGlobal();  // All dart regexps are global.
   if (ignore_case) flags.SetIgnoreCase();
-  if (multi_line) flags.SetMultiLine();
-  if (unicode) flags.SetUnicode();
-  if (dot_all) flags.SetDotAll();
+  if (multi_line) flags.SetIsMultiLine();
+  if (unicode) flags.SetIsUnicode();
+  if (dot_all) flags.SetIsDotAll();
+  if (indices) flags.SetHasIndices();
 
   RegExpKey lookup_key(pattern, flags);
   RegExp& regexp = RegExp::Handle(thread->zone());
@@ -100,6 +102,13 @@ DEFINE_NATIVE_ENTRY(RegExp_getIsDotAll, 0, 1) {
   ASSERT(!regexp.IsNull());
   return Bool::Get(regexp.flags().IsDotAll()).ptr();
 }
+
+DEFINE_NATIVE_ENTRY(RegExp_getHasIndices, 0, 1) {
+  const RegExp& regexp = RegExp::CheckedHandle(zone, arguments->NativeArgAt(0));
+  ASSERT(!regexp.IsNull());
+  return Bool::Get(regexp.flags().HasIndices()).ptr();
+}
+
 
 DEFINE_NATIVE_ENTRY(RegExp_getIsCaseSensitive, 0, 1) {
   const RegExp& regexp = RegExp::CheckedHandle(zone, arguments->NativeArgAt(0));

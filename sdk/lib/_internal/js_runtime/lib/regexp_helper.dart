@@ -50,15 +50,16 @@ class JSSyntaxRegExp implements RegExp {
       {bool multiLine = false,
       bool caseSensitive = true,
       bool unicode = false,
-      bool dotAll = false})
+      bool dotAll = false,
+      bool indices = false})
       : this.pattern = source,
         this._nativeRegExp = makeNative(
-            source, multiLine, caseSensitive, unicode, dotAll, false);
+            source, multiLine, caseSensitive, unicode, dotAll, indices, false);
 
   get _nativeGlobalVersion {
     if (_nativeGlobalRegExp != null) return _nativeGlobalRegExp;
     return _nativeGlobalRegExp = makeNative(
-        pattern, _isMultiLine, _isCaseSensitive, _isUnicode, _isDotAll, true);
+        pattern, _isMultiLine, _isCaseSensitive, _isUnicode, _isDotAll, _hasIndices, true);
   }
 
   get _nativeAnchoredVersion {
@@ -69,22 +70,24 @@ class JSSyntaxRegExp implements RegExp {
     // was the added zero-width match that matched, by looking at the last
     // capture. If it is a String, the match participated, otherwise it didn't.
     return _nativeAnchoredRegExp = makeNative('$pattern|()', _isMultiLine,
-        _isCaseSensitive, _isUnicode, _isDotAll, true);
+        _isCaseSensitive, _isUnicode, _isDotAll, _hasIndices, true);
   }
 
   bool get _isMultiLine => JS('bool', '#.multiline', _nativeRegExp);
   bool get _isCaseSensitive => JS('bool', '!#.ignoreCase', _nativeRegExp);
   bool get _isUnicode => JS('bool', '#.unicode', _nativeRegExp);
   bool get _isDotAll => JS('bool', '#.dotAll', _nativeRegExp);
+  bool get _hasIndices => JS('bool', '#.hasIndices', _nativeRegExp);
 
   static makeNative(String source, bool multiLine, bool caseSensitive,
-      bool unicode, bool dotAll, bool global) {
+      bool unicode, bool dotAll, bool hasIndices, bool global) {
     checkString(source);
     String m = multiLine == true ? 'm' : '';
     String i = caseSensitive == true ? '' : 'i';
     String u = unicode ? 'u' : '';
     String s = dotAll ? 's' : '';
     String g = global ? 'g' : '';
+    String d = hasIndices ? 'd' : '';
     // We're using the JavaScript's try catch instead of the Dart one to avoid
     // dragging in Dart runtime support just because of using RegExp.
     var regexp = JS(
@@ -98,7 +101,7 @@ class JSSyntaxRegExp implements RegExp {
             }
           })(#, # + # + # + # + # + #)''',
         source,
-        'd',  // Always request indices.
+        d,
         m,
         i,
         u,
@@ -167,13 +170,11 @@ class JSSyntaxRegExp implements RegExp {
   bool get isCaseSensitive => _isCaseSensitive;
   bool get isUnicode => _isUnicode;
   bool get isDotAll => _isDotAll;
+  bool get hasIndices => _hasIndices;
 }
 
 class _MatchImplementation implements RegExpMatch {
-  final RegExp pattern;
-  late final List<({int start, int end})?> captures = _computeCaptures();
-  late final Map<String, ({int start, int end})> namedCaptures =
-      _computeNamedCaptures();
+  final JSSyntaxRegExp pattern;
 
   // Contains a JS RegExp match object.
   // It is an Array of String values with extra 'index' and 'input' properties.
@@ -235,56 +236,51 @@ class _MatchImplementation implements RegExpMatch {
     return Iterable.empty();
   }
 
-  List<({int start, int end})?> _computeCaptures() {
-    var result = List<({int start, int end})?>.filled(_match.length, null);
-    var indices = JS<JSExtendableArray>(
-      'JSExtendableArray',
-      '#.indices',
+  ({int start, int end})? capture(int group) {
+    if (!pattern._hasIndices) {
+      throw StateError('$pattern was not constructed with indices set to true');
+    }
+    IndexError.check(group, groupCount + 1, name: 'group');
+
+    var slice = JS<JSExtendableArray?>(
+      'JSExtendableArray|Null',
+      '#.indices[#]',
       _match,
+      group,
     );
-    for (var i = 0; i <= groupCount; i++) {
+    if (slice == null) {
+      return null;
+    }
+    return (
+      start: JS<int>('int', '#', slice[0]),
+      end: JS<int>('int', '#', slice[1]),
+    );
+  }
+
+  ({int start, int end})? namedCapture(String name) {
+    if (!pattern._hasIndices) {
+      throw StateError('$pattern was not constructed with indices set to true');
+    }
+
+    var groups = JS<Object?>('=Object|Null', '#.indices.groups', _match);
+    if (groups != null) {
       var slice = JS<JSExtendableArray?>(
         'JSExtendableArray|Null',
-        '#',
-        indices[i],
+        '#[#]',
+        groups,
+        name,
       );
       if (slice != null) {
-        result[i] = (
+        return (
           start: JS<int>('int', '#', slice[0]),
           end: JS<int>('int', '#', slice[1]),
         );
       }
-    }
-    return makeFixedListUnmodifiable(result);
-  }
-
-  Map<String, ({int start, int end})> _computeNamedCaptures() {
-    var result = <String, ({int start, int end})>{};
-    var groups = JS<Object?>('=Object|Null', '#.indices.groups', _match);
-    if (groups != null) {
-      var names = JSArray<String>.markGrowable(
-        JS<JSExtendableArray>(
-          'returns:JSExtendableArray;new:true',
-          'Object.keys(#)',
-          groups,
-        ),
-      );
-      for (var i = 0; i < names.length; i++) {
-        var value = JS<JSExtendableArray?>(
-          'JSExtendableArray|Null',
-          '#[#]',
-          groups,
-          names[i],
-        );
-        if (value != null) {
-          result[names[i]] = (
-            start: JS<int>('int', '#', value[0]),
-            end: JS<int>('int', '#', value[1]),
-          );
-        }
+      if (JS('bool', '# in #', name, groups)) {
+        return null;  // Valid group name but no match.
       }
     }
-    return UnmodifiableMapView(result);
+    throw ArgumentError.value(name, 'name', 'Not a capture group name');
   }
 }
 
