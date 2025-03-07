@@ -39,6 +39,7 @@ import 'package:args/args.dart';
 import 'package:linter/src/rules.dart' as linter;
 import 'package:telemetry/crash_reporting.dart';
 import 'package:unified_analytics/unified_analytics.dart';
+import 'package:_perf_witness/server.dart';
 
 import '../utilities/usage_tracking/usage_tracking.dart';
 
@@ -153,6 +154,8 @@ class Driver implements ServerStarter {
     SendPort? sendPort,
     bool defaultToLsp = false,
   }) {
+    PerfWitnessServer.start().ignore();
+
     var sessionStartTime = DateTime.now();
     var parser = createArgParser(defaultToLsp: defaultToLsp);
     var results = parser.parse(arguments);

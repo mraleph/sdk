@@ -2,7 +2,11 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
+import 'dart:async';
+import 'dart:developer' as developer;
+
 import 'package:collection/collection.dart';
+import 'package:_perf_witness/src/async_span.dart';
 
 /// The performance of an operation.
 abstract class OperationPerformance {
@@ -152,7 +156,7 @@ class OperationPerformanceImpl implements OperationPerformance {
     child._start();
 
     try {
-      return operation(child);
+      return developer.Timeline.timeSync(name, () => operation(child));
     } finally {
       child._stop();
     }
@@ -171,7 +175,7 @@ class OperationPerformanceImpl implements OperationPerformance {
     var child = _existingOrNewChild(name);
     child._start();
     try {
-      return await operation(child);
+      return await AsyncSpan.create(name).runUnary(operation, child);
     } finally {
       child._stop();
     }
