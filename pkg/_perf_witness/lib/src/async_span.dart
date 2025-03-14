@@ -49,13 +49,14 @@ import 'dart:developer';
 // siblings).
 class AsyncSpan {
   final String name;
+  final Map<String, dynamic>? parameters;
   final Flow _flow = Flow.begin();
   bool issuedBegin = false;
   int running = 0;
 
-  AsyncSpan(this.name);
+  AsyncSpan(this.name, {this.parameters});
 
-  static AsyncSpan of(Zone zone) => zone[AsyncSpan]!;
+  static AsyncSpan of(Zone zone) => zone[AsyncSpan] as AsyncSpan;
 
   static final _zoneSpecification = ZoneSpecification(
     run: <R>(self, parent, zone, R Function() f) {
@@ -95,16 +96,20 @@ class AsyncSpan {
     },
   );
 
-  static Zone create(String name) {
+  static Zone create(String name, {Map<String, dynamic>? parameters}) {
     return Zone.current.fork(
       specification: _zoneSpecification,
-      zoneValues: {AsyncSpan: AsyncSpan(name)},
+      zoneValues: {AsyncSpan: AsyncSpan(name, parameters: parameters)},
     );
   }
 
   void startSync() {
     if (running == 0) {
-      Timeline.startSync(name, flow: issuedBegin ? Flow.step(_flow.id) : _flow);
+      Timeline.startSync(
+        name,
+        flow: issuedBegin ? Flow.step(_flow.id) : _flow,
+        arguments: issuedBegin ? null : parameters,
+      );
       issuedBegin = true;
     }
     running++;

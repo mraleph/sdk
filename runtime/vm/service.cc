@@ -5949,6 +5949,7 @@ static void SetFlag(Thread* thread, JSONStream* js) {
       "pause_isolates_on_unhandled_exceptions",
       "profile_period",
       "profiler",
+      "timeline_recorder",
   };
 
   bool allowed = false;
@@ -5967,6 +5968,12 @@ static void SetFlag(Thread* thread, JSONStream* js) {
     JSONObject jsobj(js);
     jsobj.AddProperty("type", "Error");
     jsobj.AddProperty("message", "Cannot set flag: cannot change at runtime");
+    return;
+  }
+
+  if (strcmp(flag_name, "timeline_recorder") == 0) {
+    Timeline::ReconfigureRecorder(flag_value);
+    PrintSuccess(js);
     return;
   }
 

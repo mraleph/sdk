@@ -57,7 +57,7 @@ DEFINE_FLAG(bool,
 DEFINE_FLAG(
     int,
     sample_buffer_duration,
-    0,
+    60,
     "Defines the size of the profiler sample buffer to contain at least "
     "N seconds of samples at a given sample rate. If not provided, the "
     "default is ~4 seconds. Large values will greatly increase memory "

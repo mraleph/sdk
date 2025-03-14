@@ -218,6 +218,8 @@ class Timeline : public AllStatic {
   // Cleanup timeline system. Not thread safe.
   static void Cleanup();
 
+  static void ReconfigureRecorder(const char* recorder);
+
   // Access the global recorder. Not thread safe.
   static TimelineEventRecorder* recorder() { return recorder_; }
 

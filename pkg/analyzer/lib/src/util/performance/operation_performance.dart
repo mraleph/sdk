@@ -171,11 +171,12 @@ class OperationPerformanceImpl implements OperationPerformance {
   Future<T> runAsync<T>(
     String name,
     Future<T> Function(OperationPerformanceImpl performance) operation,
+    {Map<String, dynamic>? parameters,}
   ) async {
     var child = _existingOrNewChild(name);
     child._start();
     try {
-      return await AsyncSpan.create(name).runUnary(operation, child);
+      return await AsyncSpan.create(name, parameters: parameters).runUnary(operation, child);
     } finally {
       child._stop();
     }

@@ -154,31 +154,33 @@ class CompletionHandler
       if (fileExtension == '.dart') {
         unit.ifResult((unit) {
           var performance = message.performance;
-          serverResultsFuture = performance.runAsync('request', (
-            performance,
-          ) async {
-            var thisPerformance = CompletionPerformance(
-              performance: performance,
-              path: unit.path,
-              requestLatency: requestLatency,
-              content: unit.content,
-              offset: offset,
-            );
-            completionPerformance = thisPerformance;
-            server.recentPerformance.completion.add(thisPerformance);
+          serverResultsFuture = performance.runAsync(
+            parameters: {'path': unit.path},
+            'request[completion]',
+            (performance) async {
+              var thisPerformance = CompletionPerformance(
+                performance: performance,
+                path: unit.path,
+                requestLatency: requestLatency,
+                content: unit.content,
+                offset: offset,
+              );
+              completionPerformance = thisPerformance;
+              server.recentPerformance.completion.add(thisPerformance);
 
-            // `await` required for `performance.runAsync` to count time.
-            return await _getServerDartItems(
-              clientCapabilities,
-              unit,
-              thisPerformance,
-              performance,
-              offset,
-              triggerCharacter,
-              token,
-              maxResults,
-            );
-          });
+              // `await` required for `performance.runAsync` to count time.
+              return await _getServerDartItems(
+                clientCapabilities,
+                unit,
+                thisPerformance,
+                performance,
+                offset,
+                triggerCharacter,
+                token,
+                maxResults,
+              );
+            },
+          );
         });
       } else if (fileExtension == '.yaml') {
         YamlCompletionGenerator? generator;

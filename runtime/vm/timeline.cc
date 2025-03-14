@@ -278,6 +278,17 @@ static bool HasStream(MallocGrowableArray<char*>* streams, const char* stream) {
   return false;
 }
 
+void Timeline::ReconfigureRecorder(const char* recorder) {
+  if (strcmp(FLAG_timeline_recorder, recorder) == 0) {
+    return;
+  }
+
+  Timeline::Cleanup();
+  // LEAK
+  FLAG_timeline_recorder = strdup(recorder);
+  Timeline::Init();
+}
+
 void Timeline::Init() {
   ASSERT(recorder_ == nullptr);
   recorder_ = CreateTimelineRecorder();
