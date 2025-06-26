@@ -377,10 +377,25 @@ class JSONStream : ValueObject {
 };
 
 class JSONObject : public ValueObject {
+ private:
+  struct ReopenMarker {};
+
  public:
   explicit JSONObject(JSONStream* stream) : stream_(stream) {
     stream_->OpenObject();
   }
+
+  static constexpr ReopenMarker kReopen;
+
+  JSONObject(JSONStream* stream, const ReopenMarker&) : stream_(stream) {
+    stream_->UncloseObject();
+  }
+
+  JSONObject(const JSONObject* obj, const ReopenMarker&)
+      : stream_(obj->stream_) {
+    stream_->UncloseObject();
+  }
+
   JSONObject(const JSONObject* obj, const char* name) : stream_(obj->stream_) {
     stream_->OpenObject(name);
   }
@@ -478,6 +493,10 @@ class JSONObject : public ValueObject {
   }
   void AddPropertyF(const char* name, const char* format, ...) const
       PRINTF_ATTRIBUTE(3, 4);
+
+  void AddPropertyV(const char* name, const char* format, va_list args) const {
+    stream_->VPrintfProperty(name, format, args);
+  }
 
  private:
   JSONStream* stream_;

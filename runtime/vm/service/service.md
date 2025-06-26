@@ -679,7 +679,7 @@ Success invalidateIdZone(string isolateId, string idZoneId)
 ```
 
 The _invalidateIdZone_ RPC is used to invalidate all the IDs that have been
-allocated in a certain ID zone. Invaliding the IDs makes them expire. See 
+allocated in a certain ID zone. Invaliding the IDs makes them expire. See
 [IDs and Names](#ids-and-names) for more information.
 
 ### invoke
@@ -1616,6 +1616,7 @@ See [Success](#success).
 ReloadReport|Sentinel reloadSources(string isolateId,
                                     bool force [optional],
                                     bool pause [optional],
+                                    BreakpointsUpdate[] breakpointsUpdates [optional],
                                     string rootLibUri [optional],
                                     string packagesUri [optional])
 ```
@@ -1626,8 +1627,20 @@ isolates in the same isolate group as the isolate specified by `isolateId`.
 If the _force_ parameter is provided, it indicates that all sources should be
 reloaded regardless of modification time.
 
-The _pause_ parameter has been deprecated, so providing it no longer has any
-effect.
+If the _pause_ parameter is provided, the isolate will pause immediately
+after the reload if it is not already paused with `pauseEvent.kind` being
+`PausePostRequest`. Note that this pauses only the isolate specified by
+`isolateId` while all other isolates in the same group will resume running
+immediately after the reload. This parameter is deprecated since 4.20 and
+should not be used. Clients relying on it to update breakpoints are expected
+to migrate to _breakpointsUpdate_ instead, which updates breakpoints atomically
+for all isolates in the group.
+
+If the _breakpointsUpdates_ parameter is provided, then the given updates
+will be atomically applied after the successful reload if reload changed
+any libraries (i.e. the reload was not a no-op) and before isolates in the
+group start running again. This parameter is available since version
+4.20 of the protocol.
 
 If the _rootLibUri_ parameter is provided, it indicates the new uri to the
 isolate group's root library.
@@ -2118,6 +2131,66 @@ A breakpoint is _resolved_ when it has been assigned to a specific
 program location.  A breakpoint my remain unresolved when it is in
 code which has not yet been compiled or in a library which has not
 been loaded (i.e. a deferred library).
+
+### BreakpointLocation
+
+```
+class BreakpointLocation {
+  // Target script for the breakpoint.
+  string scriptUri;
+
+  // Target line for the breakpoint.
+  int line;
+
+  // Target column for the breakpoint.
+  int column [optional];
+}
+```
+
+A `BreakpointLocation` specifies location of a breakpoint to create via
+`BreakpointUpdate`. The meaning of fields is the same as the meaning of
+parameters for [`addBreakpointWithScriptUri`](#addBreakpointWithScriptUri).
+
+### BreakpointsUpdate
+
+```
+class BreakpointsUpdate {
+  // Target isolate to which this update should be applied.
+  String isolateId;
+
+  // List of breakpoints which should be removed.
+  String[] toRemove [optional];
+
+  // List of new breakpoints to create. Each update behaves as if
+  // applied via `addBreakpointWithScriptUri`.
+  BreakpointLocation[] toAdd [optional];
+}
+```
+
+A `BreakpointsUpdate` specifies breakpoint updates which should be applied after
+isolate group is reloaded by [`reloadSources`](#reloadsources).
+
+### BreakpointsUpdateReport
+
+```
+class BreakpointsUpdateReport {
+  // Result of removing each breakpoint specified in
+  // [BreakpointUpdate.toRemove] in the same order.
+  (Success|BreakpointsUpdateFailure)[] removals [optional];
+
+  // Result of adding each breakpoint specified in
+  // [BreakpointUpdate.toAdd] in the same order.
+  (Breakpoint|BreakpointsUpdateFailure)[] additions [optional];
+}
+```
+
+A `BreakpointsUpdateReport` describe the result of applying `BreakpointsUpdate`.
+
+```
+class BreakpointsUpdateFailure {
+  String message;
+}
+```
 
 ### Class
 
@@ -4353,6 +4426,11 @@ See [getQueuedMicrotasks](#getqueuedmicrotasks) and [Microtask](#microtask).
 class ReloadReport extends Response {
   // Did the reload succeed or fail?
   bool success;
+
+  // Result of applying each entry of `breakpointsUpdates` in the same order
+  // as they were passed to the `reloadSources`, if reload was successful and
+  // not a no-op.
+  (BreakpointsUpdateReport|BreakpointsUpdateFailure)[] breakpointsUpdateReports [optional];
 }
 ```
 

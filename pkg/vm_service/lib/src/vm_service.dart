@@ -120,6 +120,10 @@ final _typeFactories = <String, Function>{
   'BoundField': BoundField.parse,
   'BoundVariable': BoundVariable.parse,
   'Breakpoint': Breakpoint.parse,
+  'BreakpointLocation': BreakpointLocation.parse,
+  'BreakpointsUpdate': BreakpointsUpdate.parse,
+  'BreakpointsUpdateReport': BreakpointsUpdateReport.parse,
+  'BreakpointsUpdateFailure': BreakpointsUpdateFailure.parse,
   '@Class': ClassRef.parse,
   'Class': Class.parse,
   'ClassHeapStats': ClassHeapStats.parse,
@@ -1567,8 +1571,20 @@ class VmService {
   /// If the `force` parameter is provided, it indicates that all sources should
   /// be reloaded regardless of modification time.
   ///
-  /// The `pause` parameter has been deprecated, so providing it no longer has
-  /// any effect.
+  /// If the `pause` parameter is provided, the isolate will pause immediately
+  /// after the reload if it is not already paused with `pauseEvent.kind` being
+  /// `PausePostRequest`. Note that this pauses only the isolate specified by
+  /// `isolateId` while all other isolates in the same group will resume running
+  /// immediately after the reload. This parameter is deprecated since 4.20 and
+  /// should not be used. Clients relying on it to update breakpoints are
+  /// expected to migrate to `breakpointsUpdate` instead, which updates
+  /// breakpoints atomically for all isolates in the group.
+  ///
+  /// If the `breakpointsUpdates` parameter is provided, then the given updates
+  /// will be atomically applied after the successful reload if reload changed
+  /// any libraries (i.e. the reload was not a no-op) and before isolates in the
+  /// group start running again. This parameter is available since version 4.20
+  /// of the protocol.
   ///
   /// If the `rootLibUri` parameter is provided, it indicates the new uri to the
   /// isolate group's root library.
@@ -1585,6 +1601,7 @@ class VmService {
     String isolateId, {
     bool? force,
     bool? pause,
+    List<BreakpointsUpdate>? breakpointsUpdates,
     String? rootLibUri,
     String? packagesUri,
   }) =>
@@ -1592,6 +1609,8 @@ class VmService {
         'isolateId': isolateId,
         if (force != null) 'force': force,
         if (pause != null) 'pause': pause,
+        if (breakpointsUpdates != null)
+          'breakpointsUpdates': breakpointsUpdates,
         if (rootLibUri != null) 'rootLibUri': rootLibUri,
         if (packagesUri != null) 'packagesUri': packagesUri,
       });
@@ -2885,6 +2904,149 @@ class Breakpoint extends Obj {
   String toString() => '[Breakpoint ' //
       'id: $id, breakpointNumber: $breakpointNumber, enabled: $enabled, ' //
       'resolved: $resolved, location: $location]';
+}
+
+/// A `BreakpointLocation` specifies location of a breakpoint to create via
+/// `BreakpointUpdate`. The meaning of fields is the same as the meaning of
+/// parameters for `addBreakpointWithScriptUri`.
+class BreakpointLocation {
+  static BreakpointLocation? parse(Map<String, dynamic>? json) =>
+      json == null ? null : BreakpointLocation._fromJson(json);
+
+  /// Target script for the breakpoint.
+  String? scriptUri;
+
+  /// Target line for the breakpoint.
+  int? line;
+
+  /// Target column for the breakpoint.
+  @optional
+  int? column;
+
+  BreakpointLocation({
+    this.scriptUri,
+    this.line,
+    this.column,
+  });
+
+  BreakpointLocation._fromJson(Map<String, dynamic> json)
+      : scriptUri = json['scriptUri'] ?? '',
+        line = json['line'] ?? -1,
+        column = json['column'];
+
+  Map<String, dynamic> toJson() => <String, Object?>{
+        'scriptUri': scriptUri ?? '',
+        'line': line ?? -1,
+        if (column case final columnValue?) 'column': columnValue,
+      };
+
+  @override
+  String toString() =>
+      '[BreakpointLocation scriptUri: $scriptUri, line: $line]';
+}
+
+/// A `BreakpointsUpdate` specifies breakpoint updates which should be applied
+/// after isolate group is reloaded by `reloadSources`.
+class BreakpointsUpdate {
+  static BreakpointsUpdate? parse(Map<String, dynamic>? json) =>
+      json == null ? null : BreakpointsUpdate._fromJson(json);
+
+  /// Target isolate to which this update should be applied.
+  String? isolateId;
+
+  /// List of breakpoints which should be removed.
+  @optional
+  List<String>? toRemove;
+
+  /// List of new breakpoints to create. Each update behaves as if applied via
+  /// `addBreakpointWithScriptUri`.
+  @optional
+  List<BreakpointLocation>? toAdd;
+
+  BreakpointsUpdate({
+    this.isolateId,
+    this.toRemove,
+    this.toAdd,
+  });
+
+  BreakpointsUpdate._fromJson(Map<String, dynamic> json)
+      : isolateId = json['isolateId'] ?? '',
+        toRemove = json['toRemove'] == null
+            ? null
+            : List<String>.from(json['toRemove']),
+        toAdd = _createServiceObjectListOrNull<BreakpointLocation>(
+            json['toAdd'], const ['BreakpointLocation']);
+
+  Map<String, dynamic> toJson() => <String, Object?>{
+        'isolateId': isolateId ?? '',
+        if (toRemove?.map((f) => f).toList() case final toRemoveValue?)
+          'toRemove': toRemoveValue,
+        if (toAdd?.map((f) => f.toJson()).toList() case final toAddValue?)
+          'toAdd': toAddValue,
+      };
+
+  @override
+  String toString() => '[BreakpointsUpdate isolateId: $isolateId]';
+}
+
+/// A `BreakpointsUpdateReport` describe the result of applying
+/// `BreakpointsUpdate`.
+class BreakpointsUpdateReport {
+  static BreakpointsUpdateReport? parse(Map<String, dynamic>? json) =>
+      json == null ? null : BreakpointsUpdateReport._fromJson(json);
+
+  /// Result of removing each breakpoint specified in
+  /// [BreakpointUpdate.toRemove] in the same order.
+  @optional
+  List<dynamic>? removals;
+
+  /// Result of adding each breakpoint specified in [BreakpointUpdate.toAdd] in
+  /// the same order.
+  @optional
+  List<dynamic>? additions;
+
+  BreakpointsUpdateReport({
+    this.removals,
+    this.additions,
+  });
+
+  BreakpointsUpdateReport._fromJson(Map<String, dynamic> json)
+      : removals = _createServiceObjectListOrNull<dynamic>(
+            json['removals'], const ['dynamic']),
+        additions = _createServiceObjectListOrNull<dynamic>(
+            json['additions'], const ['dynamic']);
+
+  Map<String, dynamic> toJson() => <String, Object?>{
+        if (removals?.map((f) => f.toJson()).toList() case final removalsValue?)
+          'removals': removalsValue,
+        if (additions?.map((f) => f.toJson()).toList()
+            case final additionsValue?)
+          'additions': additionsValue,
+      };
+
+  @override
+  String toString() => '[BreakpointsUpdateReport]';
+}
+
+class BreakpointsUpdateFailure {
+  static BreakpointsUpdateFailure? parse(Map<String, dynamic>? json) =>
+      json == null ? null : BreakpointsUpdateFailure._fromJson(json);
+
+  String? message;
+
+  BreakpointsUpdateFailure({
+    this.message,
+  });
+
+  BreakpointsUpdateFailure._fromJson(Map<String, dynamic> json)
+      : message = json['message'] ?? '';
+
+  Map<String, dynamic> toJson() => <String, Object?>{
+        'message': message ?? '',
+      };
+
+  @override
+  String toString() => '[BreakpointsUpdateFailure message: $message]';
 }
 
 /// `ClassRef` is a reference to a `Class`.
@@ -7381,12 +7543,21 @@ class ReloadReport extends Response {
   /// Did the reload succeed or fail?
   bool? success;
 
+  /// Result of applying each entry of `breakpointsUpdates` in the same order as
+  /// they were passed to the `reloadSources`, if reload was successful and not
+  /// a no-op.
+  @optional
+  List<dynamic>? breakpointsUpdateReports;
+
   ReloadReport({
     this.success,
+    this.breakpointsUpdateReports,
   });
 
   ReloadReport._fromJson(super.json)
       : success = json['success'] ?? false,
+        breakpointsUpdateReports = _createServiceObjectListOrNull<dynamic>(
+            json['breakpointsUpdateReports'], const ['dynamic']),
         super._fromJson();
 
   @override
@@ -7396,6 +7567,9 @@ class ReloadReport extends Response {
   Map<String, dynamic> toJson() => <String, Object?>{
         'type': type,
         'success': success ?? false,
+        if (breakpointsUpdateReports?.map((f) => f.toJson()).toList()
+            case final breakpointsUpdateReportsValue?)
+          'breakpointsUpdateReports': breakpointsUpdateReportsValue,
       };
 
   @override

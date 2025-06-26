@@ -151,6 +151,14 @@ Future<void> hasPausedAtStart(VmService service, IsolateRef isolate) {
   return hasPausedFor(service, isolate, EventKind.kPauseStart);
 }
 
+// WARNING: interleaving calls based on hasPausedOnInterrupt using Future.wait()
+// may cause the debug stream to be cancelled after one of the checks completes.
+// If another check is waiting on an event, it will no longer be notified of
+// the event, causing the test to hang.
+Future<void> hasPausedOnInterrupt(VmService service, IsolateRef isolate) {
+  return hasPausedFor(service, isolate, EventKind.kPauseInterrupted);
+}
+
 Future<void> markDartColonLibrariesDebuggable(
   VmService service,
   IsolateRef isolateRef,
@@ -212,7 +220,7 @@ IsolateTest setBreakpointAtLineColumn(int line, int column) {
   };
 }
 
-extension BreakpointLocation on Breakpoint {
+extension BreakpointLocationExtension on Breakpoint {
   Future<(String uri, (int line, int column))> getLocation(
     VmService service,
     IsolateRef isolateRef,

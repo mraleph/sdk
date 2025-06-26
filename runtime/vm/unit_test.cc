@@ -578,20 +578,22 @@ Dart_Handle TestCase::TriggerReload(
 
 Dart_Handle TestCase::TriggerReload(const char* root_script_url) {
   return TriggerReload([&](IsolateGroup* isolate_group, JSONStream* js) {
-    return isolate_group->ReloadSources(js,
-                                        /*force_reload=*/false, root_script_url,
-                                        /*packages_url=*/nullptr,
-                                        /*dont_delete_reload_context=*/true);
+    return isolate_group->ReloadSources(
+        js,
+        /*force_reload=*/false, [](bool success) {}, root_script_url,
+        /*packages_url=*/nullptr,
+        /*dont_delete_reload_context=*/true);
   });
 }
 
 Dart_Handle TestCase::TriggerReload(const uint8_t* kernel_buffer,
                                     intptr_t kernel_buffer_size) {
   return TriggerReload([&](IsolateGroup* isolate_group, JSONStream* js) {
-    return isolate_group->ReloadKernel(js,
-                                       /*force_reload=*/false, kernel_buffer,
-                                       kernel_buffer_size,
-                                       /*dont_delete_reload_context=*/true);
+    return isolate_group->ReloadKernel(
+        js,
+        /*force_reload=*/false, [](bool success) {}, kernel_buffer,
+        kernel_buffer_size,
+        /*dont_delete_reload_context=*/true);
   });
 }
 

@@ -170,6 +170,12 @@ class IsolateGroupReloadContext {
     file_modified_callback_ = callback;
   }
 
+  bool debugger_deoptimized_world() const {
+    return debugger_deoptimized_world_;
+  }
+
+  void mark_debugger_deoptimized_world() { debugger_deoptimized_world_ = true; }
+
  private:
   // Tells whether there are reasons for cancelling the reload.
   bool HasReasonsForCancelling() const {
@@ -239,6 +245,9 @@ class IsolateGroupReloadContext {
   intptr_t num_received_classes_ = -1;
   intptr_t num_received_procedures_ = -1;
   intptr_t num_saved_libs_ = -1;
+
+  // Tracks wheather Debugger::DeoptimizeWorld was called.
+  bool debugger_deoptimized_world_ = false;
 
   // Required trait for the instance_morpher_by_cid_;
   struct MorpherTrait {

@@ -284,7 +284,6 @@ bool Debugger::NeedsDebugEvents() {
     // E.g., NoActiveIsolateScope.
     return false;
   }
-  RELEASE_ASSERT(isolate_ == Isolate::Current());
   ASSERT(!Isolate::IsSystemIsolate(isolate_));
   return FLAG_warn_on_pause_with_no_debugger || Service::debug_stream.enabled();
 }
@@ -1743,6 +1742,18 @@ void Debugger::DeoptimizeWorld() {
 
 void Debugger::RunWithStoppedDeoptimizedWorld(std::function<void()> fun) {
 #if !defined(DART_PRECOMPILED_RUNTIME)
+  if (Thread::Current()->OwnsReloadSafepoint()) {
+    // Everything is stopped and we are currently reloading.
+    auto reload_context = group_debugger()->isolate_group()->reload_context();
+    RELEASE_ASSERT(reload_context != nullptr);
+    if (!reload_context->debugger_deoptimized_world()) {
+      DeoptimizeWorld();
+      reload_context->mark_debugger_deoptimized_world();
+    }
+    fun();
+    return;
+  }
+
   // RELOAD_OPERATION_SCOPE is used here because is is guaranteed that
   // isolates at reload safepoints hold no safepoint locks.
   RELOAD_OPERATION_SCOPE(Thread::Current());

@@ -2136,6 +2136,7 @@ bool IsolateGroup::CanReload() {
 
 bool IsolateGroup::ReloadSources(JSONStream* js,
                                  bool force_reload,
+                                 std::function<void(bool)> post_reload,
                                  const char* root_script_url,
                                  const char* packages_url,
                                  bool dont_delete_reload_context) {
@@ -2157,6 +2158,7 @@ bool IsolateGroup::ReloadSources(JSONStream* js,
       group_reload_context_->Reload(force_reload, root_script_url, packages_url,
                                     /*kernel_buffer=*/nullptr,
                                     /*kernel_buffer_size=*/0);
+  post_reload(success);
   if (!dont_delete_reload_context) {
     DeleteReloadContext();
   }
@@ -2165,6 +2167,7 @@ bool IsolateGroup::ReloadSources(JSONStream* js,
 
 bool IsolateGroup::ReloadKernel(JSONStream* js,
                                 bool force_reload,
+                                std::function<void(bool)> post_reload,
                                 const uint8_t* kernel_buffer,
                                 intptr_t kernel_buffer_size,
                                 bool dont_delete_reload_context) {
@@ -2186,6 +2189,7 @@ bool IsolateGroup::ReloadKernel(JSONStream* js,
       force_reload,
       /*root_script_url=*/nullptr,
       /*packages_url=*/nullptr, kernel_buffer, kernel_buffer_size);
+  post_reload(success);
   if (!dont_delete_reload_context) {
     DeleteReloadContext();
   }

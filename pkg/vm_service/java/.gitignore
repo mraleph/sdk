@@ -57,6 +57,10 @@ src/org/dartlang/vm/service/element/AllocationProfile.java
 src/org/dartlang/vm/service/element/BoundField.java
 src/org/dartlang/vm/service/element/BoundVariable.java
 src/org/dartlang/vm/service/element/Breakpoint.java
+src/org/dartlang/vm/service/element/BreakpointLocation.java
+src/org/dartlang/vm/service/element/BreakpointsUpdate.java
+src/org/dartlang/vm/service/element/BreakpointsUpdateFailure.java
+src/org/dartlang/vm/service/element/BreakpointsUpdateReport.java
 src/org/dartlang/vm/service/element/ClassHeapStats.java
 src/org/dartlang/vm/service/element/ClassList.java
 src/org/dartlang/vm/service/element/ClassObj.java

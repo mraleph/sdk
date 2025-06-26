@@ -1051,8 +1051,20 @@ abstract interface class VmServiceInterface {
   /// If the `force` parameter is provided, it indicates that all sources should
   /// be reloaded regardless of modification time.
   ///
-  /// The `pause` parameter has been deprecated, so providing it no longer has
-  /// any effect.
+  /// If the `pause` parameter is provided, the isolate will pause immediately
+  /// after the reload if it is not already paused with `pauseEvent.kind` being
+  /// `PausePostRequest`. Note that this pauses only the isolate specified by
+  /// `isolateId` while all other isolates in the same group will resume running
+  /// immediately after the reload. This parameter is deprecated since 4.20 and
+  /// should not be used. Clients relying on it to update breakpoints are
+  /// expected to migrate to `breakpointsUpdate` instead, which updates
+  /// breakpoints atomically for all isolates in the group.
+  ///
+  /// If the `breakpointsUpdates` parameter is provided, then the given updates
+  /// will be atomically applied after the successful reload if reload changed
+  /// any libraries (i.e. the reload was not a no-op) and before isolates in the
+  /// group start running again. This parameter is available since version 4.20
+  /// of the protocol.
   ///
   /// If the `rootLibUri` parameter is provided, it indicates the new uri to the
   /// isolate group's root library.
@@ -1069,6 +1081,7 @@ abstract interface class VmServiceInterface {
     String isolateId, {
     bool? force,
     bool? pause,
+    List<BreakpointsUpdate>? breakpointsUpdates,
     String? rootLibUri,
     String? packagesUri,
   });
@@ -1701,6 +1714,7 @@ class VmServerConnection {
             params!['isolateId'],
             force: params['force'],
             pause: params['pause'],
+            breakpointsUpdates: params['breakpointsUpdates'],
             rootLibUri: params['rootLibUri'],
             packagesUri: params['packagesUri'],
           );

@@ -56,6 +56,7 @@
 #include "vm/timeline.h"
 #include "vm/version.h"
 #include "vm/visitor.h"
+#include "vm/zone_text_buffer.h"
 
 #if defined(SUPPORT_PERFETTO)
 #include "vm/perfetto_utils.h"
@@ -3952,11 +3953,326 @@ static void GetSourceReport(Thread* thread, JSONStream* js) {
 #endif  // !DART_PRECOMPILED_RUNTIME
 }
 
+#if !defined(DART_PRECOMPILED_RUNTIME)
+namespace {
+
+// Helper class for converting nested JSON structure represented as
+// Dart objects (Map, GrowableArrayList, etc) into C++ values.
+class JSONReader {
+ public:
+  JSONReader(JSONStream* js, const char* property_name) : js_(js) {
+    path_.Add({property_name, -1});
+  }
+
+  template <typename T, typename D>
+  bool TryFillFromValue(const Object& value, T* slot, D default_value) {
+    if (value.IsNull()) {
+      *slot = default_value;
+      return true;
+    }
+
+    if (!FillTrait<T>::IsValidSource(value)) {
+      js_->PrintError(kInvalidParams, "%s: %s is expected to be a %s",
+                      js_->method(), FormatPath(),
+                      FillTrait<T>::kSourceTypeName);
+      return false;
+    }
+    return FillTrait<T>::TryFill(*this, value, slot);
+  }
+
+  template <typename T>
+  bool TryFillFromValue(const Object& value, T* slot) {
+    if (!FillTrait<T>::IsValidSource(value)) {
+      js_->PrintError(kInvalidParams, "%s: %s (%s) is expected to be a %s",
+                      js_->method(), FormatPath(), value.ToCString(),
+                      FillTrait<T>::kSourceTypeName);
+      return false;
+    }
+    return FillTrait<T>::TryFill(*this, value, slot);
+  }
+
+  template <typename T, typename D>
+  bool TryFillFromMap(const Map& map,
+                      const char* name,
+                      T* slot,
+                      D default_value) {
+    if (!FindValue(map, name)) {
+      *slot = default_value;
+      return true;
+    }
+    path_.Add({name, -1});
+    bool result = TryFillFromValue(value_, slot);
+    path_.RemoveLast();
+    return result;
+  }
+
+  template <typename T>
+  bool TryFillFromMap(const Map& map, const char* name, T* slot) {
+    if (!FindValue(map, name)) {
+      js_->PrintError(kInvalidParams,
+                      "%s: %s is missing required property '%s'", js_->method(),
+                      FormatPath(), name);
+      return false;
+    }
+    path_.Add({name, -1});
+    bool result = TryFillFromValue(value_, slot);
+    path_.RemoveLast();
+    return result;
+  }
+
+ private:
+  template <typename T>
+  struct FillTrait {
+    static constexpr char kSourceTypeName[] = "object";
+
+    static bool IsValidSource(const Object& h) { return h.IsMap(); }
+
+    static bool TryFill(JSONReader& reader, const Object& h, T* slot) {
+      // Allocate a new handle for recursive invocations.
+      return T::TryFillFromMap(reader, Map::Handle(Map::Cast(h).ptr()), slot);
+    }
+  };
+
+  template <>
+  struct FillTrait<intptr_t> {
+    static constexpr char kSourceTypeName[] = "int";
+
+    static bool IsValidSource(const Object& h) { return h.IsInteger(); }
+
+    static bool TryFill(JSONReader& reader, const Object& h, intptr_t* slot) {
+      *slot = Integer::Cast(h).Value();
+      return true;
+    }
+  };
+
+  template <>
+  struct FillTrait<String*> {
+    static constexpr char kSourceTypeName[] = "string";
+
+    static bool IsValidSource(const Object& h) { return h.IsString(); }
+
+    static bool TryFill(JSONReader& reader, const Object& h, String** slot) {
+      *slot = &String::Handle(String::Cast(h).ptr());
+      return true;
+    }
+  };
+
+  template <>
+  struct FillTrait<const char*> {
+    static constexpr char kSourceTypeName[] = "string";
+
+    static bool IsValidSource(const Object& h) { return h.IsString(); }
+
+    static bool TryFill(JSONReader& reader,
+                        const Object& h,
+                        const char** slot) {
+      *slot = String::Cast(h).ToCString();
+      return true;
+    }
+  };
+  template <typename E>
+  struct FillTrait<ZoneGrowableArray<E>*> {
+    static constexpr char kSourceTypeName[] = "array";
+
+    static bool IsValidSource(const Object& h) {
+      return h.IsGrowableObjectArray();
+    }
+
+    static bool TryFill(JSONReader& reader,
+                        const Object& h,
+                        ZoneGrowableArray<E>** slot) {
+      // Allocate a new handle for recursive invocations.
+      GrowableObjectArray& arr = GrowableObjectArray::Handle();
+      arr ^= h.ptr();
+
+      ZoneGrowableArray<E>* result = new ZoneGrowableArray<E>();
+
+      if (arr.Length() > 0) {
+        result->SetLength(arr.Length());
+
+        Object& el = Object::Handle();
+        for (intptr_t i = 0; i < arr.Length(); i++) {
+          el = arr.At(i);
+          reader.path_.Last().second = i;  // Update path.
+          if (!reader.TryFillFromValue(el, &(*result)[i])) {
+            return false;
+          }
+        }
+      }
+
+      *slot = result;
+      return true;
+    }
+  };
+
+  const char* FormatPath() const {
+    ZoneTextBuffer buf(Thread::Current()->zone());
+    for (intptr_t i = 0; i < path_.length(); i++) {
+      buf.Printf("%s%s", i > 0 ? "." : "", path_[i].first);
+      if (path_[i].second > -1) {
+        buf.Printf("[%" Pd "]", path_[i].second);
+      }
+    }
+    return buf.buffer();
+  }
+
+  bool FindValue(const Map& map, const char* name) {
+    Map::Iterator it(map);
+    while (it.MoveNext()) {
+      key_ ^= it.CurrentKey();
+      if (key_.Equals(name)) {
+        value_ = it.CurrentValue();
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  JSONStream* js_;
+  Object& value_ = Object::Handle();
+  String& key_ = String::Handle();
+  ZoneGrowableArray<std::pair<const char*, intptr_t>> path_;
+};
+
+struct BreakpointsUpdate {
+  struct Location {
+    String* script_uri;
+    intptr_t line;
+    intptr_t column;
+
+    static bool TryFillFromMap(JSONReader& reader,
+                               const Map& map,
+                               Location* loc) {
+      return reader.TryFillFromMap(map, "scriptUri", &loc->script_uri) &&
+             reader.TryFillFromMap(map, "line", &loc->line) &&
+             reader.TryFillFromMap(map, "column", &loc->column, -1);
+    }
+  };
+
+  String* isolate_id;
+  ZoneGrowableArray<const char*>* to_remove;
+  ZoneGrowableArray<Location>* to_add;
+
+  static bool TryFillFromMap(JSONReader& reader,
+                             const Map& map,
+                             BreakpointsUpdate* bu) {
+    return reader.TryFillFromMap(map, "isolateId", &bu->isolate_id) &&
+           reader.TryFillFromMap(map, "toRemove", &bu->to_remove, nullptr) &&
+           reader.TryFillFromMap(map, "toAdd", &bu->to_add, nullptr);
+  }
+};
+
+static void AddBreakpointsUpdateFailure(JSONArray* array,
+                                        const char* message,
+                                        ...) {
+  JSONObject failure(array);
+  failure.AddProperty("type", "BreakpointsUpdateFailure");
+  va_list args;
+  va_start(args, message);
+  failure.AddPropertyV("message", message, args);
+  va_end(args);
+}
+
+static void ApplyBreakpointsUpdates(
+    Thread* thread,
+    JSONStream* js,
+    ZoneGrowableArray<BreakpointsUpdate>* breakpoints_updates) {
+  IntMap<Isolate*> isolate_by_port(thread->zone());
+  thread->isolate_group()->ForEachIsolate(
+      [&isolate_by_port](Isolate* isolate) {
+        isolate_by_port.Insert(isolate->main_port(), isolate);
+      },
+      /*at_safepoint=*/true);
+
+  JSONObject reload_report(js, JSONObject::kReopen);
+  JSONArray reports(&reload_report, "breakpointsUpdateReports");
+  for (const auto& bp_update : *breakpoints_updates) {
+    // Start by finding corresponding isolate.
+    intptr_t isolate_id = 0;
+    const char* isolate_id_str = bp_update.isolate_id->ToCString();
+    if (!GetPrefixedIntegerId(isolate_id_str, "isolates/", &isolate_id)) {
+      AddBreakpointsUpdateFailure(&reports, "Malformed isolate id: %s.",
+                                  isolate_id_str);
+      continue;
+    }
+
+    auto isolate = isolate_by_port.Lookup(isolate_id);
+    if (isolate == nullptr) {
+      AddBreakpointsUpdateFailure(&reports, "Isolate %s not found.",
+                                  isolate_id_str);
+      continue;
+    }
+
+    if (thread->isolate()->debugger() == nullptr) {
+      AddBreakpointsUpdateFailure(&reports, "Isolate %s is not debuggable.",
+                                  isolate_id_str);
+      continue;
+    }
+
+    JSONObject update_report(&reports);
+    update_report.AddProperty("type", "BreakpointsUpdateReport");
+
+    if (bp_update.to_remove != nullptr) {
+      JSONArray removals(&update_report, "removals");
+      for (auto breakpoint_id : *bp_update.to_remove) {
+        ObjectIdRing::LookupResult lookup_result;
+        Breakpoint* bpt =
+            LookupBreakpoint(isolate, breakpoint_id, &lookup_result);
+        if (bpt == nullptr) {
+          AddBreakpointsUpdateFailure(&removals,
+                                      "Breakpoint %s not found in isolate %s.",
+                                      breakpoint_id, isolate_id_str);
+        } else {
+          isolate->debugger()->RemoveBreakpoint(bpt->id());
+
+          JSONObject success(&removals);
+          success.AddProperty("type", "Success");
+        }
+      }
+    }
+
+    if (bp_update.to_add != nullptr) {
+      JSONArray additions(&update_report, "additions");
+      for (const auto& location : *bp_update.to_add) {
+        Breakpoint* bpt = nullptr;
+        const Error& error =
+            Error::Handle(isolate->debugger()->SetBreakpointAtLineCol(
+                *location.script_uri, location.line, location.column, &bpt));
+        if (error.IsNull()) {
+          additions.AddValue(bpt);
+        } else {
+          if (location.column != -1) {
+            AddBreakpointsUpdateFailure(
+                &additions,
+                "Cannot add breakpoint at %s:%" Pd ":%" Pd
+                ". Error occurred when resolving "
+                "breakpoint location: %s.",
+                location.script_uri->ToCString(), location.line,
+                location.column, error.ToErrorCString());
+          } else {
+            AddBreakpointsUpdateFailure(&additions,
+                                        "Cannot add breakpoint at %s:%" Pd
+                                        ". Error occurred when resolving "
+                                        "breakpoint location: %s.",
+                                        location.script_uri->ToCString(),
+                                        location.line, error.ToErrorCString());
+          }
+        }
+      }
+    }
+  }
+}
+
+}  // namespace
+#endif  // !DART_PRECOMPILED_RUNTIME
+
 static const MethodParameter* const reload_kernel_params[] = {
     RUNNABLE_ISOLATE_PARAMETER,
     new BoolParameter("force", false),
     new BoolParameter("pause", false),
     new DartStringParameter("kernelFilePath", true),
+    new DartListParameter("breakpointsUpdates", false),
     nullptr,
 };
 
@@ -4022,8 +4338,23 @@ static void ReloadKernel(Thread* thread, JSONStream* js) {
 
   const bool force_reload =
       js->LookupObjectParam("force") == Bool::True().ptr();
-  isolate_group->ReloadKernel(js, force_reload, kernel_buffer,
-                              kernel_buffer_size);
+
+  JSONReader reader(js, "breakpointsUpdates");
+  ZoneGrowableArray<BreakpointsUpdate>* breakpoints_updates;
+  if (!reader.TryFillFromValue(
+          Object::Handle(js->LookupObjectParam("breakpointsUpdates")),
+          &breakpoints_updates, nullptr)) {
+    return;
+  }
+
+  isolate_group->ReloadKernel(
+      js, force_reload,
+      [thread, js, breakpoints_updates](auto success) {
+        if (success && breakpoints_updates != nullptr) {
+          ApplyBreakpointsUpdates(thread, js, breakpoints_updates);
+        }
+      },
+      kernel_buffer, kernel_buffer_size);
 
   free(kernel_buffer);
 
@@ -4037,6 +4368,7 @@ static const MethodParameter* const reload_sources_params[] = {
     new BoolParameter("pause", false),
     new DartStringParameter("rootLibUri", false),
     new DartStringParameter("packagesUri", false),
+    new DartListParameter("breakpointsUpdates", false),
     nullptr,
 };
 
@@ -4078,13 +4410,25 @@ static void ReloadSources(Thread* thread, JSONStream* js) {
   String& packages_uri = String::Handle(thread->zone());
   packages_uri ^= js->LookupObjectParam("packagesUri");
 
+  JSONReader reader(js, "breakpointsUpdates");
+  ZoneGrowableArray<BreakpointsUpdate>* breakpoints_updates;
+  if (!reader.TryFillFromValue(
+          Object::Handle(js->LookupObjectParam("breakpointsUpdates")),
+          &breakpoints_updates, nullptr)) {
+    return;
+  }
+
   isolate_group->ReloadSources(
       js, force_reload,
+      [thread, js, breakpoints_updates](auto success) {
+        if (success && breakpoints_updates != nullptr) {
+          ApplyBreakpointsUpdates(thread, js, breakpoints_updates);
+        }
+      },
       root_lib_uri.IsNull() ? nullptr : root_lib_uri.ToCString(),
       packages_uri.IsNull() ? nullptr : packages_uri.ToCString());
 
   Service::CheckForPause(isolate, js);
-
 #endif
 }
 

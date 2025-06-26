@@ -683,6 +683,7 @@ class IsolateGroup : public IntrusiveDListEntry<IsolateGroup> {
   // the caller to delete is separately if it is still needed.
   bool ReloadSources(JSONStream* js,
                      bool force_reload,
+                     std::function<void(bool)> post_reload,
                      const char* root_script_url = nullptr,
                      const char* packages_url = nullptr,
                      bool dont_delete_reload_context = false);
@@ -690,6 +691,7 @@ class IsolateGroup : public IntrusiveDListEntry<IsolateGroup> {
   // If provided, the VM takes ownership of kernel_buffer.
   bool ReloadKernel(JSONStream* js,
                     bool force_reload,
+                    std::function<void(bool)> post_reload,
                     const uint8_t* kernel_buffer = nullptr,
                     intptr_t kernel_buffer_size = 0,
                     bool dont_delete_reload_context = false);

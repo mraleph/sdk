@@ -3846,8 +3846,8 @@ static void HandleStackOverflowTestCases(Thread* thread) {
     // Issue a reload.
     const char* script_uri = isolate_group->source()->script_uri;
     JSONStream js;
-    const bool success =
-        isolate_group->ReloadSources(&js, /*force_reload=*/true, script_uri);
+    const bool success = isolate_group->ReloadSources(
+        &js, /*force_reload=*/true, [](auto success) {}, script_uri);
     if (!success && !Dart::IsShuttingDown() && !isolate_group->has_seen_oom()) {
       FATAL("*** Isolate reload failed:\n%s\n", js.ToCString());
     }
