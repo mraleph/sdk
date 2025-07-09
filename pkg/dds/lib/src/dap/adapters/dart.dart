@@ -15,6 +15,7 @@ import 'package:path/path.dart' as path;
 import 'package:vm_service/vm_service.dart' as vm;
 
 import '../../../dds.dart';
+import '../../utils/collection.dart';
 import '../base_debug_adapter.dart';
 import '../isolate_manager.dart';
 import '../logging.dart';
@@ -866,6 +867,16 @@ abstract class DartDebugAdapter<TL extends LaunchRequestArguments,
     sendResponse(ContinueResponseBody(allThreadsContinued: false));
   }
 
+  Future<void> _hotReloadRequest(
+    void Function(Object?) sendResponse,
+  ) async {
+    await _withImpendingReload(
+      reloadIsLikelyToHappen: true, // No doubt about it.
+      (p) => p.postponeReloadRequest(),
+    );
+    sendResponse(_noResult);
+  }
+
   /// [customRequest] handles any messages that do not match standard messages
   /// in the spec.
   ///
@@ -936,8 +947,7 @@ abstract class DartDebugAdapter<TL extends LaunchRequestArguments,
       // through the run daemon) as it needs to perform additional work to
       // rebuild widgets afterwards.
       case 'hotReload':
-        await isolateManager.reloadSources();
-        sendResponse(_noResult);
+        await _hotReloadRequest(sendResponse);
         break;
 
       // Called by VS Code extension to have us force a re-evaluation of
@@ -1550,6 +1560,104 @@ abstract class DartDebugAdapter<TL extends LaunchRequestArguments,
     sendOutput(category, '$prefix$indentedMessage\n');
   }
 
+  _ImpendingReload? _impendingReload;
+
+  /// Synchronizes the action with respect to impending hot-reload request.
+  ///
+  /// If hot-reload has started and is in progress (e.g. request was already
+  /// forwarded to the VM but we have not yet received the response), then
+  /// we will wait until it is completed.
+  ///
+  /// If there is no impeding reload but `reloadIsLikelyToHappen` is `true`
+  /// we will create a new [_ImpendingReload] and associate with the the
+  /// adapter.
+  ///
+  /// Finally if adapter has an impending reload we will execute the given
+  /// `action` and pass a reference to `_ImpendingReload` to it.
+  ///
+  /// Returns the result of running `action` or `false` otherwise.
+  Future<bool> _withImpendingReload<R>(
+      Future<bool> Function(_ImpendingReload) action,
+      {required bool reloadIsLikelyToHappen}) async {
+    // We would like to avoid additional suspension point between checking
+    // for inProgress and touching _impendingReload as the state can change
+    // during that suspension.
+    if (_impendingReload?.inProgress case final inProgress?) {
+      await inProgress;
+    }
+
+    if (reloadIsLikelyToHappen) {
+      _impendingReload ??= _ImpendingReload(this);
+    }
+
+    if (_impendingReload case final impendingReload?) {
+      return action(impendingReload);
+    }
+
+    return false;
+  }
+
+  ({
+    SetBreakpointsResponseBody response,
+    List<ClientBreakpoint> toRemove,
+    List<ClientBreakpoint> toAdd,
+  }) _applySetBreakpointsRequest(String uri, List<SourceBreakpoint> breakpoints,
+      Future<void> afterResponse) {
+    // Map the provided breakpoints onto either new or existing instances of
+    // [ClientBreakpoint] that we use to track the clients breakpoints
+    // internally.
+    //
+    // First try to match an existing breakpoint so we can avoid deleting
+    // and re-creating all breakpoints if a new one is added to a file.
+    final clientBreakpoints = [
+      for (var bp in breakpoints)
+        isolateManager.findExistingClientBreakpoint(uri, bp) ??
+            ClientBreakpoint(bp, afterResponse),
+    ];
+
+    // Any breakpoints that are not in our new set will need to be removed from
+    // the VM.
+    //
+    // Because multiple client breakpoints may resolve to the same VM breakpoint
+    // we must exclude any that still remain in one of the kept breakpoints.
+    final referencedVmBreakpoints = {
+      for (var bp in clientBreakpoints) bp.forThread.values
+    };
+    final breakpointsToRemove = [
+      for (var bp
+          in isolateManager.clientBreakpointsByUri[uri] ?? <ClientBreakpoint>[])
+        if (!clientBreakpoints.contains(bp) &&
+            bp.forThread.values.none(referencedVmBreakpoints.contains))
+          bp,
+    ];
+
+    // Store this new set of breakpoints as the current set for this URI.
+    isolateManager.recordLatestClientBreakpoints(uri, clientBreakpoints);
+
+    final response = SetBreakpointsResponseBody(
+      breakpoints: [
+        for (var bp in clientBreakpoints)
+          Breakpoint(
+            id: bp.id,
+            verified: bp.verified,
+            line: bp.verified ? bp.resolvedLine : null,
+            column: bp.verified ? bp.resolvedColumn : null,
+            message: bp.verified ? null : bp.verifiedMessage,
+            reason: bp.verified ? null : bp.verifiedReason,
+          )
+      ],
+    );
+
+    return (
+      response: response,
+      toRemove: breakpointsToRemove,
+      toAdd: [
+        for (var bp in clientBreakpoints)
+          if (!bp.isKnownToVm) bp
+      ],
+    );
+  }
+
   /// Handles a request from the client to set breakpoints.
   ///
   /// This method can be called at any time (before the app is launched or while
@@ -1569,34 +1677,41 @@ abstract class DartDebugAdapter<TL extends LaunchRequestArguments,
     void Function(SetBreakpointsResponseBody) sendResponse,
   ) async {
     final breakpoints = args.breakpoints ?? [];
-
     final path = args.source.path;
     final name = args.source.name;
     final uri = path != null
         ? normalizeUri(fromClientPathOrUri(path)).toString()
         : name!;
 
+    // Check if we should bundle this request with pending hot-reload.
+    final wasHandled = await _withImpendingReload(
+      // If `sourceModified` is true and user has reload-on-save enabled
+      // then hotReload request will arrive after setBreakpointsRequest.
+      reloadIsLikelyToHappen: args.sourceModified == true,
+      (p) => p.postponeSetBreakpointsRequest(uri, breakpoints, sendResponse),
+    );
+    if (wasHandled) {
+      return;
+    }
+
     // Use a completer to track when the response is sent, so any events related
     // to these breakpoints are not sent before the client has the IDs.
     final completer = Completer<void>();
 
-    final clientBreakpoints = breakpoints
-        .map((bp) => ClientBreakpoint(bp, completer.future))
-        .toList();
-    await isolateManager.setBreakpoints(uri, clientBreakpoints);
+    final breakpointChanges =
+        _applySetBreakpointsRequest(uri, breakpoints, completer.future);
 
-    sendResponse(SetBreakpointsResponseBody(
-      breakpoints: clientBreakpoints
-          // Send breakpoints back as unverified and with our generated IDs so we
-          // can update them with a 'breakpoint' event when we get the
-          // 'BreakpointAdded'/'BreakpointResolved' events from the VM.
-          .map((bp) => Breakpoint(
-              id: bp.id,
-              verified: false,
-              message: 'Breakpoint has not yet been resolved',
-              reason: 'pending'))
-          .toList(),
-    ));
+    // Update the breakpoints for all existing threads.
+    await Future.wait([
+      for (var thread in isolateManager.threads) ...[
+        for (var bp in breakpointChanges.toRemove)
+          isolateManager.removeBreakpoint(bp, thread),
+        for (var bp in breakpointChanges.toAdd)
+          isolateManager.addBreakpoint(bp, thread, uri),
+      ],
+    ]);
+
+    sendResponse(breakpointChanges.response);
     completer.complete();
   }
 
@@ -3051,5 +3166,271 @@ class _DdsCapabilities {
     } else {
       return false;
     }
+  }
+}
+
+/// Helper for batching setBreakpointsRequest and hotReload requests together.
+///
+/// Setting breakpoints and updating the source must be performed atomically
+/// for a variety of reasons.
+///
+/// We don't want to update breakpoints before the
+/// source is updated as it might trigger breakpoints in the old code before
+/// new code is reloaded on top. Similarly we don't want to update breakpoints
+/// after the source is updated because this might trigger old breakpoints in
+/// in the new code.
+///
+/// Updating breakpoints and source atomically is also more efficient.
+class _ImpendingReload {
+  final DartDebugAdapter adapter;
+
+  /// Empirically established interval which is long enough to capture
+  /// hotReload request arriving after setBreakpoints request.
+  ///
+  /// TODO(vegorov): this is rather long, means we only get reload 400+ms after
+  /// save. Why is latency so high?
+  static const debounceDuration = Duration(milliseconds: 200);
+
+  Timer? _debounceTimer;
+
+  /// Collection of pending `setBreakpoints` requests keyed by uri.
+  ///
+  /// We allow a single pending request for any uri: as each new one
+  /// supersedes the previous one and they can't be meaningfully merged
+  /// (unless they are identical). If a new one arrives we complete the
+  /// current pending one with an error.
+  final Map<
+      String,
+      ({
+        List<SourceBreakpoint> breakpoints,
+        void Function(SetBreakpointsResponseBody) sendResponse,
+        Completer<bool> result
+      })> pendingSetBreakpointsRequests = {};
+
+  /// Result of the pending `hotReload` request (if any).
+  Completer<bool>? pendingReloadResult;
+
+  /// `Future` which completes when currently running reload finishes.
+  ///
+  /// Note: it ignores reload errors as they are not relevant for consumers
+  /// of this `Future`.
+  late final Future<void> afterPendingReload =
+      pendingReloadResult!.future.catchError((_) => true);
+
+  /// Set to `true` when we forward hot-reload request to the VM.
+  bool reloading = false;
+
+  _ImpendingReload(this.adapter);
+
+  /// `Future` which completes when currently running reload finishes or
+  /// `null` if no reload is in progress.
+  Future<void>? get inProgress => reloading ? afterPendingReload : null;
+
+  /// Bundle `setBreakpoints` request with possible future `hotReload`.
+  ///
+  /// If `hotReload` does not arrive the returned `Future` will complete with
+  /// `false` signaling that we need to handle `setBreakpoints` without
+  /// bundling.
+  ///
+  /// If `hotReload` arrives then the returned `Future` will complete either
+  /// with `true` or with an error (if reload fails).
+  Future<bool> postponeSetBreakpointsRequest(
+      String uri,
+      List<SourceBreakpoint> breakpoints,
+      void Function(SetBreakpointsResponseBody) sendResponse) {
+    // If there is already a pending `setBreakpoints` for the same uri
+    // discard it.
+    if (pendingSetBreakpointsRequests[uri]
+        case (breakpoints: _, sendResponse: _, :final result)) {
+      result.completeError(DebugAdapterException(
+          'Ignoring duplicate request to set breakpoints for $uri.'));
+    }
+
+    // Register pending request and restart the debounce timer.
+    final result = Completer<bool>();
+    pendingSetBreakpointsRequests[uri] = (
+      breakpoints: breakpoints,
+      sendResponse: sendResponse,
+      result: result,
+    );
+    restartDebounceTimer();
+    return result.future;
+  }
+
+  /// Bundle `hotReload` request with future `setBreakpoints` and `hotReload`.
+  ///
+  /// Returns the `Future` which completes with `true` or with an error
+  /// after hot-reload is executed.
+  Future<bool> postponeReloadRequest() {
+    pendingReloadResult ??= Completer<bool>();
+    restartDebounceTimer();
+    return pendingReloadResult!.future;
+  }
+
+  void restartDebounceTimer() {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(debounceDuration, flushPostponedRequests);
+  }
+
+  /// Execute all postponed requests.
+  ///
+  /// If `hotReload` arrived execute it and bundle all collected
+  /// `setBreakpoints` into it and forward it to the VM.
+  ///
+  /// Otherwise unblock pending `setBreakpoints` and let them execute on their
+  /// own
+  Future<void> flushPostponedRequests() async {
+    final pendingReloadResult = this.pendingReloadResult;
+    if (pendingReloadResult == null) {
+      // No reload request actually arrived within debounce interval.
+      // Simply unblock all blocked requests.
+      for (final MapEntry(
+            key: _,
+            value: (breakpoints: _, sendResponse: _, result: result)
+          ) in pendingSetBreakpointsRequests.entries) {
+        result.complete(false);
+      }
+      adapter._impendingReload = null;
+      return;
+    }
+
+    // We have a pending reload request. We are going to start reload now and
+    // it is too late to join it. If any other `hotReload` and `setBreakpoints`
+    // requests arrive after this point they will be held on `inProgress`
+    // until we finish.
+    reloading = true;
+
+    // Prepare `vm.BreakpointsUpdate` for each isolate.
+    final threads = adapter.isolateManager.threads.toList();
+    final vmUris = {
+      for (var uri in pendingSetBreakpointsRequests.keys)
+        uri: adapter.isolateManager.fixSDKOrGoogle3Paths(Uri.parse(uri)),
+    };
+
+    final updates = {
+      for (var thread in threads)
+        thread: vm.BreakpointsUpdate(
+          isolateId: thread.isolate.id!,
+          toRemove: [],
+          toAdd: [],
+        ),
+    };
+
+    // Postponed responses for each pending `setBreakpoints` request.
+    //
+    // We will fire them back once reload completes successfully but before
+    // we complete pendingReloadResult future.
+    //
+    // This ordering is important because we want to ensure that we send
+    // breakpoints lists back to the client before we start sending
+    // breakpoint resolution events.
+    final pendingResponses = <void Function()>[];
+
+    // This will contain all ClientBreakpoint added by all bundled
+    // requests for each isolate. We will need this list to map results
+    // returned in vm.BreakpointsUpdateReport.additions back to
+    // ClientBreakpoint - as results will be given in the same order.
+    final allToAdd = <ThreadInfo, List<ClientBreakpoint>>{};
+    for (final (uri, (:breakpoints, :sendResponse, :result))
+        in pendingSetBreakpointsRequests.pairs) {
+      final uriUpdates = adapter._applySetBreakpointsRequest(
+          uri, breakpoints, afterPendingReload);
+
+      // Broadcast computed removals and additions to all threads.
+      for (var (thread, update) in updates.pairs) {
+        for (var bp in uriUpdates.toRemove) {
+          if (bp.forThread[thread]?.id case final vmId?) {
+            update.toRemove!.add(vmId);
+          }
+        }
+
+        final vmUri = vmUris[uri]!;
+        (allToAdd[thread] ??= []).addAll(uriUpdates.toAdd);
+        for (var bp in uriUpdates.toAdd) {
+          update.toAdd!.add(
+            vm.BreakpointLocation(
+              scriptUri: vmUri.toString(),
+              line: bp.breakpoint.line,
+              column: bp.breakpoint.column,
+            ),
+          );
+        }
+      }
+
+      // Forward result of reload into the result of the pending
+      // `setBreakpoints` request. Note that this also forwards an error
+      // if such is to occur.
+      result.complete(pendingReloadResult.future);
+
+      // Schedule a response to the `setBreakpoints` request.
+      pendingResponses.add(() => sendResponse(uriUpdates.response));
+    }
+
+    try {
+      // We are ready with the list of updates. Kick off the reload.
+      final updatesReport = await adapter.isolateManager.reloadSources(updates);
+
+      // Reload is completed, update breakpoint state based on the report.
+      for (var thread in threads) {
+        switch (updatesReport[thread]) {
+          case vm.BreakpointsUpdateReport(:final removals, :final additions):
+            // Process removal results.
+            //
+            // We don't really care if removals succeeded, because
+            // the whole ClientBreakpoint object is dead anyway and is
+            // no longer in the list of current breakpoints.
+            // However we can at least log an error if removal failed.
+            if (removals?.isNotEmpty ?? false) {
+              for (var removalResult in removals!) {
+                if (removalResult
+                    case vm.BreakpointsUpdateFailure(:final message)) {
+                  adapter.logger
+                      ?.call('Failed to remove old breakpoint: $message');
+                }
+              }
+            }
+
+            // Process addition results.
+            //
+            // These should contain a `vm.Breakpoint` object for each
+            // successful addition. We need to associate this with
+            // corresponding `ClientBreakpoint` which were created.
+            if (additions?.isNotEmpty ?? false) {
+              for (var (bp, result) in (allToAdd[thread]!, additions!).zipped) {
+                switch (result) {
+                  case final vm.Breakpoint vmBp:
+                    adapter.isolateManager
+                        .associateVmBreakpointWith(bp, thread, vmBp);
+
+                  case vm.BreakpointsUpdateFailure(:final message):
+                    adapter.logger
+                        ?.call('Failed to add new breakpoint: $message');
+                }
+              }
+            }
+
+          case vm.BreakpointsUpdateFailure(:final message):
+            adapter.logger
+                ?.call('Failed to update breakpoints in ${thread.isolate.id}: '
+                    '$message');
+        }
+      }
+
+      // The state of breakpoints is updated and we can dispatch
+      // responses to `setBreakpoints` requests which we were holding back.
+      for (var send in pendingResponses) {
+        send();
+      }
+
+      // Unblock all pending requests and signal that we successfully
+      // processed the reload and bundled all pending `setBreakpoints`
+      // requests into it.
+      pendingReloadResult.complete(true);
+    } catch (e, st) {
+      // Something went wrong. Forward the error instead.
+      pendingReloadResult.completeError(e, st);
+    }
+
+    adapter._impendingReload = null;
   }
 }

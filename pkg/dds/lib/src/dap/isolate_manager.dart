@@ -11,6 +11,7 @@ import 'package:dds_service_extensions/dds_service_extensions.dart';
 import 'package:vm_service/vm_service.dart' as vm;
 
 import '../rpc_error_codes.dart';
+import '../utils/collection.dart';
 import 'adapters/dart.dart';
 import 'adapters/mixins.dart';
 import 'utils.dart';
@@ -136,6 +137,8 @@ class IsolateManager {
   final _terseBreakpointFailureRegex =
       RegExp(r'Error occurred when resolving breakpoint location: (.*?)\.?$');
 
+  var clientBreakpointsByUri;
+
   IsolateManager(this._adapter);
 
   /// A list of all current active isolates.
@@ -255,11 +258,52 @@ class IsolateManager {
     return thread;
   }
 
-  /// Calls reloadSources for all isolates.
-  Future<void> reloadSources() async {
-    await Future.wait(_threadsByThreadId.values.map(
-      (isolate) => _reloadSources(isolate.isolate),
-    ));
+  /// Calls reloadSources for all isolate groups.
+  ///
+  /// If `breakpointUpdates` are provided they will be forwarded to respective
+  /// isolates as part of outgoing `reloadSources` requests.
+  ///
+  /// Returns results of applying `breakpointUpdates` for each isolate (either
+  /// [vm.BreakpointsUpdateReport] or [vm.BreakpointsUpdateFailure]).
+  Future<Map<ThreadInfo, Object>> reloadSources(
+      [Map<ThreadInfo, vm.BreakpointsUpdate>? breakpointUpdates]) async {
+    // We are going to send reload request once to each isolate group, so
+    // we start by grouping all isolates by their groups.
+    final groups = groupBy(
+        _threadsByThreadId.values, (thread) => thread.isolate.isolateGroupId!);
+
+    // For each isolate group compute list of [vm.BreakpointsUpdate].
+    final groupBreakpointUpdates = <String, List<vm.BreakpointsUpdate>>{};
+    if (breakpointUpdates != null) {
+      for (var (thread, update) in breakpointUpdates.pairs) {
+        groupBreakpointUpdates
+            .putIfAbsent(thread.isolate.isolateGroupId!, () => [])
+            .add(update);
+      }
+    }
+
+    // Make a copy before we hit `await`, isolates might exit when we come back.
+    final threadsByIsolateId = Map.of(_threadsByIsolateId);
+
+    // Fan out reload requests to all isolate groups.
+    final reports = await Future.wait([
+      for (var (isolateGroupId, threads) in groups.pairs)
+        _reloadSources(
+            threads.first.isolate, groupBreakpointUpdates[isolateGroupId]),
+    ]);
+
+    // Collect results of applying breakpoint updates.
+    final result = <ThreadInfo, Object>{
+      for (var thread in breakpointUpdates?.keys ?? <ThreadInfo>[])
+        thread: vm.BreakpointsUpdateFailure(),
+    };
+    for (var (isolateGroupId, groupReports) in (groups.keys, reports).zipped) {
+      for (var (update, report)
+          in (groupBreakpointUpdates[isolateGroupId]!, groupReports!).zipped) {
+        result[threadsByIsolateId[update.isolateId!]!] = report;
+      }
+    }
+    return result;
   }
 
   Future<void> resumeIsolate(vm.IsolateRef isolateRef) async {
@@ -861,10 +905,7 @@ class IsolateManager {
 
     // Store this event so if we get any future breakpoints that resolve to this
     // VM breakpoint, we can access the resolution info.
-    _breakpointResolvedEventsByVmId[(
-      isolateId: isolateId,
-      breakpointId: breakpointId
-    )] = event;
+    _breakpointResolvedEventsByVmId[uniqueBreakpointId] = event;
 
     // And for existing breakpoints, send (or queue) resolved events.
     final existingBreakpoints = _clientBreakpointsByVmId[uniqueBreakpointId];
@@ -1028,15 +1069,18 @@ class IsolateManager {
   }
 
   /// Calls reloadSources for the given isolate.
-  Future<void> _reloadSources(vm.IsolateRef isolateRef) async {
+  Future<List?> _reloadSources(vm.IsolateRef isolateRef,
+      [List<vm.BreakpointsUpdate>? breakpointUpdates]) async {
     final service = _adapter.vmService;
     if (!debug || service == null) {
-      return;
+      return null;
     }
 
     final isolateId = isolateRef.id!;
 
-    await service.reloadSources(isolateId);
+    final report = await service.reloadSources(isolateId,
+        breakpointsUpdates: breakpointUpdates);
+    return report.breakpointsUpdateReports;
   }
 
   /// Converts local Google3 or SDK file paths to URIs VM can recognize.
@@ -1056,7 +1100,7 @@ class IsolateManager {
   /// filesystem* accessed via a special scheme (`google3` and
   /// `org-dartlang-sdk` respectively) to hide local file layout from the
   /// front-end.
-  Uri _fixSDKOrGoogle3Paths(Uri sourcePathUri) {
+  Uri fixSDKOrGoogle3Paths(Uri sourcePathUri) {
     return _adapter.convertUriToOrgDartlangSdk(sourcePathUri) ??
         _convertPathToGoogle3Uri(sourcePathUri) ??
         sourcePathUri;
@@ -1106,44 +1150,65 @@ class IsolateManager {
 
       // Some file URIs (like SDK sources) need to be converted to
       // appropriate internal URIs to be able to set breakpoints.
-      final vmUri = _fixSDKOrGoogle3Paths(Uri.parse(uri));
+      final vmUri = fixSDKOrGoogle3Paths(Uri.parse(clientUri));
+      final vmBp = await service.addBreakpointWithScriptUri(
+          isolateId, vmUri.toString(), clientBreakpoint.breakpoint.line,
+          column: clientBreakpoint.breakpoint.column);
+      associateVmBreakpointWith(clientBreakpoint, thread, vmBp);
+    } catch (e) {
+      // Swallow errors setting breakpoints rather than failing the whole
+      // request as it's very easy for editors to send us breakpoints that
+      // aren't valid any more.
+      _adapter.logger?.call('Failed to add breakpoint $e');
+      queueFailedBreakpointEvent(e, clientBreakpoint);
+    }
+  }
 
-      // Set new breakpoints.
-      final newBreakpoints = _clientBreakpointsByUri[uri] ?? const [];
-      await Future.forEach<ClientBreakpoint>(newBreakpoints, (bp) async {
-        try {
-          final vmBp = await service.addBreakpointWithScriptUri(
-              isolateId, vmUri.toString(), bp.breakpoint.line,
-              column: bp.breakpoint.column);
-          final vmBpId = vmBp.id!;
-          final uniqueBreakpointId =
-              (isolateId: isolateId, breakpointId: vmBp.id!);
-          existingBreakpointsForIsolateAndUri[vmBpId] = vmBp;
+  void associateVmBreakpointWith(ClientBreakpoint clientBreakpoint,
+      ThreadInfo thread, vm.Breakpoint vmBp) {
+    clientBreakpoint.forThread[thread] = vmBp;
+    final uniqueBreakpointId =
+        (isolateId: thread.isolate.id!, breakpointId: vmBp.id!);
+    // Store this client breakpoint by the VM ID, so when we get events
+    // from the VM we can map them back to client breakpoints (for example
+    // to send resolved events).
+    _clientBreakpointsByVmId
+        .putIfAbsent(uniqueBreakpointId, () => [])
+        .add(clientBreakpoint);
 
-          // Store this client breakpoint by the VM ID, so when we get events
-          // from the VM we can map them back to client breakpoints (for example
-          // to send resolved events).
-          _clientBreakpointsByVmId
-              .putIfAbsent(uniqueBreakpointId, () => [])
-              .add(bp);
+    // Queue any resolved events that may have already arrived
+    // (either because the VM sent them before responding to us, or
+    // because it gave us an existing VM breakpoint because it resolved to
+    // the same location as another).
+    final resolvedEvent = _breakpointResolvedEventsByVmId[uniqueBreakpointId];
+    if (resolvedEvent != null) {
+      queueBreakpointResolutionEvent(resolvedEvent, clientBreakpoint);
+    }
+  }
 
-          // Queue any resolved events that may have already arrived
-          // (either because the VM sent them before responding to us, or
-          // because it gave us an existing VM breakpoint because it resolved to
-          // the same location as another).
-          final resolvedEvent =
-              _breakpointResolvedEventsByVmId[uniqueBreakpointId];
-          if (resolvedEvent != null) {
-            queueBreakpointResolutionEvent(resolvedEvent, bp);
-          }
-        } catch (e) {
-          // Swallow errors setting breakpoints rather than failing the whole
-          // request as it's very easy for editors to send us breakpoints that
-          // aren't valid any more.
-          _adapter.logger?.call('Failed to add breakpoint $e');
-          queueFailedBreakpointEvent(e, bp);
-        }
-      });
+  /// Removes [clientBreakpoint] from [thread] in the VM.
+  Future<void> removeBreakpoint(
+      ClientBreakpoint clientBreakpoint, ThreadInfo thread) async {
+    final service = _adapter.vmService;
+    if (!debug || service == null) {
+      return;
+    }
+
+    final isolateId = thread.isolate.id!;
+    final vmBreakpoint = clientBreakpoint.forThread[thread];
+    if (vmBreakpoint == null) {
+      // This isolate didn't have this breakpoint.
+      return;
+    }
+
+    try {
+      await service.removeBreakpoint(isolateId, vmBreakpoint.id!);
+      clientBreakpoint.forThread.remove(thread);
+    } catch (e) {
+      // Swallow errors removing breakpoints rather than failing the whole
+      // request as it's very possible that an isolate exited while we were
+      // sending this and the request will fail.
+      _adapter.logger?.call('Failed to remove old breakpoint $e');
     }
   }
 
@@ -1249,6 +1314,15 @@ class IsolateManager {
   /// References to stored data become invalid when a thread is resumed.
   void clearStoredData(ThreadInfo thread) {
     _storedData.removeWhere((_, value) => value.thread == thread);
+  }
+
+  ClientBreakpoint? findExistingClientBreakpoint(
+      String uri, SourceBreakpoint bp) {
+    return _clientBreakpointsByUri[uri]
+        ?.firstWhereOrNull((clientBp) => clientBp.breakpoint == bp);
+  }
+
+  void recordLatestClientBreakpoints(String uri, SourceBreakpoint bp) {
   }
 }
 
@@ -1399,7 +1473,7 @@ class ThreadInfo with FileUtils {
   /// This helper is used when trying to find [vm.Script] by matching its
   /// `uri`.
   Future<Uri?> _convertToPackageOrSdkPath(Uri sourcePathUri) async {
-    final uri = _manager._fixSDKOrGoogle3Paths(sourcePathUri);
+    final uri = _manager.fixSDKOrGoogle3Paths(sourcePathUri);
     if (uri.isScheme('org-dartlang-sdk')) {
       return uri; // No package path exists for SDK sources.
     }
