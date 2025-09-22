@@ -2301,7 +2301,7 @@ static Breakpoint* LookupBreakpoint(Isolate* isolate,
         *result = ObjectIdRing::kValid;
         return bpt;
       }
-      if (bpt_id < isolate->debugger()->limitBreakpointId()) {
+      if (bpt_id < isolate->debugger()->FirstUnusedBreakpointId()) {
         *result = ObjectIdRing::kCollected;
         return nullptr;
       }
@@ -4224,7 +4224,7 @@ static void ApplyBreakpointsUpdates(
                                       "Breakpoint %s not found in isolate %s.",
                                       breakpoint_id, isolate_id_str);
         } else {
-          isolate->debugger()->RemoveBreakpoint(bpt->id());
+          isolate->debugger()->RemoveBreakpoint(bpt);
 
           JSONObject success(&removals);
           success.AddProperty("type", "Success");
@@ -4636,7 +4636,7 @@ static void RemoveBreakpoint(Thread* thread, JSONStream* js) {
     PrintInvalidParamError(js, "breakpointId");
     return;
   }
-  isolate->debugger()->RemoveBreakpoint(bpt->id());
+  isolate->debugger()->RemoveBreakpoint(bpt);
   PrintSuccess(js);
 }
 
