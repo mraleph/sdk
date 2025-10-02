@@ -1370,27 +1370,65 @@ DART_FORCE_INLINE static intptr_t GetPlaceId(const Instruction* instr) {
 
 enum CSEMode { kOptimizeLoads, kOptimizeStores };
 
-static AliasedSet* NumberPlaces(FlowGraph* graph,
+static bool CanHoist(FlowGraph* flow_graph, BlockEntryInstr* header, Instruction* instr) {
+  // Iterate over all blocks in the loop.
+  LoopInfo* loop = header->loop_info();
+  for (BitVector::Iterator loop_it(loop->blocks()); !loop_it.Done();
+        loop_it.Advance()) {
+    BlockEntryInstr* block = flow_graph->preorder()[loop_it.Current()];
+
+    if (!loop->IsAlwaysTaken(block)) {
+      if (CompilerState::ShouldTrace()) OS::PrintErr("  %s not always taken\n", block->ToCString());
+      return false;
+    }
+
+    for (auto current : block->instructions()) {
+      if (current == instr) {
+        // Reached the instruction we care about with out hitting any side
+        // effects.
+        return true;
+      } else if (current->MayHaveVisibleEffect()) {
+        if (CompilerState::ShouldTrace()) OS::PrintErr("  %s has visible effect\n", current->ToCString());
+        return false;
+      }
+    }
+  }
+  UNREACHABLE();
+  return false;
+}
+
+static AliasedSet* NumberPlaces(FlowGraph* flow_graph,
                                 PointerSet<Place>* map,
                                 CSEMode mode) {
+  const LoopHierarchy& loop_hierarchy = flow_graph->GetLoopHierarchy();
+  loop_hierarchy.ComputeInduction();
+
   // Loads representing different expression ids will be collected and
   // used to build per offset kill sets.
-  Zone* zone = graph->zone();
+  Zone* zone = flow_graph->zone();
   ZoneGrowableArray<Place*>* places = new (zone) ZoneGrowableArray<Place*>(10);
 
   bool has_loads = false;
   bool has_stores = false;
-  for (BlockIterator it = graph->reverse_postorder_iterator(); !it.Done();
+  for (BlockIterator it = flow_graph->reverse_postorder_iterator(); !it.Done();
        it.Advance()) {
     BlockEntryInstr* block = it.Current();
+
+    BlockEntryInstr* loop_header = block->IsInsideLoop() ? block->loop_info()->header() : nullptr;
+    BlockEntryInstr* loop_pre_header = loop_header != nullptr ? loop_header->ImmediateDominator() : nullptr;
 
     for (ForwardInstructionIterator instr_it(block); !instr_it.Done();
          instr_it.Advance()) {
       Instruction* instr = instr_it.Current();
-      Place place(instr, &has_loads, &has_stores);
+      bool is_load = false;
+      bool is_store = false;
+      Place place(instr, &is_load, &is_store);
       if (place.kind() == Place::kNone) {
         continue;
       }
+
+      if (is_load) has_loads = true;
+      if (is_store) has_stores = true;
 
       Place* result = map->LookupValue(&place);
       if (result == nullptr) {
@@ -1398,13 +1436,94 @@ static AliasedSet* NumberPlaces(FlowGraph* graph,
         map->Insert(result);
         places->Add(result);
 
-        if (FLAG_trace_optimization && graph->should_print()) {
+        if (FLAG_trace_optimization && flow_graph->should_print()) {
           THR_Print("numbering %s as %" Pd "\n", result->ToCString(),
                     result->id());
         }
       }
 
       SetPlaceId(instr, result->id());
+      if (mode == kOptimizeLoads && is_load && loop_pre_header != nullptr) {
+        switch (instr->tag()) {
+          case Instruction::kLoadField:
+          case Instruction::kLoadStaticField:
+            // TODO:
+            break;
+
+          case Instruction::kLoadIndexed: {
+            if (!flow_graph->is_licm_allowed()) {
+              break;
+            }
+
+            auto load_indexed = instr->Cast<LoadIndexedInstr>();
+
+            auto array = load_indexed->array()->definition();
+            if (!loop_pre_header->last_instruction()->IsDominatedBy(array)) {
+              continue;
+            }
+
+            GotoInstr* last = loop_pre_header->last_instruction()->AsGoto();
+
+            // The location (determined by array and index) from which we are
+            // loading is invariant. The load itself might not be an invariant
+            // because there are might be interfering stores inside the loop.
+            // However there is a possibility that we can fully forward all
+            // stores and loads if we insert an additional load in the preheader.
+            auto index = load_indexed->index()->definition();
+            if (!loop_pre_header->last_instruction()->IsDominatedBy(index)) {
+              // Check if this is a bounds check.
+              if (auto check_bound = index->AsGenericCheckBound()) {
+                if (CompilerState::ShouldTrace()) OS::PrintErr("here with %s\n", check_bound->ToCString());
+                if (!loop_pre_header->last_instruction()->IsDominatedBy(check_bound->index()->definition()) ||
+                    !loop_pre_header->last_instruction()->IsDominatedBy(check_bound->length()->definition())) {
+                  if (CompilerState::ShouldTrace()) OS::PrintErr("... not dom\n");
+                  continue;
+                }
+                // Can possibly duplicate the check as well.
+                if (!CanHoist(flow_graph, loop_header, check_bound)) {
+                  if (CompilerState::ShouldTrace()) OS::PrintErr("... not CanHoist\n");
+                  continue;
+                }
+
+                auto check_bound_clone = new GenericCheckBoundInstr(
+                  new Value(check_bound->length()->definition()),
+                  new Value(check_bound->index()->definition()),
+                  last->deopt_id(), check_bound->IsPhantom() ? GenericCheckBoundInstr::kPhantom : GenericCheckBoundInstr::kReal);
+                flow_graph->InsertBefore(last, check_bound_clone, last->env(), FlowGraph::kValue);
+                if (check_bound_clone->env() != nullptr) {
+                  // If the hoisted instruction lazy-deopts, it should continue at the start of
+                  // the Goto (of which we copy the deopt-id from).
+                  check_bound_clone->env()->MarkAsLazyDeoptToBeforeDeoptId();
+                  check_bound_clone->env()->MarkAsHoisted();
+                }
+                index = check_bound_clone;
+              } else {
+                continue;
+              }
+            }
+
+            auto clone = new LoadIndexedInstr(new Value(array),
+                   new Value(index),
+                   load_indexed->index_unboxed(),
+                   load_indexed->index_scale(),
+                   load_indexed->class_id(),
+                   load_indexed->aligned() ? AlignmentType::kAlignedAccess : AlignmentType::kUnalignedAccess,
+                   last->deopt_id(),  // TODO: copy deopt ID from preheader branch.
+                   load_indexed->source());
+            flow_graph->InsertBefore(last, clone, last->env(), FlowGraph::kValue);
+            if (clone->env() != nullptr) {
+              // If the hoisted instruction lazy-deopts, it should continue at the start of
+              // the Goto (of which we copy the deopt-id from).
+              clone->env()->MarkAsLazyDeoptToBeforeDeoptId();
+              clone->env()->MarkAsHoisted();
+            }
+            SetPlaceId(clone, result->id());
+            break;
+          }
+          default:
+            break;
+        }
+      }
     }
   }
 
@@ -1416,11 +1535,11 @@ static AliasedSet* NumberPlaces(FlowGraph* graph,
   }
 
   PhiPlaceMoves* phi_moves =
-      ComputePhiMoves(map, places, graph->should_print());
+      ComputePhiMoves(map, places, flow_graph->should_print());
 
   // Build aliasing sets mapping aliases to loads.
   return new (zone)
-      AliasedSet(zone, map, places, phi_moves, graph->should_print());
+      AliasedSet(zone, map, places, phi_moves, flow_graph->should_print());
 }
 
 // Load instructions handled by load elimination.
@@ -2009,14 +2128,14 @@ class LoadOptimizer : public ValueObject {
     }
   }
 
-  // Only forward stores to normal arrays, float64, and simd arrays
+  // Only forward stores to normal arrays, int64, float64, and simd arrays
   // to loads because other array stores (intXX/uintXX/float32)
   // may implicitly convert the value stored.
   bool CanForwardStore(StoreIndexedInstr* array_store) {
     if (array_store == nullptr) return true;
     auto const rep = RepresentationUtils::RepresentationOfArrayElement(
         array_store->class_id());
-    return !RepresentationUtils::IsUnboxedInteger(rep) && rep != kUnboxedFloat;
+    return rep == kUnboxedInt64 || (!RepresentationUtils::IsUnboxedInteger(rep) && rep != kUnboxedFloat);
   }
 
   static bool AlreadyPinnedByRedefinition(Definition* replacement,
@@ -2398,8 +2517,21 @@ class LoadOptimizer : public ValueObject {
         } else {
           temp->SetAll();
           ASSERT(block->PredecessorCount() > 0);
+          const bool is_loop_header = block->IsLoopHeader();
+          BlockEntryInstr* pre_header = nullptr;
+          if (block->IsLoopHeader()) {
+            if (CompilerState::ShouldTrace()) {
+              OS::PrintErr("loop header %s\n", block->ToCString());
+            }
+            pre_header = block->ImmediateDominator();
+          }
+          bool other_blocks = false;
           for (intptr_t i = 0; i < block->PredecessorCount(); i++) {
             BlockEntryInstr* pred = block->PredecessorAt(i);
+            if (pred == pre_header) {
+              continue;
+            }
+
             BitVector* pred_out = out_[pred->preorder_number()];
             if (pred_out == nullptr) continue;
             PhiPlaceMoves::MovesList phi_moves =
@@ -2412,6 +2544,36 @@ class LoadOptimizer : public ValueObject {
               pred_out = temp_out;
             }
             temp->Intersect(pred_out);
+            other_blocks = true;
+          }
+
+          if (is_loop_header && pre_header != nullptr && out_[pre_header->preorder_number()] != nullptr) {
+            BitVector* pre_header_out = out_[pre_header->preorder_number()];
+            PhiPlaceMoves::MovesList phi_moves =
+                aliased_set_->phi_moves()->GetOutgoingMoves(pre_header);
+            if (phi_moves != nullptr) {
+              // If there are phi moves, perform intersection with
+              // a copy of pre_header_out where the phi moves are applied.
+              temp_out->CopyFrom(pre_header_out);
+              PerformPhiMoves(phi_moves, temp_out, forwarded_loads);
+              pre_header_out = temp_out;
+            }
+
+            if (other_blocks) {
+              if (CompilerState::ShouldTrace()) {
+                for (BitVector::Iterator it(temp);
+                    !it.Done();
+                    it.Advance()) {
+                  const auto place_id = it.Current();
+                  if (!pre_header_out->Contains(place_id)) {
+                    OS::PrintErr("place %s live on back edges but not from pre_header\n", aliased_set_->places()[place_id]->ToCString());
+                  }
+                }
+              }
+            }
+
+            temp->Intersect(pre_header_out);
+
           }
         }
 

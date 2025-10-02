@@ -6726,6 +6726,7 @@ class LoadIndexedInstr : public TemplateDefinition<2, NoThrow> {
   intptr_t index_scale() const { return index_scale_; }
   intptr_t class_id() const { return class_id_; }
   bool aligned() const { return alignment_ == kAlignedAccess; }
+  bool index_unboxed() const { return index_unboxed_; }
 
   virtual intptr_t DeoptimizationTarget() const {
     // Direct access since this instruction cannot deoptimize, and the deopt-id
