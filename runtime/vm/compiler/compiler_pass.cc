@@ -296,6 +296,7 @@ FlowGraph* CompilerPass::RunPipeline(PipelineMode mode,
   INVOKE_PASS(SetOuterInliningId);
   INVOKE_PASS(TypePropagation);
   INVOKE_PASS(ApplyClassIds);
+  INVOKE_PASS(Canonicalize);
   INVOKE_PASS(Inlining);
   INVOKE_PASS(TypePropagation);
   INVOKE_PASS(ApplyClassIds);

@@ -2861,6 +2861,14 @@ Definition* LoadFieldInstr::Canonicalize(FlowGraph* flow_graph) {
               Smi::Handle(Smi::New(slot.field().guarded_list_length())));
         }
       }
+    } else if (instance()->BindsToConstant()) {
+      if (CompilerState::ShouldTrace()) {
+        OS::PrintErr("%s -> %s\n", instance()->BoundConstant().ToCString(), instance()->BoundConstant().IsArray() ? "+" : "-");
+      }
+      if (instance()->BoundConstant().IsArray()) {
+        const auto& array = Array::Cast(instance()->BoundConstant());
+        return flow_graph->GetConstant(Smi::Handle(Smi::New(array.Length())));
+      }
     }
   }
 
@@ -6891,7 +6899,15 @@ Definition* LoadIndexedInstr::Canonicalize(FlowGraph* flow_graph) {
       flow_graph->InsertBefore(this, load, env(), FlowGraph::kValue);
       return load;
     }
+  } else if (representation() == kTagged && array()->BindsToConstant() && (array()->BoundConstant().IsArray() && Array::Cast(array()->BoundConstant()).IsImmutable()) && index()->BindsToConstant()) {
+    const auto& array_value = Array::Cast(array()->BoundConstant());
+    const auto index_value = Integer::Cast(index()->BoundConstant()).Value();
+    if (0 <= index_value && index_value < array_value.Length()) {
+      return flow_graph->GetConstant(Object::Handle(array_value.At(index_value)));
+    }
   }
+
+
   return this;
 }
 
