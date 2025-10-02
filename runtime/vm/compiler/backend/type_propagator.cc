@@ -748,6 +748,21 @@ CompileType CompileType::NullableInt() {
                           kCannotBeSentinel);
 }
 
+CompileType CompileType::Int32x4() {
+  return FromAbstractType(Type::ZoneHandle(Type::Int32x4()), kCannotBeNull,
+                          kCannotBeSentinel);
+}
+
+CompileType CompileType::Float32x4() {
+  return FromAbstractType(Type::ZoneHandle(Type::Float32x4()), kCannotBeNull,
+                          kCannotBeSentinel);
+}
+
+CompileType CompileType::Float64x2() {
+  return FromAbstractType(Type::ZoneHandle(Type::Float64x2()), kCannotBeNull,
+                          kCannotBeSentinel);
+}
+
 CompileType CompileType::Smi() {
   return CompileType(kCannotBeNull, kCannotBeSentinel, kSmiCid,
                      &Type::ZoneHandle(Type::SmiType()));

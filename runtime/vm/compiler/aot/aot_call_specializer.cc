@@ -324,6 +324,15 @@ CompileType AotCallSpecializer::BuildStrengthenedReceiverType(Value* input,
   } else if (cid == kDoubleCid && !input->Type()->IsNullableDouble()) {
     type = CompileType::NullableDouble();
     refined_type = CompileType::ComputeRefinedType(old_type, &type);
+  } else if (cid == kInt32x4Cid && !input->Type()->IsNullableInt32x4()) {
+    type = CompileType::Int32x4();
+    refined_type = CompileType::ComputeRefinedType(old_type, &type);
+  } else if (cid == kFloat32x4Cid && !input->Type()->IsNullableFloat32x4()) {
+    type = CompileType::Float32x4();
+    refined_type = CompileType::ComputeRefinedType(old_type, &type);
+  } else if (cid == kFloat64x2Cid && !input->Type()->IsNullableFloat64x2()) {
+    type = CompileType::Float64x2();
+    refined_type = CompileType::ComputeRefinedType(old_type, &type);
   }
 
   if (refined_type != old_type) {
@@ -370,7 +379,8 @@ bool AotCallSpecializer::TryOptimizeStaticCallUsingStaticTypes(
   const Class& owner = Class::Handle(Z, target.Owner());
   const intptr_t cid = owner.id();
   if (cid == kSmiCid || cid == kMintCid || cid == kIntegerCid ||
-      cid == kDoubleCid) {
+      cid == kDoubleCid || cid == kInt32x4Cid ||
+      cid == kFloat32x4Cid || cid == kFloat64x2Cid) {
     // Sometimes TFA de-virtualizes instance calls to static calls.  In such
     // cases the VM might have a looser type on the receiver, so we explicitly
     // tighten it (this is safe since it was proven that the receiver is either
@@ -392,7 +402,8 @@ bool AotCallSpecializer::TryOptimizeStaticCallUsingStaticTypes(
   }
 
   return TryOptimizeIntegerOperation(instr, op_kind) ||
-         TryOptimizeDoubleOperation(instr, op_kind);
+         TryOptimizeDoubleOperation(instr, op_kind) ||
+         TryOptimizeSimdOperation(instr, op_kind);
 }
 
 Definition* AotCallSpecializer::TryOptimizeDivisionOperation(
@@ -628,6 +639,123 @@ bool AotCallSpecializer::TryOptimizeIntegerOperation(TemplateDartCall<0>* instr,
       left_value = PrepareStaticOpInput(left_value, kMintCid, instr);
       replacement = new (Z) UnaryInt64OpInstr(
           op_kind, left_value, DeoptId::kNone, Instruction::kNotSpeculative);
+    }
+  }
+
+  if (replacement != nullptr && !replacement->ComputeCanDeoptimize()) {
+    if (FLAG_trace_strong_mode_types) {
+      THR_Print("[Strong mode] Optimization: replacing %s with %s\n",
+                instr->ToCString(), replacement->ToCString());
+    }
+    ReplaceCall(instr, replacement);
+    RefineUseTypes(replacement);
+    return true;
+  }
+
+  return false;
+}
+
+bool AotCallSpecializer::TryOptimizeSimdOperation(TemplateDartCall<0>* instr,
+                                                    Token::Kind op_kind) {
+  if (instr->type_args_len() != 0) {
+    // Arithmetic operations don't have type arguments.
+    return false;
+  }
+
+  if (!FlowGraphCompiler::SupportsUnboxedDoubles()) {
+    return false;
+  }
+
+  Definition* replacement = nullptr;
+
+  if (instr->ArgumentCount() == 2) {
+    Value* left_value = instr->ArgumentValueAt(0);
+    Value* right_value = instr->ArgumentValueAt(1);
+    CompileType* left_type = left_value->Type();
+    CompileType* right_type = right_value->Type();
+
+    if (!left_type->IsNullableDouble() &&
+        !IsSupportedIntOperandForStaticDoubleOp(left_type)) {
+      return false;
+    }
+    if (!right_type->IsNullableDouble() &&
+        !IsSupportedIntOperandForStaticDoubleOp(right_type)) {
+      return false;
+    }
+
+    switch (op_kind) {
+      case Token::kEQ:
+        FALL_THROUGH;
+      case Token::kNE: {
+        // TODO(dartbug.com/32166): Support EQ, NE for nullable doubles.
+        // (requires null-aware comparison instruction).
+        if (!left_type->is_nullable() && !right_type->is_nullable()) {
+          left_value = PrepareStaticOpInput(left_value, kDoubleCid, instr);
+          right_value = PrepareStaticOpInput(right_value, kDoubleCid, instr);
+          replacement = new (Z) EqualityCompareInstr(
+              instr->source(), op_kind, left_value, right_value, kDoubleCid,
+              DeoptId::kNone, /*null_aware=*/false,
+              Instruction::kNotSpeculative);
+          break;
+        }
+        break;
+      }
+      case Token::kLT:
+        FALL_THROUGH;
+      case Token::kLTE:
+        FALL_THROUGH;
+      case Token::kGT:
+        FALL_THROUGH;
+      case Token::kGTE: {
+        left_value = PrepareStaticOpInput(left_value, kDoubleCid, instr);
+        right_value = PrepareStaticOpInput(right_value, kDoubleCid, instr);
+        replacement = new (Z) RelationalOpInstr(
+            instr->source(), op_kind, left_value, right_value, kDoubleCid,
+            DeoptId::kNone, Instruction::kNotSpeculative);
+        break;
+      }
+      case Token::kADD:
+        FALL_THROUGH;
+      case Token::kSUB:
+        FALL_THROUGH;
+      case Token::kMUL:
+        FALL_THROUGH;
+      case Token::kDIV: {
+        left_value = PrepareStaticOpInput(left_value, kDoubleCid, instr);
+        right_value = PrepareStaticOpInput(right_value, kDoubleCid, instr);
+        replacement = new (Z) BinaryDoubleOpInstr(
+            op_kind, left_value, right_value, DeoptId::kNone, instr->source(),
+            Instruction::kNotSpeculative);
+        break;
+      }
+
+      case Token::kBIT_OR:
+        FALL_THROUGH;
+      case Token::kBIT_XOR:
+        FALL_THROUGH;
+      case Token::kBIT_AND:
+        FALL_THROUGH;
+      case Token::kMOD:
+        FALL_THROUGH;
+      case Token::kTRUNCDIV:
+        FALL_THROUGH;
+      default:
+        break;
+    }
+  } else if (instr->ArgumentCount() == 1) {
+    Value* left_value = instr->ArgumentValueAt(0);
+    CompileType* left_type = left_value->Type();
+
+    // We only support unary operations on nullable doubles.
+    if (!left_type->IsNullableDouble()) {
+      return false;
+    }
+
+    if (op_kind == Token::kNEGATE) {
+      left_value = PrepareStaticOpInput(left_value, kDoubleCid, instr);
+      replacement = new (Z)
+          UnaryDoubleOpInstr(Token::kNEGATE, left_value, instr->deopt_id(),
+                             Instruction::kNotSpeculative);
     }
   }
 

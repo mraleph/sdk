@@ -141,6 +141,12 @@ bool IsSubtypeOfInt(const AbstractType& type);
 // Returns true if [type] is the "double" type.
 bool IsDoubleType(const AbstractType& type);
 
+bool IsInt32x4Type(const AbstractType& type);
+
+bool IsFloat32x4Type(const AbstractType& type);
+
+bool IsFloat64x2Type(const AbstractType& type);
+
 // Returns true if [type] is the "double" type.
 bool IsBoolType(const AbstractType& type);
 

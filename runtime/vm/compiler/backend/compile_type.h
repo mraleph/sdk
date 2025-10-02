@@ -176,6 +176,10 @@ class CompileType : public ZoneAllocated {
   // Create nullable Int type.
   static CompileType NullableInt();
 
+  static CompileType Int32x4();
+  static CompileType Float32x4();
+  static CompileType Float64x2();
+
   // Create non-nullable Smi type.
   static CompileType Smi();
 
@@ -275,6 +279,37 @@ class CompileType : public ZoneAllocated {
     }
     return false;
   }
+
+  bool IsNullableInt32x4() {
+    if (cid_ == kInt32x4Cid) {
+      return true;
+    }
+    if ((cid_ == kIllegalCid) || (cid_ == kDynamicCid)) {
+      return type_ != nullptr && compiler::IsInt32x4Type(*type_);
+    }
+    return false;
+  }
+
+  bool IsNullableFloat32x4() {
+    if (cid_ == kFloat32x4Cid) {
+      return true;
+    }
+    if ((cid_ == kIllegalCid) || (cid_ == kDynamicCid)) {
+      return type_ != nullptr && compiler::IsFloat32x4Type(*type_);
+    }
+    return false;
+  }
+
+  bool IsNullableFloat64x2() {
+    if (cid_ == kFloat64x2Cid) {
+      return true;
+    }
+    if ((cid_ == kIllegalCid) || (cid_ == kDynamicCid)) {
+      return type_ != nullptr && compiler::IsFloat64x2Type(*type_);
+    }
+    return false;
+  }
+
 
   // Returns true if a value of this CompileType can contain a Smi.
   // Note that this is not the same as calling

@@ -9416,6 +9416,12 @@ class Type : public AbstractType {
   // The 'int?' type.
   static TypePtr NullableIntType();
 
+  static TypePtr NullableInt32x4Type();
+
+  static TypePtr NullableFloat32x4Type();
+
+  static TypePtr NullableFloat64x2Type();
+
   // The 'Smi' type.
   static TypePtr SmiType();
 

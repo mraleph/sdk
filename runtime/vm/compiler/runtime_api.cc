@@ -72,6 +72,18 @@ bool IsDoubleType(const AbstractType& type) {
   return type.IsDoubleType();
 }
 
+bool IsInt32x4Type(const AbstractType& type) {
+  return type.IsInt32x4Type();
+}
+
+bool IsFloat32x4Type(const AbstractType& type) {
+  return type.IsFloat32x4Type();
+}
+
+bool IsFloat64x2Type(const AbstractType& type) {
+  return type.IsFloat64x2Type();
+}
+
 bool IsBoolType(const AbstractType& type) {
   return type.IsBoolType();
 }
