@@ -3385,6 +3385,8 @@ Definition* UnboxIntegerInstr::Canonicalize(FlowGraph* flow_graph) {
   return this;
 }
 
+DEFINE_FLAG(bool, x_remove_int64_to_int32_conversions, false, "remove int64->int32 conversions");
+
 Definition* IntConverterInstr::Canonicalize(FlowGraph* flow_graph) {
   if (!HasUses()) return nullptr;
 
@@ -3447,6 +3449,13 @@ Definition* IntConverterInstr::Canonicalize(FlowGraph* flow_graph) {
                             unbox_defn->value_mode());
     flow_graph->InsertBefore(this, replacement, env(), FlowGraph::kValue);
     return replacement;
+  }
+
+  if (FLAG_x_remove_int64_to_int32_conversions) {
+    if (!flow_graph->unmatched_representations_allowed() &&
+        from() == kUnboxedInt64 && to() == kUnboxedInt32) {
+      return value()->definition();
+    }
   }
 
   return this;

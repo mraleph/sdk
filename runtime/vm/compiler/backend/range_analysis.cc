@@ -1389,18 +1389,60 @@ void RangeAnalysis::RemoveConstraints() {
   }
 }
 
+static bool OnlyNarrowingUses(Definition* defn) {
+  if (defn->env_use_list() != nullptr) {
+    if (CompilerState::ShouldTrace()) {
+      OS::PrintErr("considering %s: has environment use at %s\n", defn->ToCString(), defn->env_use_list()->instruction()->ToCString());
+    }
+    return false;
+  }
+
+  for (auto use : defn->input_uses()) {
+    if (auto converter = use->instruction()->AsIntConverter()) {
+      if (converter->to() != kUnboxedInt32) {
+        if (CompilerState::ShouldTrace()) {
+          OS::PrintErr("considering %s: has non truncating use at %s\n", defn->ToCString(), use->instruction()->ToCString());
+        }
+        return false;
+      }
+    } else if (auto binary_int32_op = use->instruction()->AsBinaryInt32Op()) {
+      continue;
+    } else {
+      if (CompilerState::ShouldTrace()) {
+        OS::PrintErr("considering %s: has non truncating use at %s\n", defn->ToCString(), use->instruction()->ToCString());
+      }
+      return false;
+    }
+  }
+
+  return true;
+}
+
+DEFINE_FLAG(bool, x_narrow, false, "narrow");
+
+
 static void NarrowBinaryInt64Op(BinaryInt64OpInstr* int64_op) {
-  if (Range::Fits(int64_op->range(), kUnboxedInt32) &&
+  if (CompilerState::ShouldTrace()) {
+    OS::PrintErr("considering %s (%s op %s => %s)\n", int64_op->ToCString(),
+                 Range::ToCString(int64_op->left()->definition()->range()),
+                 Range::ToCString(int64_op->right()->definition()->range()),
+                 Range::ToCString(int64_op->range()));
+
+  }
+
+  if ((Range::Fits(int64_op->range(), kUnboxedInt32) &&
       Range::Fits(int64_op->left()->definition()->range(), kUnboxedInt32) &&
       Range::Fits(int64_op->right()->definition()->range(), kUnboxedInt32) &&
       BinaryInt32OpInstr::IsSupported(int64_op->op_kind(), int64_op->left(),
-                                      int64_op->right())) {
+                                      int64_op->right())) || (FLAG_x_narrow && (int64_op->op_kind() == Token::kADD || int64_op->op_kind() == Token::kBIT_AND) &&
+             OnlyNarrowingUses(int64_op))) {
     BinaryInt32OpInstr* int32_op = new BinaryInt32OpInstr(
         int64_op->op_kind(), int64_op->left()->CopyWithType(),
         int64_op->right()->CopyWithType(), int64_op->DeoptimizationTarget());
     int32_op->set_range(*int64_op->range());
-    int32_op->set_can_overflow(false);
+    int32_op->mark_truncating();
     int64_op->ReplaceWith(int32_op, nullptr);
+    int32_op->RemoveEnvironment();
   }
 }
 
@@ -1414,7 +1456,7 @@ static void NarrowInt64ComparisonInstr(ComparisonInstr* int64_op) {
 #endif
 
 void RangeAnalysis::NarrowInt64OperationsToInt32() {
-  for (intptr_t i = 0; i < binary_int64_ops_.length(); i++) {
+  for (intptr_t i = binary_int64_ops_.length() - 1; i >= 0; i--) {
     NarrowBinaryInt64Op(binary_int64_ops_[i]);
   }
 #if defined(TARGET_ARCH_IS_32_BIT)

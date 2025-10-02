@@ -1258,6 +1258,8 @@ Condition TestCidsInstr::EmitConditionCode(FlowGraphCompiler* compiler,
   return kInvalidCondition;
 }
 
+DEFINE_FLAG(bool, x_no_constant_operand, false, "no constant operand");
+
 LocationSummary* RelationalOpInstr::MakeLocationSummary(Zone* zone,
                                                         bool opt) const {
   const intptr_t kNumInputs = 2;
@@ -1269,7 +1271,7 @@ LocationSummary* RelationalOpInstr::MakeLocationSummary(Zone* zone,
     locs->set_in(1, Location::RequiresFpuRegister());
   } else {
     locs->set_in(0, Location::RequiresRegister());
-    locs->set_in(1, LocationRegisterOrConstant(right()));
+    locs->set_in(1, FLAG_x_no_constant_operand ? Location::RequiresRegister() : LocationRegisterOrConstant(right()));
   }
   locs->set_out(0, Location::RequiresRegister());
   return locs;
@@ -1905,6 +1907,9 @@ LocationSummary* LoadIndexedInstr::MakeLocationSummary(Zone* zone,
   return locs;
 }
 
+DEFINE_FLAG(bool, x_no_ldrs, false, "no constant operand");
+
+
 void LoadIndexedInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   // The array register points to the backing store for external arrays.
   const Register array = locs()->in(kArrayPos).reg();
@@ -1923,7 +1928,7 @@ void LoadIndexedInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   ASSERT(representation() == Boxing::NativeRepresentation(rep));
   if (RepresentationUtils::IsUnboxedInteger(rep)) {
     const Register result = locs()->out(0).reg();
-    __ ldr(result, element_address, RepresentationUtils::OperandSize(rep));
+    __ ldr(result, element_address, FLAG_x_no_ldrs && rep == kUnboxedInt32 ? compiler::kUnsignedFourBytes : RepresentationUtils::OperandSize(rep));
   } else if (RepresentationUtils::IsUnboxed(rep)) {
     const VRegister result = locs()->out(0).fpu_reg();
     if (rep == kUnboxedFloat) {
@@ -2883,14 +2888,21 @@ class CheckStackOverflowSlowPath
   compiler::Label osr_entry_label_;
 };
 
+DEFINE_FLAG(bool, x_use_test_for_interrupt, false, "aaaa");
+
 void CheckStackOverflowInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   CheckStackOverflowSlowPath* slow_path = new CheckStackOverflowSlowPath(this);
   compiler->AddSlowPathCode(slow_path);
 
   __ ldr(TMP, compiler::Address(
                   THR, compiler::target::Thread::stack_limit_offset()));
-  __ CompareRegisters(SP, TMP);
-  __ b(slow_path->entry_label(), LS);
+  if (in_loop() && FLAG_x_use_test_for_interrupt) {
+    __ TestImmediate(TMP, 0x3);
+    __ b(slow_path->entry_label(), NOT_EQUAL);
+  } else {
+    __ CompareRegisters(SP, TMP);
+    __ b(slow_path->entry_label(), LS);
+  }
   if (compiler->CanOSRFunction() && in_loop()) {
     const Register function = locs()->temp(0).reg();
     // In unoptimized code check the usage counter to trigger OSR at loop
@@ -5381,6 +5393,8 @@ static void EmitInt64ModTruncDiv(FlowGraphCompiler* compiler,
   }
 }
 
+DEFINE_FLAG(bool, x_better_binary_ops, false, "");
+
 LocationSummary* BinaryInt64OpInstr::MakeLocationSummary(Zone* zone,
                                                          bool opt) const {
   const intptr_t kNumInputs = 2;
@@ -5416,7 +5430,7 @@ LocationSummary* BinaryInt64OpInstr::MakeLocationSummary(Zone* zone,
           zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
       summary->set_in(0, Location::RequiresRegister());
       summary->set_in(1, LocationRegisterOrConstant(right()));
-      summary->set_out(0, Location::RequiresRegister());
+      summary->set_out(0, FLAG_x_better_binary_ops ? Location::MayBeSameAsFirstInput() : Location::RequiresRegister());
       return summary;
     }
   }
@@ -5817,7 +5831,79 @@ void UnaryUint32OpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
   __ mvnw(out, left);
 }
 
-DEFINE_UNIMPLEMENTED_INSTRUCTION(BinaryInt32OpInstr)
+LocationSummary* BinaryInt32OpInstr::MakeLocationSummary(Zone* zone,
+                                                          bool opt) const {
+  const intptr_t kNumInputs = 2;
+  const intptr_t kNumTemps = 0;
+  LocationSummary* summary = new (zone)
+      LocationSummary(zone, kNumInputs, kNumTemps, LocationSummary::kNoCall);
+  summary->set_in(0, Location::RequiresRegister());
+  summary->set_in(1, LocationRegisterOrConstant(right()));
+  summary->set_out(0, Location::RequiresRegister());
+  return summary;
+}
+
+void BinaryInt32OpInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
+  if ((op_kind() == Token::kSHL) || (op_kind() == Token::kSHR) ||
+      (op_kind() == Token::kUSHR)) {
+    UNREACHABLE();
+    return;
+  }
+  Register out = locs()->out(0).reg();
+  Register left = locs()->in(0).reg();
+  if (locs()->in(1).IsConstant()) {
+    int64_t right;
+    const bool ok = compiler::HasIntegerValue(locs()->in(1).constant(), &right);
+    RELEASE_ASSERT(ok);
+    switch (op_kind()) {
+      case Token::kBIT_AND:
+        __ AndImmediate(out, left, right, compiler::kFourBytes);
+        break;
+      case Token::kBIT_OR:
+        __ OrImmediate(out, left, right, compiler::kFourBytes);
+        break;
+      case Token::kBIT_XOR:
+        __ XorImmediate(out, left, right, compiler::kFourBytes);
+        break;
+      case Token::kADD:
+        __ AddImmediate(out, left, right, compiler::kFourBytes);
+        break;
+      case Token::kSUB:
+        __ AddImmediate(out, left, -right, compiler::kFourBytes);
+        break;
+      case Token::kMUL:
+        __ MulImmediate(out, left, right, compiler::kFourBytes);
+        break;
+      default:
+        UNREACHABLE();
+    }
+  } else {
+    Register right = locs()->in(1).reg();
+    compiler::Operand r = compiler::Operand(right);
+    switch (op_kind()) {
+      case Token::kBIT_AND:
+        __ and_(out, left, r);
+        break;
+      case Token::kBIT_OR:
+        __ orr(out, left, r);
+        break;
+      case Token::kBIT_XOR:
+        __ eor(out, left, r);
+        break;
+      case Token::kADD:
+        __ addw(out, left, r);
+        break;
+      case Token::kSUB:
+        __ subw(out, left, r);
+        break;
+      case Token::kMUL:
+        __ mulw(out, left, right);
+        break;
+      default:
+        UNREACHABLE();
+    }
+  }
+}
 
 LocationSummary* IntConverterInstr::MakeLocationSummary(Zone* zone,
                                                         bool opt) const {

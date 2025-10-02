@@ -1649,7 +1649,8 @@ inline Register ConcreteRegister(LinkRegister) {
 //
 //    https://github.com/llvm/llvm-project/blob/05c1447b3eabe9cc4a27866094e46c57350c5d5a/llvm/lib/Target/AArch64/AArch64Subtarget.cpp#L107
 //
-#if defined(DART_TARGET_OS_MACOS_IOS) || defined(DART_TARGET_OS_MACOS)
+#if 0
+//defined(DART_TARGET_OS_MACOS_IOS) || defined(DART_TARGET_OS_MACOS)
 const intptr_t kPreferredLoopAlignment = 1;
 #else
 const intptr_t kPreferredLoopAlignment = 32;

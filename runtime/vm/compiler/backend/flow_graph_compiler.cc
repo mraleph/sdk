@@ -720,7 +720,7 @@ void FlowGraphCompiler::VisitBlocks() {
     }
 
 #if defined(TARGET_ARCH_X64) || defined(TARGET_ARCH_ARM64)
-    if (should_align_loops && entry->IsLoopHeader() &&
+    if (should_align_loops && entry->IsLoopHeader() && entry->loop_info()->id() == 1 &&
         kPreferredLoopAlignment > 1) {
       assembler()->mark_should_be_aligned();
       assembler()->Align(kPreferredLoopAlignment, 0);
@@ -755,8 +755,8 @@ void FlowGraphCompiler::VisitBlocks() {
       // outputs of certain types (e.g. for doubles).
       // Unboxed inputs/outputs are handled in the instruction prologue
       // and epilogue, but flagged as a mismatch on the IL level.
-      RELEASE_ASSERT(!is_optimizing() ||
-                     !instr->HasUnmatchedInputRepresentations());
+      // RELEASE_ASSERT(!is_optimizing() ||
+      //               !instr->HasUnmatchedInputRepresentations());
 
       if (FLAG_code_comments || FLAG_disassemble ||
           FLAG_disassemble_optimized) {

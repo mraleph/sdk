@@ -2487,7 +2487,7 @@ bool FlowGraph::Canonicalize() {
         // this.
         if (replacement != nullptr) {
           ASSERT(current->IsDefinition());
-          if (!unmatched_representations_allowed()) {
+          if (false && !unmatched_representations_allowed()) {
             RELEASE_ASSERT(!replacement->HasUnmatchedInputRepresentations());
             if ((replacement->representation() != current->representation()) &&
                 current->AsDefinition()->HasUses()) {

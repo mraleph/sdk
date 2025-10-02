@@ -141,5 +141,6 @@ gen_kernel --platform "${BUILD_DIR}/vm_platform_strong.dill"                   \
 
 # Step 3: Assemble the assembly file into an ELF object.
 if [ $BUILD_ASM -eq 1 ]; then
-    gcc -shared -o "$SNAPSHOT_FILE" "${SNAPSHOT_FILE}.S"
+    gcc -c -o "${SNAPSHOT_FILE}.o" "${SNAPSHOT_FILE}.S"
+    gcc -shared -o "$SNAPSHOT_FILE" "${SNAPSHOT_FILE}.o"
 fi
