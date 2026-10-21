@@ -346,8 +346,8 @@ class PageSpace {
   bool pause_concurrent_marking() const {
     return pause_concurrent_marking_.load() != 0;
   }
-  Phase phase() const { return phase_; }
-  void set_phase(Phase val) { phase_ = val; }
+  Phase phase() const { return phase_.load(); }
+  void set_phase(Phase val) { phase_.store(val); }
 
   void SetupImagePage(void* pointer, uword size, bool is_executable);
 
@@ -493,7 +493,8 @@ class PageSpace {
   intptr_t concurrent_marker_tasks_;
   intptr_t concurrent_marker_tasks_active_;
   RelaxedAtomic<uword> pause_concurrent_marking_;
-  Phase phase_;
+  // Written while holding tasks_lock_, but can be read without it.
+  AcqRelAtomic<Phase> phase_;
 
 #if defined(DEBUG)
   Thread* iterating_thread_;

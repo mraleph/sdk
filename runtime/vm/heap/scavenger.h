@@ -84,8 +84,9 @@ class SemiSpace : public MallocAllocated {
   // Size sitting in the free list.
   intptr_t freed_in_words_ = 0;
 
-  // Size of Pages in this semi-space.
-  intptr_t capacity_in_words_ = 0;
+  // Size of Pages in this semi-space. Written while holding
+  // Scavenger::space_lock_, but can be read without it.
+  RelaxedAtomic<intptr_t> capacity_in_words_ = {0};
 
   // Size of Pages before we trigger a scavenge. Compare old-space's
   // hard_gc_threshold_in_words_.
@@ -192,6 +193,11 @@ class Scavenger {
   }
   intptr_t CapacityInWords() const {
     MutexLocker ml(&space_lock_);
+    return to_->capacity_in_words();
+  }
+  // Same as CapacityInWords, but without taking space_lock_. Only for mutators
+  // outside of a safepoint, for which to_ cannot be replaced concurrently.
+  intptr_t CapacityInWordsFromMutator() const {
     return to_->capacity_in_words();
   }
   intptr_t ExternalInWords() const { return external_size_ >> kWordSizeLog2; }

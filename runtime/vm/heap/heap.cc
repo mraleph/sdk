@@ -254,7 +254,8 @@ void Heap::CheckExternalGC(Thread* thread) {
     return;
   }
 
-  if (new_space_.ExternalInWords() >= (4 * new_space_.CapacityInWords())) {
+  if (new_space_.ExternalInWords() >=
+      (4 * new_space_.CapacityInWordsFromMutator())) {
     // Attempt to free some external allocation by a scavenge. (If the total
     // remains above the limit, next external alloc will trigger another.)
     CollectGarbage(thread, GCType::kScavenge, GCReason::kExternal);
@@ -590,11 +591,9 @@ void Heap::CheckConcurrentMarking(Thread* thread,
                                   intptr_t size) {
   ASSERT(!thread->force_growth());
 
-  PageSpace::Phase phase;
-  {
-    MonitorLocker ml(old_space_.tasks_lock());
-    phase = old_space_.phase();
-  }
+  // This runs on every TLAB refill, so don't take tasks_lock_: the phase can
+  // change right after reading it anyway.
+  const PageSpace::Phase phase = old_space_.phase();
 
   switch (phase) {
     case PageSpace::kMarking:
