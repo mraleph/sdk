@@ -553,7 +553,7 @@ char* Flags::CheckFlags() {
   if (FLAG_scavenger_tasks < -1) {
     return Utils::StrDup("Invalid scavenger_tasks");
   }
-  if (FLAG_marker_tasks < 0) {
+  if (FLAG_marker_tasks < -1) {
     return Utils::StrDup("Invalid marker_tasks");
   }
   if (FLAG_compactor_tasks < 0) {

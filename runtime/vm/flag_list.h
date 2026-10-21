@@ -143,9 +143,10 @@ constexpr bool FLAG_support_il_printer = false;
   P(mark_when_idle, bool, false,                                               \
     "The Dart thread will assist in concurrent marking during idle time and "  \
     "is counted as one marker task")                                           \
-  P(marker_tasks, int, 2,                                                      \
+  P(marker_tasks, int, -1,                                                     \
     "The number of tasks to spawn during old gen GC marking (0 means "         \
-    "perform all marking on main thread).")                                    \
+    "perform all marking on main thread, -1 means select an amount based on "  \
+    "the number of active isolates).")                                         \
   P(hash_map_probes_limit, int, kMaxInt32,                                     \
     "Limit number of probes while doing lookups in hash maps.")                \
   P(max_polymorphic_checks, int, 4,                                            \

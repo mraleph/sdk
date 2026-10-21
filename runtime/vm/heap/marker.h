@@ -67,6 +67,7 @@ class GCMarker {
 
   IsolateGroup* const isolate_group_;
   Heap* const heap_;
+  const intptr_t num_tasks_;
   // The regular marking worklists, divided by generation. The marker and the
   // write-barrier push here. Dividing by generation allows faster filtering at
   // the end of a scavenge.

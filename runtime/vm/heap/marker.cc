@@ -25,8 +25,18 @@
 
 namespace dart {
 
-static intptr_t NumTasks() {
+static constexpr intptr_t kMinAutoMarkerTasks = 2;
+static constexpr intptr_t kMaxAutoMarkerTasks = 8;
+
+static intptr_t ComputeNumTasks(IsolateGroup* isolate_group) {
   intptr_t marker_tasks = FLAG_marker_tasks;
+  if (marker_tasks == -1) {
+    // --marker_tasks=-1 => scale with the number of mutators, which create
+    // marking work through allocation and write barriers.
+    marker_tasks = isolate_group->MutatorCount();
+    marker_tasks = Utils::Maximum(marker_tasks, kMinAutoMarkerTasks);
+    marker_tasks = Utils::Minimum(marker_tasks, kMaxAutoMarkerTasks);
+  }
   ASSERT(marker_tasks >= 0);
   if (marker_tasks == 0) {
     marker_tasks = 1;  // Marking on main thread is still one job.
@@ -1085,12 +1095,13 @@ intptr_t GCMarker::MarkedWordsPerMicro() const {
   if (marked_words_per_job_micro == 0) {
     marked_words_per_job_micro = 1;  // Prevent division by zero.
   }
-  return marked_words_per_job_micro * NumTasks();
+  return marked_words_per_job_micro * num_tasks_;
 }
 
 GCMarker::GCMarker(IsolateGroup* isolate_group, Heap* heap)
     : isolate_group_(isolate_group),
       heap_(heap),
+      num_tasks_(ComputeNumTasks(isolate_group)),
       old_marking_stack_(),
       new_marking_stack_(),
       wbe_deferred_marking_stack_(),
@@ -1099,8 +1110,8 @@ GCMarker::GCMarker(IsolateGroup* isolate_group, Heap* heap)
       visitors_(),
       marked_bytes_(0),
       marked_micros_(0) {
-  visitors_ = new MarkingVisitor*[NumTasks()];
-  for (intptr_t i = 0, n = NumTasks(); i < n; i++) {
+  visitors_ = new MarkingVisitor*[num_tasks_];
+  for (intptr_t i = 0; i < num_tasks_; i++) {
     visitors_[i] = nullptr;
   }
 }
@@ -1110,7 +1121,7 @@ GCMarker::~GCMarker() {
   // marker and before finalizing.
   if (isolate_group_->old_marking_stack() != nullptr) {
     isolate_group_->DisableIncrementalBarrier();
-    for (intptr_t i = 0, n = NumTasks(); i < n; i++) {
+    for (intptr_t i = 0; i < num_tasks_; i++) {
       visitors_[i]->AbandonWork();
       delete visitors_[i];
     }
@@ -1122,7 +1133,7 @@ void GCMarker::StartConcurrentMark(PageSpace* page_space) {
   isolate_group_->EnableIncrementalBarrier(
       &old_marking_stack_, &new_marking_stack_, &deferred_marking_stack_);
 
-  const intptr_t num_tasks = NumTasks();
+  const intptr_t num_tasks = num_tasks_;
 
   {
     // Bulk increase task count before starting any task, instead of
@@ -1301,7 +1312,7 @@ void GCMarker::MarkObjects(PageSpace* page_space) {
 
   Prologue();
 
-  const intptr_t num_tasks = NumTasks();
+  const intptr_t num_tasks = num_tasks_;
   ThreadBarrier* barrier = new ThreadBarrier(num_tasks, /*initial=*/1);
 
   ResetSlices();
@@ -1358,7 +1369,7 @@ void GCMarker::MarkObjects(PageSpace* page_space) {
 
 void GCMarker::PruneWeak(Scavenger* scavenger) {
   scavenger->PruneWeak(&global_list_);
-  for (intptr_t i = 0, n = NumTasks(); i < n; i++) {
+  for (intptr_t i = 0; i < num_tasks_; i++) {
     scavenger->PruneWeak(visitors_[i]->delayed());
   }
 }
