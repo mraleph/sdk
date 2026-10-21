@@ -7,6 +7,7 @@
 
 #include "platform/atomic.h"
 #include "vm/globals.h"
+#include "vm/growable_array.h"
 #include "vm/heap/spaces.h"
 #include "vm/pointer_tagging.h"
 #include "vm/raw_object.h"
@@ -337,15 +338,12 @@ class PageCache {
   void Clear();
 
  private:
-  // This cache needs to be at least as big as FLAG_new_gen_semi_max_size or
-  // munmap will noticeably impact performance. I.e., a scavenge should be able
-  // to fit a complete from-space into this cache. The standalone embedder sets
-  // the semispace size to 16/32MB. This cache is in units of regular heap
-  // pages, which are 512kB (Page::kPageSize).
-  static constexpr intptr_t kCapacity = (4 * kWordSize * MB) / Page::kPageSize;
+  // This cache needs to be able to hold a complete from-space, otherwise every
+  // scavenge unmaps part of the from-space and mutators have to map and fault
+  // in fresh pages again. Push limits the size of the cache to one new-space
+  // worth of pages.
   Mutex mutex_;
-  VirtualMemory* cache_[2][kCapacity] = {{nullptr}, {nullptr}};
-  intptr_t size_[2] = {0, 0};
+  MallocGrowableArray<VirtualMemory*> cache_[2];
 };
 
 }  // namespace dart

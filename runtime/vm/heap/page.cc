@@ -290,11 +290,9 @@ VirtualMemory* PageCache::Pop(uword flags, intptr_t size) {
   if (CanUseCache(flags)) {
     ASSERT(size == Page::kPageSize);
     MutexLocker ml(&mutex_);
-    intptr_t index = CacheIndex(flags);
-    ASSERT(size_[index] >= 0);
-    ASSERT(size_[index] <= kCapacity);
-    if (size_[index] > 0) {
-      return cache_[index][--size_[index]];
+    MallocGrowableArray<VirtualMemory*>& cache = cache_[CacheIndex(flags)];
+    if (cache.length() > 0) {
+      return cache.RemoveLast();
     }
   }
   return nullptr;
@@ -316,13 +314,10 @@ bool PageCache::Push(uword flags, VirtualMemory* memory) {
     }
     limit = Utils::Maximum(limit,
                            FLAG_new_gen_semi_max_size * MB / Page::kPageSize);
-    limit = Utils::Minimum(limit, kCapacity);
 
     MutexLocker ml(&mutex_);
-    intptr_t index = CacheIndex(flags);
-    ASSERT(size_[index] >= 0);
-    ASSERT(size_[index] <= kCapacity);
-    if (size_[index] < limit) {
+    MallocGrowableArray<VirtualMemory*>& cache = cache_[CacheIndex(flags)];
+    if (cache.length() < limit) {
       intptr_t size = memory->size();
       if ((flags & Page::kExecutable) != 0 && FLAG_write_protect_code) {
         // Reset to initial protection.
@@ -340,7 +335,7 @@ bool PageCache::Push(uword flags, VirtualMemory* memory) {
       }
 #endif
       MSAN_POISON(memory->address(), size);
-      cache_[index][size_[index]++] = memory;
+      cache.Add(memory);
       return true;
     }
   }
@@ -352,24 +347,22 @@ intptr_t PageCache::Size() {
   MutexLocker ml(&mutex_);
   intptr_t pages = 0;
   for (intptr_t i = 0; i < 2; i++) {
-    pages += size_[i];
+    pages += cache_[i].length();
   }
   return pages * Page::kPageSize;
 }
 
 void PageCache::Abandon() {
   for (intptr_t i = 0; i < 2; i++) {
-    size_[i] = 0;
+    cache_[i].Clear();
   }
 }
 
 void PageCache::Clear() {
   MutexLocker ml(&mutex_);
   for (intptr_t i = 0; i < 2; i++) {
-    ASSERT(size_[i] >= 0);
-    ASSERT(size_[i] <= kCapacity);
-    while (size_[i] > 0) {
-      delete cache_[i][--size_[i]];
+    while (cache_[i].length() > 0) {
+      delete cache_[i].RemoveLast();
     }
   }
 }
