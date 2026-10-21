@@ -1813,9 +1813,16 @@ void Scavenger::TryAllocateNewTLAB(Thread* thread,
   }
 #endif
 
-  intptr_t allocated = AbandonRemainingTLAB(thread);
   if (can_safepoint && !thread->force_growth()) {
     ASSERT(thread->no_safepoint_scope_depth() == 0);
+    // The TLAB is abandoned below, together with allocating the new one, so
+    // that refilling takes space_lock_ only once. Any GC started here abandons
+    // the TLAB itself.
+    intptr_t allocated = 0;
+    if (thread->top() != 0) {
+      allocated = Utils::Maximum(
+          (uword)0, Scavenger::kTlabSize - (thread->true_end() - thread->top()));
+    }
     heap_->CheckConcurrentMarking(thread, GCReason::kNewSpace, allocated);
   }
 
@@ -1829,6 +1836,9 @@ void Scavenger::TryAllocateNewTLAB(Thread* thread,
 void Scavenger::RefillTLAB(Thread* thread, intptr_t min_size) {
   {
     MutexLocker ml(&space_lock_);
+    if (thread->top() != 0) {
+      to_->AbandonRemainingTLABLocked(thread);
+    }
     if (to_->TryAllocateNewTLABFromFreeListLocked(thread, min_size)) {
       return;
     }
