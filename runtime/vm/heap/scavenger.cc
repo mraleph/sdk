@@ -833,7 +833,6 @@ Scavenger::Scavenger(Heap* heap, intptr_t max_semi_capacity_in_words)
 
 Scavenger::~Scavenger() {
   delete to_;
-  ASSERT(blocks_ == nullptr);
 }
 
 bool Scavenger::Contains(uword addr) const {
@@ -1059,13 +1058,13 @@ SemiSpace* Scavenger::Prologue(GCReason reason) {
 
   // Need to stash the old remembered set before any worker begins adding to the
   // new remembered set.
-  blocks_ = heap_->isolate_group()->store_buffer()->PopAll();
+  blocks_.Set(heap_->isolate_group()->store_buffer()->PopAll());
   GCMarker* marker = heap_->old_space()->marker();
   if (marker != nullptr) {
     marker->new_marking_stack_.PushAll(
         marker->wbe_deferred_marking_stack_.PopAll());
-    new_blocks_ = marker->new_marking_stack_.PopAll();
-    deferred_blocks_ = marker->deferred_marking_stack_.PopAll();
+    new_blocks_.Set(marker->new_marking_stack_.PopAll());
+    deferred_blocks_.Set(marker->deferred_marking_stack_.PopAll());
   }
 
   UpdateMaxHeapCapacity();
@@ -1214,13 +1213,7 @@ void Scavenger::IterateStoreBuffers(ScavengerVisitor* visitor) {
 
   StoreBuffer* store_buffer = heap_->isolate_group()->store_buffer();
   StoreBufferBlock* pending;
-  for (;;) {
-    {
-      MutexLocker ml(&space_lock_);
-      pending = blocks_;
-      if (pending == nullptr) break;
-      blocks_ = pending->next();
-    }
+  while ((pending = blocks_.Claim()) != nullptr) {
     // Ensure the block is freed in case of scavenger abort.
     visitor->set_pending(pending);
     // Generated code appends to store buffers; tell MemorySanitizer.
@@ -1609,13 +1602,7 @@ void Scavenger::PruneNew() {
   MarkingStack* new_marking_stack = &marker->new_marking_stack_;
   MarkingStackBlock* old_writing = old_marking_stack->PopNonFullBlock();
   MarkingStackBlock* new_writing = new_marking_stack->PopNonFullBlock();
-  for (;;) {
-    {
-      MutexLocker ml(&space_lock_);
-      reading = new_blocks_;
-      if (reading == nullptr) break;
-      new_blocks_ = reading->next();
-    }
+  while ((reading = new_blocks_.Claim()) != nullptr) {
     // Generated code appends to marking stacks; tell MemorySanitizer.
     MSAN_UNPOISON(reading, sizeof(*reading));
     while (!reading->IsEmpty()) {
@@ -1656,13 +1643,7 @@ void Scavenger::PruneDeferred() {
   GCMarker* marker = heap_->old_space()->marker();
   MarkingStack* marking_stack = &marker->deferred_marking_stack_;
   MarkingStackBlock* writing = marking_stack->PopNonFullBlock();
-  for (;;) {
-    {
-      MutexLocker ml(&space_lock_);
-      reading = deferred_blocks_;
-      if (reading == nullptr) break;
-      deferred_blocks_ = reading->next();
-    }
+  while ((reading = deferred_blocks_.Claim()) != nullptr) {
     // Generated code appends to marking stacks; tell MemorySanitizer.
     MSAN_UNPOISON(reading, sizeof(*reading));
     while (!reading->IsEmpty()) {
@@ -2072,6 +2053,9 @@ void Scavenger::Scavenge(Thread* thread, GCType type, GCReason reason) {
     ReverseScavenge(&from);
     bytes_promoted = 0;
   } else {
+    blocks_.Clear();
+    new_blocks_.Clear();
+    deferred_blocks_.Clear();
     if (failed_to_promote_ &&
         ((ThresholdInWords() - UsedInWords()) < 32 * KBInWords)) {
       // If we don't have much room in new-space, and this is because of
@@ -2182,7 +2166,7 @@ void Scavenger::ReverseScavenge(SemiSpace** from) {
 
   // Release any remaining part of the remembered set that wasn't completed.
   StoreBuffer* store_buffer = heap_->isolate_group()->store_buffer();
-  StoreBufferBlock* pending = blocks_;
+  StoreBufferBlock* pending = blocks_.TakeUnclaimed();
   while (pending != nullptr) {
     StoreBufferBlock* next = pending->next();
     pending->Reset();
@@ -2190,7 +2174,6 @@ void Scavenger::ReverseScavenge(SemiSpace** from) {
     store_buffer->PushBlock(pending, StoreBuffer::kIgnoreThreshold);
     pending = next;
   }
-  blocks_ = nullptr;
 
   // Reverse the partial forwarding from the aborted scavenge. This also
   // rebuilds the remembered set.
@@ -2201,10 +2184,8 @@ void Scavenger::ReverseScavenge(SemiSpace** from) {
 
   GCMarker* marker = heap_->old_space()->marker();
   if (marker != nullptr) {
-    marker->new_marking_stack_.PushAll(new_blocks_);
-    new_blocks_ = nullptr;
-    marker->deferred_marking_stack_.PushAll(deferred_blocks_);
-    deferred_blocks_ = nullptr;
+    marker->new_marking_stack_.PushAll(new_blocks_.TakeUnclaimed());
+    marker->deferred_marking_stack_.PushAll(deferred_blocks_.TakeUnclaimed());
     // Not redundant with the flush at the beginning of the scavenge because
     // the scavenge workers may add promoted objects to the mark stack.
     heap_->isolate_group()->FlushMarkingStacks();

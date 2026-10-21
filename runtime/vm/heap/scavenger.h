@@ -150,6 +150,59 @@ class ScavengeStats {
   intptr_t abandoned_in_words_;
 };
 
+// A list of blocks which parallel scavenger tasks claim one by one without
+// taking a lock.
+template <typename Block>
+class ClaimableBlockList {
+ public:
+  ClaimableBlockList() {}
+  ~ClaimableBlockList() { ASSERT(blocks_.is_empty()); }
+
+  // Takes ownership of a linked list of blocks.
+  void Set(Block* list) {
+    ASSERT(blocks_.is_empty());
+    while (list != nullptr) {
+      Block* next = list->next();
+      list->set_next(nullptr);
+      blocks_.Add(list);
+      list = next;
+    }
+    next_ = 0;
+  }
+
+  // Returns the next unclaimed block, or nullptr. The caller takes ownership.
+  Block* Claim() {
+    const intptr_t index = next_.fetch_add(1);
+    return index < blocks_.length() ? blocks_[index] : nullptr;
+  }
+
+  // Forgets all blocks, which must all have been claimed.
+  void Clear() {
+    ASSERT(next_ >= blocks_.length());
+    blocks_.Clear();
+    next_ = 0;
+  }
+
+  // Forgets all blocks and returns the unclaimed ones as a linked list.
+  Block* TakeUnclaimed() {
+    Block* result = nullptr;
+    const intptr_t first = Utils::Minimum<intptr_t>(next_, blocks_.length());
+    for (intptr_t i = blocks_.length() - 1; i >= first; i--) {
+      blocks_[i]->set_next(result);
+      result = blocks_[i];
+    }
+    blocks_.Clear();
+    next_ = 0;
+    return result;
+  }
+
+ private:
+  MallocGrowableArray<Block*> blocks_;
+  RelaxedAtomic<intptr_t> next_ = {0};
+
+  DISALLOW_COPY_AND_ASSIGN(ClaimableBlockList);
+};
+
 class Scavenger {
  public:
   static constexpr intptr_t kTlabSize = 64 * KB;
@@ -354,9 +407,9 @@ class Scavenger {
   // the start of each scavenge.
   MallocGrowableArray<Isolate*> root_isolates_;
   RelaxedAtomic<intptr_t> weak_slices_started_ = {0};
-  StoreBufferBlock* blocks_ = nullptr;
-  MarkingStackBlock* new_blocks_ = nullptr;
-  MarkingStackBlock* deferred_blocks_ = nullptr;
+  ClaimableBlockList<StoreBufferBlock> blocks_;
+  ClaimableBlockList<MarkingStackBlock> new_blocks_;
+  ClaimableBlockList<MarkingStackBlock> deferred_blocks_;
 
   int64_t gc_time_micros_ = 0;
   intptr_t collections_ = 0;
