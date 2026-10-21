@@ -12,23 +12,56 @@
 namespace dart {
 
 template <int BlockSize>
-typename BlockStack<BlockSize>::List* BlockStack<BlockSize>::global_empty_ =
-    nullptr;
-template <int BlockSize>
-Mutex* BlockStack<BlockSize>::global_mutex_ = nullptr;
+typename BlockStack<BlockSize>::EmptyShard*
+    BlockStack<BlockSize>::empty_shards_ = nullptr;
 
 template <int BlockSize>
 void BlockStack<BlockSize>::Init() {
-  global_empty_ = new List();
-  if (global_mutex_ == nullptr) {
-    global_mutex_ = new Mutex();
+  if (empty_shards_ == nullptr) {
+    empty_shards_ = new EmptyShard[kNumEmptyShards];
   }
 }
 
 template <int BlockSize>
 void BlockStack<BlockSize>::Cleanup() {
-  delete global_empty_;
-  global_empty_ = nullptr;
+  for (intptr_t i = 0; i < kNumEmptyShards; i++) {
+    EmptyShard* shard = &empty_shards_[i];
+    MutexLocker ml(&shard->mutex);
+    while (!shard->list.IsEmpty()) {
+      delete shard->list.Pop();
+    }
+  }
+}
+
+static intptr_t CurrentThreadShardIndex() {
+  static RelaxedAtomic<intptr_t> next_index = 0;
+  static thread_local intptr_t index = -1;
+  if (index < 0) {
+    index = next_index.fetch_add(1);
+  }
+  return index;
+}
+
+template <int BlockSize>
+typename BlockStack<BlockSize>::EmptyShard*
+BlockStack<BlockSize>::CurrentEmptyShard() {
+  return &empty_shards_[CurrentThreadShardIndex() % kNumEmptyShards];
+}
+
+template <int BlockSize>
+void BlockStack<BlockSize>::PushEmptyBlocksLocked(EmptyShard* shard,
+                                                  Block* blocks) {
+  DEBUG_ASSERT(shard->mutex.IsOwnedByCurrentThread());
+  while (blocks != nullptr) {
+    Block* next = blocks->next_;
+    blocks->Reset();
+    if (shard->list.length() < kMaxEmptyPerShard) {
+      shard->list.Push(blocks);
+    } else {
+      delete blocks;
+    }
+    blocks = next;
+  }
 }
 
 template <int BlockSize>
@@ -44,18 +77,10 @@ void BlockStack<BlockSize>::Reset() {
   MonitorLocker local_mutex_locker(&monitor_);
   {
     // Empty all blocks and move them to the global cache.
-    MutexLocker global_mutex_locker(global_mutex_);
-    while (!full_.IsEmpty()) {
-      Block* block = full_.Pop();
-      block->Reset();
-      global_empty_->Push(block);
-    }
-    while (!partial_.IsEmpty()) {
-      Block* block = partial_.Pop();
-      block->Reset();
-      global_empty_->Push(block);
-    }
-    TrimGlobalEmpty();
+    EmptyShard* shard = CurrentEmptyShard();
+    MutexLocker shard_locker(&shard->mutex);
+    PushEmptyBlocksLocked(shard, full_.PopAll());
+    PushEmptyBlocksLocked(shard, partial_.PopAll());
   }
 }
 
@@ -87,9 +112,9 @@ void BlockStack<BlockSize>::PushBlockImpl(Block* block) {
     full_.Push(block);
     if (was_empty) ml.Notify();
   } else if (block->IsEmpty()) {
-    MutexLocker ml(global_mutex_);
-    global_empty_->Push(block);
-    TrimGlobalEmpty();
+    EmptyShard* shard = CurrentEmptyShard();
+    MutexLocker ml(&shard->mutex);
+    PushEmptyBlocksLocked(shard, block);
   } else {
     MonitorLocker ml(&monitor_);
     bool was_empty = IsEmptyLocked();
@@ -163,10 +188,14 @@ BlockStack<BlockSize>::PopNonFullBlock() {
 
 template <int BlockSize>
 typename BlockStack<BlockSize>::Block* BlockStack<BlockSize>::PopEmptyBlock() {
-  {
-    MutexLocker ml(global_mutex_);
-    if (!global_empty_->IsEmpty()) {
-      return global_empty_->Pop();
+  const intptr_t start = CurrentThreadShardIndex();
+  for (intptr_t i = 0; i < kNumEmptyShards; i++) {
+    EmptyShard* shard = &empty_shards_[(start + i) % kNumEmptyShards];
+    // Racy check to avoid locking empty shards.
+    if (shard->list.length() == 0) continue;
+    MutexLocker ml(&shard->mutex);
+    if (!shard->list.IsEmpty()) {
+      return shard->list.Pop();
     }
   }
   return new Block();
@@ -246,14 +275,6 @@ void BlockStack<BlockSize>::VisitObjectPointers(ObjectPointerVisitor* visitor) {
   for (Block* block = partial_.Peek(); block != nullptr;
        block = block->next()) {
     block->VisitObjectPointers(visitor);
-  }
-}
-
-template <int BlockSize>
-void BlockStack<BlockSize>::TrimGlobalEmpty() {
-  DEBUG_ASSERT(global_mutex_->IsOwnedByCurrentThread());
-  while (global_empty_->length() > kMaxGlobalEmpty) {
-    delete global_empty_->Pop();
   }
 }
 

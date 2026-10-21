@@ -85,7 +85,7 @@ class PointerBlock : public MallocAllocated {
 
 // A synchronized collection of pointer blocks of a particular size.
 // This class is meant to be used as a base (note PushBlockImpl is protected).
-// The global list of cached empty blocks is currently per-size.
+// The global cache of empty blocks is per-size.
 template <int BlockSize>
 class BlockStack {
  public:
@@ -139,17 +139,24 @@ class BlockStack {
   // Adds and transfers ownership of the block to the buffer.
   void PushBlockImpl(Block* block);
 
-  // If needed, trims the global cache of empty blocks.
-  static void TrimGlobalEmpty();
+  // The global cache of empty blocks is sharded to reduce contention between
+  // threads. Each thread pushes into its own shard and pops from it first.
+  struct alignas(64) EmptyShard {
+    Mutex mutex;
+    List list;
+  };
+
+  static EmptyShard* CurrentEmptyShard();
+  static void PushEmptyBlocksLocked(EmptyShard* shard, Block* blocks);
 
   List full_;
   List partial_;
   Monitor monitor_;
 
   // Note: This is shared on the basis of block size.
-  static constexpr intptr_t kMaxGlobalEmpty = 100;
-  static List* global_empty_;
-  static Mutex* global_mutex_;
+  static constexpr intptr_t kNumEmptyShards = 16;
+  static constexpr intptr_t kMaxEmptyPerShard = 16;
+  static EmptyShard* empty_shards_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BlockStack);
