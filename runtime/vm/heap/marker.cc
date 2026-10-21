@@ -315,12 +315,32 @@ class MarkingVisitor : public ObjectPointerVisitor {
   }
 
   bool ProcessOldMarkingStack(intptr_t remaining_budget) {
+    return ProcessMarkingStacks</*include_new=*/false>(remaining_budget);
+  }
+
+  // Like ProcessOldMarkingStack, but also processes the new-space objects the
+  // write barrier keeps adding while mutators run. Otherwise the concurrent
+  // marker might never catch up with many mutators.
+  bool ProcessOldAndNewMarkingStacks(intptr_t remaining_budget) {
+    return ProcessMarkingStacks</*include_new=*/true>(remaining_budget);
+  }
+
+  template <bool include_new>
+  bool ProcessMarkingStacks(intptr_t remaining_budget) {
     Thread* thread = Thread::Current();
     do {
       // First drain the marking stacks.
       ObjectPtr obj;
-      while (old_work_list_.Pop(&obj)) {
+      while (include_new
+                 ? MarkerWorkList::Pop(&old_work_list_, &new_work_list_, &obj)
+                 : old_work_list_.Pop(&obj)) {
         ASSERT(!has_evacuation_candidate_);
+
+        if (include_new && obj->IsNewObject() && HasWBE(obj)) {
+          // See DrainMarkingStackWithPauseChecks.
+          wbe_deferred_work_list_.Push(obj);
+          continue;
+        }
 
         const intptr_t class_id = obj->GetClassIdOfHeapObject();
         ASSERT(class_id != kIllegalCid);
@@ -344,7 +364,11 @@ class MarkingVisitor : public ObjectPointerVisitor {
           if ((class_id == kArrayCid) || (class_id == kImmutableArrayCid)) {
             size = obj->untag()->HeapSize();
             if (size > remaining_budget) {
-              old_work_list_.Push(obj);
+              if (include_new && obj->IsNewObject()) {
+                new_work_list_.Push(obj);
+              } else {
+                old_work_list_.Push(obj);
+              }
               return true;  // More to mark.
             }
           }
@@ -362,7 +386,9 @@ class MarkingVisitor : public ObjectPointerVisitor {
             thread->StoreBufferAddObjectGC(obj);
           }
         }
-        marked_bytes_ += size;
+        if (!include_new || !obj->IsNewObject()) {
+          marked_bytes_ += size;
+        }
         remaining_budget -= size;
         if (remaining_budget < 0) {
           return true;  // More to mark.
@@ -1224,7 +1250,7 @@ void GCMarker::IncrementalMarkWithSizeBudget(PageSpace* page_space,
                          &new_marking_stack_, &wbe_deferred_marking_stack_,
                          &deferred_marking_stack_);
   int64_t start = OS::GetCurrentMonotonicMicros();
-  visitor.ProcessOldMarkingStack(size);
+  visitor.ProcessOldAndNewMarkingStacks(size);
   int64_t stop = OS::GetCurrentMonotonicMicros();
   visitor.AddMicros(stop - start);
   visitor.FinalizeIncrementalWorkLists();
