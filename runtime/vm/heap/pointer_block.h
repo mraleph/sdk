@@ -312,7 +312,7 @@ class StoreBuffer : public BlockStack<kStoreBufferBlockSize> {
 
 typedef StoreBuffer::Block StoreBufferBlock;
 
-static constexpr int kMarkingStackBlockSize = 64;
+static constexpr int kMarkingStackBlockSize = 256;
 class MarkingStack : public BlockStack<kMarkingStackBlockSize> {
  public:
   // Adds and transfers ownership of the block to the buffer.
@@ -324,7 +324,7 @@ class MarkingStack : public BlockStack<kMarkingStackBlockSize> {
 typedef MarkingStack::Block MarkingStackBlock;
 typedef BlockWorkList<MarkingStack> MarkerWorkList;
 
-static constexpr int kPromotionStackBlockSize = 64;
+static constexpr int kPromotionStackBlockSize = 256;
 class PromotionStack : public BlockStack<kPromotionStackBlockSize> {
  public:
   // Adds and transfers ownership of the block to the buffer.
