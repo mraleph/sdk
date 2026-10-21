@@ -621,7 +621,9 @@ class MarkingVisitor : public ObjectPointerVisitor {
     delayed_.Release();
   }
 
-  void FinalizeIncremental(GCLinkedLists* global_list) {
+  // Returns the work lists' blocks to the marking stacks. Unlike
+  // FinalizeIncrementalDelayed, does not need the tasks lock.
+  void FinalizeIncrementalWorkLists() {
     old_work_list_.Flush();
     old_work_list_.Finalize();
     new_work_list_.Flush();
@@ -630,6 +632,9 @@ class MarkingVisitor : public ObjectPointerVisitor {
     wbe_deferred_work_list_.Finalize();
     deferred_work_list_.Flush();
     deferred_work_list_.Finalize();
+  }
+
+  void FinalizeIncrementalDelayed(GCLinkedLists* global_list) {
     delayed_.FlushInto(global_list);
   }
 
@@ -1185,9 +1190,10 @@ void GCMarker::IncrementalMarkWithUnlimitedBudget(PageSpace* page_space) {
   visitor.ProcessOldMarkingStack(kIntptrMax);
   int64_t stop = OS::GetCurrentMonotonicMicros();
   visitor.AddMicros(stop - start);
+  visitor.FinalizeIncrementalWorkLists();
   {
     MonitorLocker ml(page_space->tasks_lock());
-    visitor.FinalizeIncremental(&global_list_);
+    visitor.FinalizeIncrementalDelayed(&global_list_);
     marked_bytes_ += visitor.marked_bytes();
     marked_micros_ += visitor.marked_micros();
   }
@@ -1210,9 +1216,10 @@ void GCMarker::IncrementalMarkWithSizeBudget(PageSpace* page_space,
   visitor.ProcessOldMarkingStack(size);
   int64_t stop = OS::GetCurrentMonotonicMicros();
   visitor.AddMicros(stop - start);
+  visitor.FinalizeIncrementalWorkLists();
   {
     MonitorLocker ml(page_space->tasks_lock());
-    visitor.FinalizeIncremental(&global_list_);
+    visitor.FinalizeIncrementalDelayed(&global_list_);
     marked_bytes_ += visitor.marked_bytes();
     marked_micros_ += visitor.marked_micros();
   }
@@ -1230,9 +1237,10 @@ void GCMarker::IncrementalMarkWithTimeBudget(PageSpace* page_space,
   visitor.ProcessOldMarkingStackUntil(deadline);
   int64_t stop = OS::GetCurrentMonotonicMicros();
   visitor.AddMicros(stop - start);
+  visitor.FinalizeIncrementalWorkLists();
   {
     MonitorLocker ml(page_space->tasks_lock());
-    visitor.FinalizeIncremental(&global_list_);
+    visitor.FinalizeIncrementalDelayed(&global_list_);
     marked_bytes_ += visitor.marked_bytes();
     marked_micros_ += visitor.marked_micros();
   }
