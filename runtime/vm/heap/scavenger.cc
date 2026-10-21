@@ -728,24 +728,30 @@ SemiSpace::~SemiSpace() {
   }
 }
 
-Page* SemiSpace::TryAllocatePageLocked(bool link) {
+bool SemiSpace::TryReservePageLocked() {
   if (capacity_in_words_ >= gc_threshold_in_words_) {
-    return nullptr;  // Full.
-  }
-  Page* page = Page::Allocate(cage_, Page::kPageSize, Page::kNew);
-  if (page == nullptr) {
-    return nullptr;  // Out of memory;
+    return false;  // Full.
   }
   capacity_in_words_ += Page::kPageSizeInWords;
-  if (link) {
-    if (head_ == nullptr) {
-      head_ = tail_ = page;
-    } else {
-      tail_->set_next(page);
-      tail_ = page;
-    }
+  return true;
+}
+
+void SemiSpace::CancelPageReservationLocked() {
+  capacity_in_words_ -= Page::kPageSizeInWords;
+  ASSERT(capacity_in_words_ >= 0);
+}
+
+Page* SemiSpace::AllocateReservedPage() {
+  return Page::Allocate(cage_, Page::kPageSize, Page::kNew);
+}
+
+void SemiSpace::LinkPageLocked(Page* page) {
+  if (head_ == nullptr) {
+    head_ = tail_ = page;
+  } else {
+    tail_->set_next(page);
+    tail_ = page;
   }
-  return page;
 }
 
 bool SemiSpace::Contains(uword addr) const {
@@ -1813,15 +1819,38 @@ void Scavenger::TryAllocateNewTLAB(Thread* thread,
     heap_->CheckConcurrentMarking(thread, GCReason::kNewSpace, allocated);
   }
 
-  MutexLocker ml(&space_lock_);
-  to_->TryAllocateNewTLABLocked(thread, min_size);
+  RefillTLAB(thread, min_size);
 
 #if !defined(PRODUCT) || defined(FORCE_INCLUDE_SAMPLING_HEAP_PROFILER)
   thread->heap_sampler().HandleNewTLAB(remaining, is_first_tlab);
 #endif
 }
 
-void SemiSpace::TryAllocateNewTLABLocked(Thread* thread, intptr_t alloc_size) {
+void Scavenger::RefillTLAB(Thread* thread, intptr_t min_size) {
+  {
+    MutexLocker ml(&space_lock_);
+    if (to_->TryAllocateNewTLABFromFreeListLocked(thread, min_size)) {
+      return;
+    }
+    if (!to_->TryReservePageLocked()) {
+      return;
+    }
+  }
+  // Mapping and first touch of a fresh page can be slow (e.g. faulting in a
+  // transparent huge page), so don't block other mutators while doing it.
+  // to_ cannot change because this thread is not at a safepoint.
+  Page* page = to_->AllocateReservedPage();
+  MutexLocker ml(&space_lock_);
+  if (page == nullptr) {
+    to_->CancelPageReservationLocked();
+    return;
+  }
+  to_->LinkPageLocked(page);
+  to_->AllocateNewTLABFromPageLocked(thread, page, min_size);
+}
+
+bool SemiSpace::TryAllocateNewTLABFromFreeListLocked(Thread* thread,
+                                                     intptr_t alloc_size) {
   FreeListElement* previous = nullptr;
   FreeListElement* current = free_;
   while (current != nullptr) {
@@ -1848,18 +1877,18 @@ void SemiSpace::TryAllocateNewTLABLocked(Thread* thread, intptr_t alloc_size) {
       thread->set_true_end(end);
 
       AddFreeLocked(end, current_size - alloc_size);
-      return;
+      return true;
     }
 
     previous = current;
     current = next;
   }
+  return false;
+}
 
-  Page* page = TryAllocatePageLocked(true);
-  if (page == nullptr) {
-    return;
-  }
-
+void SemiSpace::AllocateNewTLABFromPageLocked(Thread* thread,
+                                              Page* page,
+                                              intptr_t alloc_size) {
   uword top, page_end;
   page->AllocateAll(&top, &page_end);
   intptr_t current_size = page_end - top;
@@ -1932,12 +1961,17 @@ intptr_t Scavenger::AbandonRemainingTLAB(Thread* thread) {
 }
 
 uword ScavengerVisitor::TryAllocateCopySlow(intptr_t size) {
-  Page* page;
+  SemiSpace* to = scavenger_->to_;
   {
     MutexLocker ml(&scavenger_->space_lock_);
-    page = scavenger_->to_->TryAllocatePageLocked(false);
+    if (!to->TryReservePageLocked()) {
+      return 0;
+    }
   }
+  Page* page = to->AllocateReservedPage();
   if (page == nullptr) {
+    MutexLocker ml(&scavenger_->space_lock_);
+    to->CancelPageReservationLocked();
     return 0;
   }
 

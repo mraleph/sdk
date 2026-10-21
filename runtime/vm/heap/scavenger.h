@@ -39,8 +39,19 @@ class SemiSpace : public MallocAllocated {
   SemiSpace(intptr_t gc_threshold_in_words, Cage* cage);
   ~SemiSpace();
 
-  Page* TryAllocatePageLocked(bool link);
-  void TryAllocateNewTLABLocked(Thread* thread, intptr_t alloc_size);
+  // Allocating a page is split into reserving capacity and allocating the
+  // page itself, so that mapping and first touch of a fresh page happen
+  // without holding Scavenger::space_lock_.
+  bool TryReservePageLocked();
+  void CancelPageReservationLocked();
+  Page* AllocateReservedPage();
+  void LinkPageLocked(Page* page);
+
+  bool TryAllocateNewTLABFromFreeListLocked(Thread* thread,
+                                            intptr_t alloc_size);
+  void AllocateNewTLABFromPageLocked(Thread* thread,
+                                     Page* page,
+                                     intptr_t alloc_size);
   intptr_t AbandonRemainingTLABLocked(Thread* thread);
   void AddFreeLocked(uword start, intptr_t size);
 
@@ -302,6 +313,7 @@ class Scavenger {
     return result;
   }
   void TryAllocateNewTLAB(Thread* thread, intptr_t size, bool can_safepoint);
+  void RefillTLAB(Thread* thread, intptr_t min_size);
 
   SemiSpace* Prologue(GCReason reason);
   void ReverseScavenge(SemiSpace** from);
