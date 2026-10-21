@@ -3052,6 +3052,24 @@ void IsolateGroup::VisitStackPointers(ObjectPointerVisitor* visitor,
   visitor->clear_gc_root_type();
 }
 
+void IsolateGroup::VisitNonMutatorThreadPointers(
+    ObjectPointerVisitor* visitor,
+    ValidationPolicy validate_frames) {
+  visitor->set_gc_root_type("stack");
+  thread_registry()->VisitObjectPointers(this, visitor, validate_frames);
+  visitor->clear_gc_root_type();
+}
+
+void IsolateGroup::VisitIsolatePointers(Isolate* isolate,
+                                        ObjectPointerVisitor* visitor,
+                                        ValidationPolicy validate_frames) {
+  ASSERT(isolate->group() == this);
+  isolate->VisitObjectPointers(visitor, validate_frames);
+  visitor->set_gc_root_type("stack");
+  isolate->VisitStackPointers(visitor, validate_frames);
+  visitor->clear_gc_root_type();
+}
+
 void IsolateGroup::VisitWeakPersistentHandles(HandleVisitor* visitor) {
   api_state()->VisitWeakHandlesUnlocked(visitor);
 }

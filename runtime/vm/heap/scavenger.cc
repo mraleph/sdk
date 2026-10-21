@@ -1183,10 +1183,24 @@ bool Scavenger::ShouldPerformIdleScavenge(int64_t deadline) {
   return estimated_scavenge_completion <= deadline;
 }
 
-void Scavenger::IterateIsolateRoots(ObjectPointerVisitor* visitor) {
+void Scavenger::IterateIsolateRoots(ObjectPointerVisitor* visitor,
+                                    Isolate* isolate) {
   TIMELINE_FUNCTION_GC_DURATION(Thread::Current(), "IterateIsolateRoots");
-  heap_->isolate_group()->VisitObjectPointers(
-      visitor, ValidationPolicy::kDontValidateFrames);
+  heap_->isolate_group()->VisitIsolatePointers(
+      isolate, visitor, ValidationPolicy::kDontValidateFrames);
+}
+
+void Scavenger::IterateIsolateGroupRoots(ObjectPointerVisitor* visitor,
+                                         intptr_t slice) {
+  TIMELINE_FUNCTION_GC_DURATION(Thread::Current(), "IterateIsolateGroupRoots");
+  auto isolate_group = heap_->isolate_group();
+  if (slice < kNumRootSlices) {
+    isolate_group->VisitSharedPointers(visitor, slice);
+  } else {
+    ASSERT(slice == kNumRootSlices);
+    isolate_group->VisitNonMutatorThreadPointers(
+        visitor, ValidationPolicy::kDontValidateFrames);
+  }
 }
 
 void Scavenger::IterateStoreBuffers(ScavengerVisitor* visitor) {
@@ -1225,24 +1239,21 @@ void Scavenger::IterateRememberedCards(ScavengerVisitor* visitor) {
   heap_->old_space()->VisitRememberedCards(visitor);
 }
 
-enum RootSlices {
-  kIsolate = 0,
-  kNumFixedRootSlices = 1,
-};
-
 void Scavenger::IterateRoots(ScavengerVisitor* visitor) {
+  // Mutator stacks usually hold most of the roots, so each isolate is a
+  // separate slice. Isolate slices go first so that larger slices start
+  // earlier.
+  const intptr_t num_isolate_slices = root_isolates_.length();
+  const intptr_t num_slices = num_isolate_slices + kNumRootSlices + 1;
   for (;;) {
     intptr_t slice = root_slices_started_.fetch_add(1);
-    if (slice >= kNumFixedRootSlices) {
+    if (slice >= num_slices) {
       break;  // No more slices.
     }
-    switch (slice) {
-      case kIsolate:
-        // TODO(gc): Split this by isolate?
-        IterateIsolateRoots(visitor);
-        break;
-      default:
-        UNREACHABLE();
+    if (slice < num_isolate_slices) {
+      IterateIsolateRoots(visitor, root_isolates_[slice]);
+    } else {
+      IterateIsolateGroupRoots(visitor, slice - num_isolate_slices);
     }
   }
 
@@ -1962,6 +1973,10 @@ void Scavenger::Scavenge(Thread* thread, GCType type, GCReason reason) {
   failed_to_promote_ = false;
   abort_ = false;
   root_slices_started_ = 0;
+  root_isolates_.Clear();
+  heap_->isolate_group()->ForEachIsolate(
+      [&](Isolate* isolate) { root_isolates_.Add(isolate); },
+      /*at_safepoint=*/true);
   weak_slices_started_ = 0;
   heap_->isolate_group()->AbandonRemainingTLABs(this);  // Before usage.
   intptr_t abandoned_bytes = 0;  // TODO(rmacnak): Count fragmentation?

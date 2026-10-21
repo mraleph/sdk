@@ -305,7 +305,8 @@ class Scavenger {
 
   SemiSpace* Prologue(GCReason reason);
   void ReverseScavenge(SemiSpace** from);
-  void IterateIsolateRoots(ObjectPointerVisitor* visitor);
+  void IterateIsolateRoots(ObjectPointerVisitor* visitor, Isolate* isolate);
+  void IterateIsolateGroupRoots(ObjectPointerVisitor* visitor, intptr_t slice);
   void IterateStoreBuffers(ScavengerVisitor* visitor);
   void IterateRememberedCards(ScavengerVisitor* visitor);
   void IterateRoots(ScavengerVisitor* visitor);
@@ -331,6 +332,9 @@ class Scavenger {
 
   bool early_tenure_ = false;
   RelaxedAtomic<intptr_t> root_slices_started_ = {0};
+  // Isolates whose roots are visited as separate root slices, collected at
+  // the start of each scavenge.
+  MallocGrowableArray<Isolate*> root_isolates_;
   RelaxedAtomic<intptr_t> weak_slices_started_ = {0};
   StoreBufferBlock* blocks_ = nullptr;
   MarkingStackBlock* new_blocks_ = nullptr;

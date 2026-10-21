@@ -758,6 +758,14 @@ class IsolateGroup : public IntrusiveDListEntry<IsolateGroup> {
   void VisitSharedPointers(ObjectPointerVisitor* visitor, intptr_t slice);
   void VisitStackPointers(ObjectPointerVisitor* visitor,
                           ValidationPolicy validate_frames);
+  // Visiting all slices of [VisitSharedPointers], [VisitNonMutatorThreadPointers]
+  // and [VisitIsolatePointers] for every isolate is equivalent to
+  // [VisitObjectPointers], but allows parallel visitors to split the work.
+  void VisitNonMutatorThreadPointers(ObjectPointerVisitor* visitor,
+                                     ValidationPolicy validate_frames);
+  void VisitIsolatePointers(Isolate* isolate,
+                            ObjectPointerVisitor* visitor,
+                            ValidationPolicy validate_frames);
   void VisitWeakPersistentHandles(HandleVisitor* visitor);
 
   // In precompilation we finalize all regular classes before compiling.
