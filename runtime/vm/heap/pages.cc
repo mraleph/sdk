@@ -1483,7 +1483,17 @@ void PageSpace::Sweep(bool exclusive, bool one_page) {
     shard = (shard + 1) % num_shards;
     FreeList* freelist = DataFreeList(shard);
     if (!exclusive) {
-      freelist->mutex()->Lock();
+      // Prefer a freelist that is not in use by another sweeper or allocator,
+      // e.g. when mutators assist the concurrent sweeper.
+      intptr_t attempts = 1;
+      while (!freelist->mutex()->TryLock()) {
+        if (attempts++ == num_shards) {
+          freelist->mutex()->Lock();
+          break;
+        }
+        shard = (shard + 1) % num_shards;
+        freelist = DataFreeList(shard);
+      }
     }
     bool page_in_use = sweeper.SweepPage(page, freelist);
     if (!exclusive) {
