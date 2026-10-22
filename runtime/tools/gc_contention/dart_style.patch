@@ -1,0 +1,730 @@
+diff --git a/bin/format.dart b/bin/format.dart
+index 535f6ff2..6120b08a 100644
+--- a/bin/format.dart
++++ b/bin/format.dart
+@@ -1,12 +1,22 @@
+ // Copyright (c) 2015, the Dart project authors.  Please see the AUTHORS file
+ // for details. All rights reserved. Use of this source code is governed by a
+ // BSD-style license that can be found in the LICENSE file.
++import 'dart:developer';
+ import 'dart:io';
++import 'dart:isolate';
+ 
+ import 'package:args/command_runner.dart';
++import 'package:dart_style/src/back_end/worker_pool.dart';
+ import 'package:dart_style/src/cli/format_command.dart';
+ 
+-void main(List<String> arguments) async {
++void main(List<String> arguments, [Object? message]) async {
++  if (message is SendPort &&
++      arguments.length == 1 &&
++      arguments.first == WorkerPool.workerArgument) {
++    WorkerPool.runWorkerInOwnGroup(message);
++    return;
++  }
++
+   var runner = CommandRunner<int>(
+     'format',
+     'Idiomatically format Dart source code.',
+@@ -23,10 +33,27 @@ void main(List<String> arguments) async {
+     ),
+   );
+ 
++  var timelinePath = Platform.environment['FORMAT_TIMELINE'];
++  if (timelinePath != null) {
++    NativeRuntime.streamTimelineTo(
++      TimelineRecorder.perfetto,
++      path: timelinePath,
++      streams: const [
++        TimelineStream.dart,
++        TimelineStream.gc,
++        TimelineStream.isolate,
++        TimelineStream.vm,
++      ],
++      enableProfiler: Platform.environment.containsKey('FORMAT_PROFILE'),
++    );
++  }
++
+   try {
+     await runner.runCommand(runner.parse(['format', ...arguments]));
+   } on UsageException catch (exception) {
+     stderr.writeln(exception);
+     exit(64);
++  } finally {
++    if (timelinePath != null) NativeRuntime.stopStreamingTimeline();
+   }
+ }
+diff --git a/lib/src/config_cache.dart b/lib/src/config_cache.dart
+index df3b027f..ec813427 100644
+--- a/lib/src/config_cache.dart
++++ b/lib/src/config_cache.dart
+@@ -34,6 +34,10 @@ final class ConfigCache {
+   /// given directory.
+   final Map<String, PackageConfig?> _directoryConfigs = {};
+ 
++  /// The nearest package config for absolute directory paths, shared by all
++  /// directories visited while walking up the file system.
++  final Map<String, PackageConfig?> _absoluteDirectoryConfigs = {};
++
+   /// The previously cached default language version for all files immediately
+   /// within a given directory.
+   ///
+@@ -245,8 +249,8 @@ final class ConfigCache {
+       // store `null` so that we don't look again in that same directory.
+       Profile.begin('package_config.findPackageConfig()');
+       try {
+-        return _directoryConfigs[directory] = await findPackageConfig(
+-          file.parent,
++        return _directoryConfigs[directory] = await _findPackageConfigIn(
++          file.parent.absolute,
+         );
+       } finally {
+         Profile.end('package_config.findPackageConfig()');
+@@ -269,6 +273,26 @@ final class ConfigCache {
+     }
+   }
+ 
++  /// Finds the nearest package config in absolute [directory] or one of its
++  /// parents.
++  ///
++  /// Results are cached for every visited directory so that sibling
++  /// directories in the same package share a single parsed config instead of
++  /// each re-reading and re-parsing it.
++  Future<PackageConfig?> _findPackageConfigIn(Directory directory) async {
++    var path = directory.path;
++    if (_absoluteDirectoryConfigs.containsKey(path)) {
++      return _absoluteDirectoryConfigs[path];
++    }
++
++    var config = await findPackageConfig(directory, recurse: false);
++    if (config == null) {
++      var parent = directory.parent;
++      if (parent.path != path) config = await _findPackageConfigIn(parent);
++    }
++    return _absoluteDirectoryConfigs[path] = config;
++  }
++
+   /// Resolves a "package:" [packageUri] using the nearest package config file
+   /// surrounding [file].
+   ///
+diff --git a/lib/src/io.dart b/lib/src/io.dart
+index 42a0602e..9b2e7e9e 100644
+--- a/lib/src/io.dart
++++ b/lib/src/io.dart
+@@ -3,10 +3,13 @@
+ // BSD-style license that can be found in the LICENSE file.
+ import 'dart:async';
+ import 'dart:convert';
++import 'dart:developer';
+ import 'dart:io';
+ 
+ import 'package:path/path.dart' as p;
++import 'package:pub_semver/pub_semver.dart';
+ 
++import 'back_end/worker_pool.dart';
+ import 'cli/formatter_options.dart';
+ import 'config_cache.dart';
+ import 'dart_formatter.dart';
+@@ -98,16 +101,144 @@ Future<void> _processDirectory(
+   );
+   entries.sort((a, b) => a.path.compareTo(b.path));
+ 
++  // Setting FORMAT_SEQUENTIAL formats everything on the main isolate.
++  var sequential = Platform.environment.containsKey('FORMAT_SEQUENTIAL');
++  var pool = sequential ? null : WorkerPool();
++
++  // All configuration is per directory, so resolve it once per directory
++  // instead of once per file.
++  var directoryConfigs = <String, _FileConfig>{};
++
+   for (var entry in entries) {
+     if (entry is Link) continue;
+ 
+     if (entry is! File || !entry.path.endsWith('.dart')) continue;
+ 
+     // If the path is in a subdirectory starting with ".", ignore it.
+-    var parts = p.split(p.relative(entry.path, from: directory.path));
+-    if (parts.any((part) => part.startsWith('.'))) continue;
++    if (_isHidden(directory.path, entry.path)) continue;
++
++    var displayPath = p.normalize(entry.path);
++
++    if (sequential) {
++      await _processFile(cache, options, entry, displayPath);
++      continue;
++    }
++
++    var parentPath = entry.path.substring(
++      0,
++      entry.path.lastIndexOf(Platform.pathSeparator) + 1,
++    );
++    var config = directoryConfigs[parentPath] ??= await _resolveConfig(
++      cache,
++      options,
++      entry,
++      displayPath,
++    );
+ 
+-    await _processFile(cache, options, entry, p.normalize(entry.path));
++    options.beforeFile(entry, displayPath);
++
++    await pool!.add(
++      uri: entry.path,
++      languageVersion: config.languageVersion,
++      indent: options.indent,
++      pageWidth: config.pageWidth,
++      trailingCommas: config.trailingCommas,
++      experimentFlags: config.experimentFlags,
++      onResult: (response) {
++        if (response.error != null) {
++          if (response.isFormatterException) {
++            stderr.writeln(response.error);
++            if (exitCode != 70) exitCode = 65; // sysexits.h: EX_DATAERR
++          } else {
++            stderr.writeln(
++              'Hit a bug in the formatter when formatting $displayPath.',
++            );
++            stderr.writeln(response.error);
++            if (response.stackTrace case var stackTrace?) {
++              stderr.writeln(stackTrace);
++            }
++            stderr.writeln(
++              'Please report at github.com/dart-lang/dart_style/issues.',
++            );
++            exitCode = 70; // sysexits.h: EX_SOFTWARE
++          }
++          return;
++        }
++
++        var output = SourceCode(
++          response.text!,
++          uri: entry.path,
++          selectionStart: response.selectionStart,
++          selectionLength: response.selectionLength,
++        );
++
++        options.afterFile(
++          entry,
++          displayPath,
++          output,
++          changed: response.changed,
++        );
++      },
++    );
++  }
++
++  await pool?.close();
++}
++
++/// Whether [path] (inside [directory]) is in a subdirectory or file whose name
++/// starts with ".".
++bool _isHidden(String directory, String path) {
++  if (!path.startsWith(directory)) {
++    var parts = p.split(p.relative(path, from: directory));
++    return parts.any((part) => part.startsWith('.'));
++  }
++
++  // Avoid the relatively expensive p.relative() since listed entries always
++  // start with the directory path.
++  var relative = path.substring(directory.length);
++  for (var i = 0; i < relative.length; i++) {
++    if (relative[i] != '.') continue;
++    if (i == 0 || relative[i - 1] == '/' || relative[i - 1] == p.separator) {
++      return true;
++    }
++  }
++  return false;
++}
++
++/// Formatter configuration shared by all files in a directory.
++typedef _FileConfig = ({
++  Version languageVersion,
++  int pageWidth,
++  TrailingCommas? trailingCommas,
++  List<String> experimentFlags,
++});
++
++Future<_FileConfig> _resolveConfig(
++  ConfigCache cache,
++  FormatterOptions options,
++  File file,
++  String displayPath,
++) async {
++  Timeline.startSync('Main.configLookup');
++  try {
++    var languageVersion =
++        options.languageVersion ??
++        await cache.findLanguageVersion(file, displayPath);
++    var pageWidth = options.pageWidth ?? await cache.findPageWidth(file);
++    var trailingCommas =
++        options.trailingCommas ?? await cache.findTrailingCommas(file);
++    var experimentFlags = options.experimentFlags;
++    if (experimentFlags.isEmpty) {
++      experimentFlags = await cache.findExperimentFlags(file);
++    }
++    return (
++      languageVersion: languageVersion ?? DartFormatter.latestLanguageVersion,
++      pageWidth: pageWidth ?? DartFormatter.defaultPageWidth,
++      trailingCommas: trailingCommas,
++      experimentFlags: experimentFlags,
++    );
++  } finally {
++    Timeline.finishSync();
+   }
+ }
+ 
+@@ -122,9 +253,15 @@ Future<void> _processFile(
+   var formatter = await _createFormatter(options, cache, file, displayPath);
+ 
+   try {
+-    var source = SourceCode(file.readAsStringSync(), uri: file.path);
++    var source = SourceCode(
++      Timeline.timeSync('Worker.readFile', file.readAsStringSync),
++      uri: file.path,
++    );
+     options.beforeFile(file, displayPath);
+-    var output = formatter.formatSource(source);
++    var output = Timeline.timeSync(
++      'Worker.formatSource',
++      () => formatter.formatSource(source),
++    );
+     options.afterFile(
+       file,
+       displayPath,
+diff --git a/pubspec.yaml b/pubspec.yaml
+index dd1e0f1d..c0afa7f9 100644
+--- a/pubspec.yaml
++++ b/pubspec.yaml
+@@ -14,6 +14,7 @@ dependencies:
+   collection: ^1.19.0
+   package_config: '>=2.1.0 <4.0.0'
+   path: ^1.9.0
++  pool: ^1.5.2
+   pub_semver: ^2.1.4
+   source_span: ^1.8.0
+   yaml: ^3.1.2
+diff --git a/lib/src/back_end/worker_pool.dart b/lib/src/back_end/worker_pool.dart
+new file mode 100644
+index 00000000..050ec605
+--- /dev/null
++++ b/lib/src/back_end/worker_pool.dart
+@@ -0,0 +1,419 @@
++// Copyright (c) 2026, the Dart project authors.  Please see the AUTHORS file
++// for details. All rights reserved. Use of this source code is governed by a
++// BSD-style license that can be found in the LICENSE file.
++
++import 'dart:async';
++import 'dart:developer';
++import 'dart:io';
++import 'dart:isolate';
++
++import 'package:pool/pool.dart';
++import 'package:pub_semver/pub_semver.dart';
++
++import '../dart_formatter.dart';
++import '../exceptions.dart';
++import '../source_code.dart';
++
++typedef _PendingRequest = ({
++  _WorkerRequest request,
++  void Function(WorkerResponse) callback,
++});
++
++/// A pool of long-lived isolates that can format Dart source code in parallel.
++final class WorkerPool {
++  /// The list of free worker ports.
++  final List<SendPort> _freeWorkers = [];
++
++  /// The pool to limit concurrency.
++  final Pool _pool;
++
++  /// Whether the pool is being shut down.
++  bool _isClosed = false;
++
++  /// Queue to buffer requests until we have a full batch.
++  final List<_PendingRequest> _pending = [];
++
++  /// List of futures for active batches to ensure we wait for them on close.
++  final List<Future<void>> _activeBatches = [];
++
++  static final _batchSize = _getBatchSize();
++
++  /// The number of requests currently in memory (pending or in flight).
++  int _inMemoryCount = 0;
++
++  /// The maximum number of requests allowed in memory before throttling.
++  final int maxBacklog;
++
++  /// Completer to pause the producer when the backlog is full.
++  Completer<void>? _throttleCompleter;
++
++  /// Creates a worker pool with [size] isolates.
++  ///
++  /// If [size] is not given, defaults to the 'FORMAT_POOL_SIZE' environment
++  /// variable if set, otherwise [Platform.numberOfProcessors] / 3,
++  /// with a minimum of 1.
++  WorkerPool({int? size})
++    : _pool = Pool(size ?? _getPoolSize()),
++      maxBacklog = _batchSize * ((size ?? _getPoolSize()) + 1) {
++    if (_batchSize < 1) {
++      throw ArgumentError('FORMAT_BATCH_SIZE must be >= 1, got $_batchSize');
++    }
++  }
++
++  /// Adds a request to the pool.
++  ///
++  /// The [onResult] callback will be called when this specific request is
++  /// complete.
++  ///
++  /// The returned [Future] completes when the pool has capacity to accept more
++  /// requests. If the pool's backlog grows too large, this method will pause
++  /// the caller to apply backpressure and prevent excessive memory usage from
++  /// eagerly reading file contents.
++  Future<void> add({
++    required String uri,
++    required Version languageVersion,
++    required int indent,
++    required int pageWidth,
++    required TrailingCommas? trailingCommas,
++    required List<String> experimentFlags,
++    required void Function(WorkerResponse) onResult,
++  }) async {
++    if (_isClosed) throw StateError('WorkerPool is closed');
++
++    _inMemoryCount++;
++
++    var request = _WorkerRequest(
++      uri: uri,
++      languageVersion: languageVersion,
++      indent: indent,
++      pageWidth: pageWidth,
++      trailingCommas: trailingCommas,
++      experimentFlags: experimentFlags,
++    );
++
++    void wrappedCallback(WorkerResponse response) {
++      _inMemoryCount--;
++      if (_inMemoryCount < maxBacklog && _throttleCompleter != null) {
++        var c = _throttleCompleter!;
++        _throttleCompleter = null;
++        c.complete();
++      }
++      onResult(response);
++    }
++
++    _pending.add((request: request, callback: wrappedCallback));
++
++    if (_pending.length >= _batchSize) {
++      _flush();
++    }
++
++    if (_inMemoryCount >= maxBacklog) {
++      _throttleCompleter ??= Completer<void>();
++      return _throttleCompleter!.future;
++    }
++  }
++
++  /// Sends a batch of requests to a worker.
++  void _flush() {
++    if (_pending.isEmpty) return;
++
++    var currentBatch = _pending.toList();
++    _pending.clear();
++
++    var requests = currentBatch.map((_PendingRequest e) => e.request).toList();
++
++    // Run the batch in the background. The pool will limit concurrency.
++    _formatBatch(requests, currentBatch);
++  }
++
++  /// Spawns a new worker isolate.
++  Future<SendPort> _spawnWorker() async {
++    var completer = Completer<SendPort>();
++    var receivePort = ReceivePort();
++
++    receivePort.listen((message) {
++      if (message is SendPort) {
++        receivePort.close();
++        completer.complete(message);
++      }
++    });
++
++    if (_useIsolateGroups) {
++      // Each worker gets its own isolate group (and heap) by spawning the
++      // running program again.
++      await Isolate.spawnUri(Platform.script, const [
++        workerArgument,
++      ], receivePort.sendPort);
++    } else {
++      await Isolate.spawn(_workerEntry, receivePort.sendPort);
++    }
++    return completer.future;
++  }
++
++  /// Argument passed to `main` of worker isolates spawned in their own group.
++  static const workerArgument = '--format-worker';
++
++  /// Entry point for workers spawned in their own isolate group.
++  ///
++  /// Messages to and from such workers have to be encoded using only
++  /// primitive values, lists and send ports.
++  static void runWorkerInOwnGroup(SendPort mainSendPort) =>
++      _runWorker(mainSendPort, encoded: true);
++
++  /// Formats a batch of files in a worker isolate.
++  Future<void> _formatBatch(
++    List<_WorkerRequest> requests,
++    List<_PendingRequest> batch,
++  ) async {
++    var future = _pool.withResource(() async {
++      var worker = _freeWorkers.isNotEmpty
++          ? _freeWorkers.removeLast()
++          : await _spawnWorker();
++      var responsePort = ReceivePort();
++
++      try {
++        if (_useIsolateGroups) {
++          worker.send([
++            [for (var r in requests) r.encode()],
++            responsePort.sendPort,
++          ]);
++        } else {
++          worker.send((requests, responsePort.sendPort));
++        }
++        var response = await responsePort.first;
++        var responses = _useIsolateGroups
++            ? [
++                for (var r in response as List<Object?>)
++                  WorkerResponse.decode(r as List<Object?>),
++              ]
++            : response as List<WorkerResponse>;
++        Timeline.timeSync('WorkerPool.handleResponses', () {
++          for (var i = 0; i < batch.length; i++) {
++            batch[i].callback(responses[i]);
++          }
++        });
++      } catch (e) {
++        for (var i = 0; i < batch.length; i++) {
++          batch[i].callback(WorkerResponse(error: e.toString()));
++        }
++      } finally {
++        responsePort.close();
++        if (_isClosed) {
++          worker.send(null); // Signal worker to exit.
++        } else {
++          _freeWorkers.add(worker);
++        }
++      }
++    });
++
++    _activeBatches.add(future);
++    try {
++      await future;
++    } finally {
++      _activeBatches.remove(future);
++    }
++  }
++
++  /// Closes the pool and shuts down all worker isolates.
++  Future<void> close() async {
++    _isClosed = true;
++    _flush();
++    await Future.wait(_activeBatches);
++    await _pool.close();
++    for (var worker in _freeWorkers) {
++      worker.send(null);
++    }
++    _freeWorkers.clear();
++  }
++
++  static void _workerEntry(SendPort mainSendPort) =>
++      _runWorker(mainSendPort, encoded: false);
++
++  static void _runWorker(SendPort mainSendPort, {required bool encoded}) {
++    var receivePort = ReceivePort();
++    mainSendPort.send(receivePort.sendPort);
++
++    receivePort.listen((message) {
++      if (message == null) {
++        receivePort.close();
++        return;
++      }
++
++      List<_WorkerRequest> requests;
++      SendPort responseSendPort;
++      if (encoded) {
++        var [encodedRequests as List<Object?>, port as SendPort] =
++            message as List<Object?>;
++        requests = [
++          for (var r in encodedRequests)
++            _WorkerRequest.decode(r as List<Object?>),
++        ];
++        responseSendPort = port;
++      } else {
++        (requests, responseSendPort) =
++            message as (List<_WorkerRequest>, SendPort);
++      }
++      var responses = <WorkerResponse>[];
++
++      Timeline.startSync('Worker.formatBatch');
++      for (var request in requests) {
++        var formatter = DartFormatter(
++          languageVersion: request.languageVersion,
++          indent: request.indent,
++          pageWidth: request.pageWidth,
++          trailingCommas: request.trailingCommas,
++          experimentFlags: request.experimentFlags,
++        );
++
++        try {
++          var file = File(request.uri);
++          var sourceText = Timeline.timeSync(
++            'Worker.readFile',
++            file.readAsStringSync,
++          );
++          var source = SourceCode(sourceText, uri: request.uri);
++          var output = Timeline.timeSync(
++            'Worker.formatSource',
++            () => formatter.formatSource(source),
++          );
++
++          responses.add(
++            WorkerResponse(
++              text: output.text,
++              selectionStart: output.selectionStart,
++              selectionLength: output.selectionLength,
++              changed: sourceText != output.text,
++            ),
++          );
++        } on FormatterException catch (err) {
++          responses.add(
++            WorkerResponse(error: err.message(), isFormatterException: true),
++          );
++        } catch (err, stack) {
++          responses.add(
++            WorkerResponse(
++              error: err.toString(),
++              stackTrace: err is UnexpectedOutputException
++                  ? null
++                  : stack.toString(),
++            ),
++          );
++        }
++      }
++      Timeline.finishSync();
++
++      Timeline.timeSync(
++        'Worker.sendResponses',
++        () => responseSendPort.send(
++          encoded ? [for (var r in responses) r.encode()] : responses,
++        ),
++      );
++    });
++  }
++}
++
++/// The parameters for a single formatting task.
++final class _WorkerRequest {
++  final String uri;
++  final Version languageVersion;
++  final int indent;
++  final int pageWidth;
++  final TrailingCommas? trailingCommas;
++  final List<String> experimentFlags;
++
++  _WorkerRequest({
++    required this.uri,
++    required this.languageVersion,
++    required this.indent,
++    required this.pageWidth,
++    required this.trailingCommas,
++    required this.experimentFlags,
++  });
++
++  factory _WorkerRequest.decode(List<Object?> m) => _WorkerRequest(
++    uri: m[0] as String,
++    languageVersion: Version.parse(m[1] as String),
++    indent: m[2] as int,
++    pageWidth: m[3] as int,
++    trailingCommas: switch (m[4] as int) {
++      -1 => null,
++      var i => TrailingCommas.values[i],
++    },
++    experimentFlags: (m[5] as List<Object?>).cast<String>(),
++  );
++
++  List<Object?> encode() => [
++    uri,
++    languageVersion.toString(),
++    indent,
++    pageWidth,
++    trailingCommas?.index ?? -1,
++    experimentFlags,
++  ];
++}
++
++/// The result of a single formatting task.
++final class WorkerResponse {
++  final String? text;
++  final int? selectionStart;
++  final int? selectionLength;
++  final String? error;
++  final String? stackTrace;
++  final bool isFormatterException;
++  final bool changed;
++
++  WorkerResponse({
++    this.text,
++    this.selectionStart,
++    this.selectionLength,
++    this.error,
++    this.stackTrace,
++    this.isFormatterException = false,
++    this.changed = false,
++  });
++
++  factory WorkerResponse.decode(List<Object?> m) => WorkerResponse(
++    text: m[0] as String?,
++    selectionStart: m[1] as int?,
++    selectionLength: m[2] as int?,
++    error: m[3] as String?,
++    stackTrace: m[4] as String?,
++    isFormatterException: m[5] as bool,
++    changed: m[6] as bool,
++  );
++
++  List<Object?> encode() => [
++    text,
++    selectionStart,
++    selectionLength,
++    error,
++    stackTrace,
++    isFormatterException,
++    changed,
++  ];
++}
++
++/// Whether to spawn each worker in its own isolate group, controlled by the
++/// 'FORMAT_ISOLATE_GROUPS' environment variable.
++final bool _useIsolateGroups = Platform.environment.containsKey(
++  'FORMAT_ISOLATE_GROUPS',
++);
++
++int _getPoolSize() {
++  var env = Platform.environment['FORMAT_POOL_SIZE'];
++  var n = Platform.numberOfProcessors;
++  var size = (n / 3).round();
++  if (env != null) {
++    size = int.tryParse(env) ?? size;
++  }
++  return size.clamp(1, 32);
++}
++
++int _getBatchSize() {
++  var env = Platform.environment['FORMAT_BATCH_SIZE'];
++  var size = 20;
++  if (env != null) {
++    size = int.tryParse(env) ?? size;
++  }
++  return size.clamp(1, 500);
++}
