@@ -729,7 +729,10 @@ class FileState {
   /// [FileSystemState.newDetachedFile], see `ParallelAnalysis`. The result
   /// should be put into [FileSystemState.prefetchedFiles], to be used by
   /// [refresh] of the registered file with the same path.
-  PrefetchedFile prefetch() {
+  ///
+  /// If [keepParsedUnit] is `false`, the unit parsed to compute the unlinked
+  /// unit is not kept, so linking will parse the file again.
+  PrefetchedFile prefetch({bool keepParsedUnit = true}) {
     var content = _readFileContent(resource);
     var unlinkedKey = _unlinkedKeyForSignature(
       _computeUnlinkedSignature(content),
@@ -738,6 +741,7 @@ class FileState {
     var bytes = _fsState._byteStore.get(unlinkedKey);
     if (bytes != null && bytes.isNotEmpty) {
       return PrefetchedFile._(
+        file: this,
         content: content,
         unlinkedKey: unlinkedKey,
         unlinkedUnit: AnalysisDriverUnlinkedUnit.fromBytes(bytes),
@@ -752,10 +756,11 @@ class FileState {
     var unlinkedUnit = _computeUnlinkedUnit(unit, performance: performance);
     _fsState._byteStore.putGet(unlinkedKey, unlinkedUnit.toBytes());
     return PrefetchedFile._(
+      file: this,
       content: content,
       unlinkedKey: unlinkedKey,
       unlinkedUnit: unlinkedUnit,
-      parsedUnit: unit,
+      parsedUnit: keepParsedUnit ? unit : null,
     );
   }
 
@@ -1784,7 +1789,10 @@ class FileSystemState {
     Uri uri, {
     OperationPerformanceImpl? performance,
   }) {
-    var file = _createFile(resource, path, uri);
+    var file = switch (prefetchedFiles?[path]?.file) {
+      var prefetched? when prefetched.uri == uri => prefetched,
+      _ => _createFile(resource, path, uri),
+    };
     _pathToFile[path] = file;
     _uriToFile[uri] = file;
     knownFilePaths.add(path);
@@ -2320,6 +2328,10 @@ final class PartIncludeWithUriStr<U extends DirectiveUriWithString>
 
 /// The content and unlinked unit of a file, computed by [FileState.prefetch].
 class PrefetchedFile {
+  /// The detached file that was prefetched, so that it can be registered
+  /// instead of creating a new one.
+  final FileState file;
+
   final StoredFileContent content;
   final String unlinkedKey;
   final AnalysisDriverUnlinkedUnit unlinkedUnit;
@@ -2328,6 +2340,7 @@ class PrefetchedFile {
   final CompilationUnitImpl? parsedUnit;
 
   new _({
+    required this.file,
     required this.content,
     required this.unlinkedKey,
     required this.unlinkedUnit,

@@ -305,7 +305,7 @@ class ParallelAnalysis {
   /// The results are used by [_discoverLibraries], when it creates files.
   /// Missing files are read on demand, so this is only an optimization.
   Future<void> _prefetch(_WorkerPool pool) async {
-    var phase = _PrefetchPhase(driver, paths);
+    var phase = _PrefetchPhase(driver, paths, retainParsedUnits);
     driver.fsState.prefetchedFiles = phase.prefetchedFiles;
     await pool.run(phase);
   }
@@ -523,12 +523,18 @@ class _PrefetchPhase extends _Phase {
   /// The paths of seen files, used only by the main isolate.
   final Set<String> _seenPaths = {};
 
+  /// Resolved absolute URIs, mapped to paths, or `null` if not analyzed.
+  final Map<Uri, String?> _resolvedUris = {};
+
   /// The number of tasks pushed, used only by the main isolate.
   int _pushedCount = 0;
 
+  /// Whether to keep units parsed to compute unlinked data, for linking.
+  final bool keepParsedUnits;
+
   late GrowingQueue _queue;
 
-  new(this.driver, this.initialPaths);
+  new(this.driver, this.initialPaths, this.keepParsedUnits);
 
   @override
   void abort() {
@@ -553,7 +559,7 @@ class _PrefetchPhase extends _Phase {
   @override
   void runTask(int task) {
     try {
-      results[task] = files[task]!.prefetch();
+      results[task] = files[task]!.prefetch(keepParsedUnit: keepParsedUnits);
     } catch (_) {
       // The file will be read again when it is used.
     }
@@ -616,9 +622,16 @@ class _PrefetchPhase extends _Phase {
         continue;
       }
       var uri = uriCache.resolveRelative(file.uri, relativeUri);
+      if (_resolvedUris.containsKey(uri)) {
+        continue;
+      }
       var source = sourceFactory.forUri2(uri);
-      if (source != null && source is! InSummarySource) {
-        paths.add(source.fullName);
+      var path = source != null && source is! InSummarySource
+          ? source.fullName
+          : null;
+      _resolvedUris[uri] = path;
+      if (path != null) {
+        paths.add(path);
       }
     }
   }
