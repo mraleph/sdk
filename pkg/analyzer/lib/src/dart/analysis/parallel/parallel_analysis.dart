@@ -511,6 +511,7 @@ class _PrefetchPhase extends _Phase {
 
   final AnalysisDriver driver;
   final List<String> initialPaths;
+  late final Set<String> _initialPathSet = initialPaths.toSet();
 
   /// The files to prefetch, the main isolate sets slots before it makes
   /// them available in [_queue].
@@ -525,6 +526,11 @@ class _PrefetchPhase extends _Phase {
 
   /// Resolved absolute URIs, mapped to paths, or `null` if not analyzed.
   final Map<Uri, String?> _resolvedUris = {};
+
+  /// The paths of files whose references are prefetched, used only by the
+  /// main isolate. Files that are only registered, e.g. not selected
+  /// configurations, are prefetched, but their references are not.
+  late final Set<String> _followedPaths = _initialPathSet.toSet();
 
   /// The number of tasks pushed, used only by the main isolate.
   int _pushedCount = 0;
@@ -597,7 +603,9 @@ class _PrefetchPhase extends _Phase {
           if (results[task] case var prefetched?) {
             var file = files[task]!;
             prefetchedFiles[file.path] = prefetched;
-            _addReferencedPaths(file, prefetched, newPaths);
+            if (_followedPaths.contains(file.path)) {
+              _addReferencedPaths(file, prefetched, newPaths);
+            }
           }
         }
         _push(newPaths);
@@ -616,22 +624,33 @@ class _PrefetchPhase extends _Phase {
     List<String> paths,
   ) {
     var sourceFactory = driver.sourceFactory;
-    for (var relativeUriStr in prefetched.referencedUris) {
+    var referencedUris = prefetched.referencedUris(
+      declaredVariables: driver.declaredVariables,
+      // Only doc imports of analyzed libraries are loaded.
+      docImports: _initialPathSet.contains(file.path),
+    );
+    for (var (relativeUriStr, isUsed) in referencedUris) {
       var relativeUri = uriCache.tryParse(relativeUriStr);
       if (relativeUri == null) {
         continue;
       }
       var uri = uriCache.resolveRelative(file.uri, relativeUri);
-      if (_resolvedUris.containsKey(uri)) {
+      var path = _resolvedUris.putIfAbsent(uri, () {
+        var source = sourceFactory.forUri2(uri);
+        return source != null && source is! InSummarySource
+            ? source.fullName
+            : null;
+      });
+      if (path == null) {
         continue;
       }
-      var source = sourceFactory.forUri2(uri);
-      var path = source != null && source is! InSummarySource
-          ? source.fullName
-          : null;
-      _resolvedUris[uri] = path;
-      if (path != null) {
+      if (!_seenPaths.contains(path)) {
         paths.add(path);
+      }
+      if (isUsed && _followedPaths.add(path)) {
+        if (prefetchedFiles[path] case var referenced?) {
+          _addReferencedPaths(referenced.file, referenced, paths);
+        }
       }
     }
   }

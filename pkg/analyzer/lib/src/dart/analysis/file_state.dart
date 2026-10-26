@@ -2347,15 +2347,28 @@ class PrefetchedFile {
     required this.parsedUnit,
   });
 
-  /// The relative URIs of files that this file references.
-  Iterable<String> get referencedUris sync* {
+  /// The relative URIs of files that this file references, with `true` if
+  /// the referenced file is used, or `false` if it is only registered, as
+  /// URIs of not selected configurations are.
+  ///
+  /// Doc imports are included only if [docImports] is `true`.
+  Iterable<(String, bool)> referencedUris({
+    required DeclaredVariables declaredVariables,
+    required bool docImports,
+  }) sync* {
     var unit = unlinkedUnit.unit;
-    Iterable<String> ofConfigurable(
+    Iterable<(String, bool)> ofConfigurable(
       UnlinkedConfigurableUriDirective directive,
     ) sync* {
-      if (directive.uri case var uri?) yield uri;
+      var selected = directive.configurations.firstWhereOrNull((configuration) {
+        var value = declaredVariables.get(configuration.name);
+        return value == configuration.valueOrTrue;
+      });
+      if (directive.uri case var uri?) yield (uri, selected == null);
       for (var configuration in directive.configurations) {
-        if (configuration.uri case var uri?) yield uri;
+        if (configuration.uri case var uri?) {
+          yield (uri, identical(configuration, selected));
+        }
       }
     }
 
@@ -2368,16 +2381,17 @@ class PrefetchedFile {
     for (var directive in unit.parts) {
       yield* ofConfigurable(directive);
     }
-    var docImports = [
-      ...?unit.libraryDirective?.docImports,
-      ...?unit.partOfNameDirective?.docImports,
-      ...?unit.partOfUriDirective?.docImports,
-    ];
-    for (var directive in docImports) {
-      yield* ofConfigurable(directive);
+    if (docImports) {
+      for (var directive in [
+        ...?unit.libraryDirective?.docImports,
+        ...?unit.partOfNameDirective?.docImports,
+        ...?unit.partOfUriDirective?.docImports,
+      ]) {
+        yield* ofConfigurable(directive);
+      }
     }
     if (unit.partOfUriDirective?.uri case var uri?) {
-      yield uri;
+      yield (uri, true);
     }
   }
 }
