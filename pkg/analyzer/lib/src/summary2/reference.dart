@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:analyzer/src/binary/binary_reader.dart';
 import 'package:analyzer/src/binary/binary_writer.dart';
 import 'package:analyzer/src/dart/element/element.dart';
+import 'package:analyzer/src/util/shared_state_lock.dart';
 import 'package:analyzer/src/utilities/growable_type_data.dart';
 import 'package:analyzer/src/utilities/uri_cache.dart';
 
@@ -49,11 +50,15 @@ final class LibraryReference extends Reference {
   new _({required this.uriString}) : super._();
 
   @override
-  List<Reference> get children => [
-    for (var byKey in _topLevelsByKind) ...?byKey?.values,
-    if (_builtInByKind case var builtInByKind?)
-      for (var builtIn in builtInByKind) ?builtIn,
-  ];
+  List<Reference> get children {
+    return withSharedStateLock(() {
+      return [
+        for (var byKey in _topLevelsByKind) ...?byKey?.values,
+        if (_builtInByKind case var builtInByKind?)
+          for (var builtIn in builtInByKind) ?builtIn,
+      ];
+    });
+  }
 
   BuiltInReference get dynamicRef {
     assert(uriString == 'dart:core');
@@ -190,14 +195,16 @@ final class LibraryReference extends Reference {
   }
 
   BuiltInReference _builtIn(_BuiltInReferenceKind kind) {
-    var builtInByKind = _builtInByKind ??= List.filled(
-      _BuiltInReferenceKind.values.length,
-      null,
-    );
-    return builtInByKind[kind.index] ??= BuiltInReference._(
-      library: this,
-      kind: kind,
-    );
+    return withSharedStateLock(() {
+      var builtInByKind = _builtInByKind ??= List.filled(
+        _BuiltInReferenceKind.values.length,
+        null,
+      );
+      return builtInByKind[kind.index] ??= BuiltInReference._(
+        library: this,
+        kind: kind,
+      );
+    });
   }
 
   TopLevelReference _createTopLevelReference(
@@ -214,52 +221,60 @@ final class LibraryReference extends Reference {
     required _TopLevelReferenceKind kind,
     required String key,
   }) {
-    var byKey = _topLevelByKey(kind);
-    if (byKey[key] != null) {
-      throw StateError('Duplicate reference key: $key');
-    }
+    return withSharedStateLock(() {
+      var byKey = _topLevelByKey(kind);
+      if (byKey[key] != null) {
+        throw StateError('Duplicate reference key: $key');
+      }
 
-    return byKey[key] = MemberContainerReference._(
-      library: this,
-      key: key,
-      kind: kind,
-    );
+      return byKey[key] = MemberContainerReference._(
+        library: this,
+        key: key,
+        kind: kind,
+      );
+    });
   }
 
   TopLevelReference _declareTopLevel({
     required _TopLevelReferenceKind kind,
     required String key,
   }) {
-    return Reference._declare(
-      byKey: _topLevelByKey(kind),
-      key: key,
-      create: (key) => _createTopLevelReference(kind, key),
-    );
+    return withSharedStateLock(() {
+      return Reference._declare(
+        byKey: _topLevelByKey(kind),
+        key: key,
+        create: (key) => _createTopLevelReference(kind, key),
+      );
+    });
   }
 
   MemberContainerReference _getOrCreateMemberContainer({
     required _TopLevelReferenceKind kind,
     required String key,
   }) {
-    var byKey = _topLevelByKey(kind);
-    if (byKey[key] case MemberContainerReference existing) {
-      return existing;
-    }
+    return withSharedStateLock(() {
+      var byKey = _topLevelByKey(kind);
+      if (byKey[key] case MemberContainerReference existing) {
+        return existing;
+      }
 
-    var result = MemberContainerReference._(
-      library: this,
-      key: key,
-      kind: kind,
-    );
-    byKey[key] = result;
-    return result;
+      var result = MemberContainerReference._(
+        library: this,
+        key: key,
+        kind: kind,
+      );
+      byKey[key] = result;
+      return result;
+    });
   }
 
   TopLevelReference _getOrCreateTopLevel({
     required _TopLevelReferenceKind kind,
     required String key,
   }) {
-    return _topLevelByKey(kind)[key] ??= _createTopLevelReference(kind, key);
+    return withSharedStateLock(() {
+      return _topLevelByKey(kind)[key] ??= _createTopLevelReference(kind, key);
+    });
   }
 
   Map<String, TopLevelReference> _topLevelByKey(_TopLevelReferenceKind kind) {
@@ -434,9 +449,11 @@ final class MemberContainerReference extends TopLevelReference {
     : super._();
 
   @override
-  List<Reference> get children => [
-    for (var byKey in _membersByKind) ...?byKey?.values,
-  ];
+  List<Reference> get children {
+    return withSharedStateLock(() {
+      return [for (var byKey in _membersByKind) ...?byKey?.values];
+    });
+  }
 
   MemberReference declareConstructor(String key) {
     return _declareMember(kind: _MemberReferenceKind.constructor, key: key);
@@ -482,22 +499,28 @@ final class MemberContainerReference extends TopLevelReference {
     required _MemberReferenceKind kind,
     required String key,
   }) {
-    return Reference._declare(
-      byKey: _memberByKey(kind),
-      key: key,
-      create: (key) => MemberReference._(container: this, key: key, kind: kind),
-    );
+    return withSharedStateLock(() {
+      return Reference._declare(
+        byKey: _memberByKey(kind),
+        key: key,
+        create: (key) {
+          return MemberReference._(container: this, key: key, kind: kind);
+        },
+      );
+    });
   }
 
   MemberReference _getOrCreateMember({
     required _MemberReferenceKind kind,
     required String key,
   }) {
-    return _memberByKey(kind)[key] ??= MemberReference._(
-      container: this,
-      key: key,
-      kind: kind,
-    );
+    return withSharedStateLock(() {
+      return _memberByKey(kind)[key] ??= MemberReference._(
+        container: this,
+        key: key,
+        kind: kind,
+      );
+    });
   }
 
   Map<String, MemberReference> _memberByKey(_MemberReferenceKind kind) {
@@ -800,27 +823,36 @@ final class ReferenceTableWriter {
   }
 }
 
+/// The root of the reference tree.
+///
+/// Libraries can be added while other isolates that share the element model
+/// read it, see `ParallelAnalysis`, so all accesses are under
+/// [SharedStateLock].
 final class RootReference extends Reference {
   final Map<String, LibraryReference> _libraries = {};
 
   new() : super._();
 
   @override
-  List<LibraryReference> get children => [..._libraries.values];
+  List<LibraryReference> get children {
+    return withSharedStateLock(() => [..._libraries.values]);
+  }
 
   LibraryReference getOrCreateLibrary(Uri uri) {
     var uriString = '$uri';
-    return _libraries[uriString] ??= LibraryReference._(uriString: uriString);
+    return withSharedStateLock(() {
+      return _libraries[uriString] ??= LibraryReference._(uriString: uriString);
+    });
   }
 
   LibraryReference? libraryIfExists(Uri uri) {
     var uriString = '$uri';
-    return _libraries[uriString];
+    return withSharedStateLock(() => _libraries[uriString]);
   }
 
   LibraryReference? removeLibrary(Uri uri) {
     var uriString = '$uri';
-    return _libraries.remove(uriString);
+    return withSharedStateLock(() => _libraries.remove(uriString));
   }
 }
 

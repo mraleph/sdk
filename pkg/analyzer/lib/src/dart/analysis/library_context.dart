@@ -34,6 +34,7 @@ import 'package:analyzer/src/summary2/link.dart';
 import 'package:analyzer/src/summary2/linked_element_factory.dart';
 import 'package:analyzer/src/summary2/reference.dart';
 import 'package:analyzer/src/util/performance/operation_performance.dart';
+import 'package:analyzer/src/util/shared_state_lock.dart';
 import 'package:analyzer/src/utilities/extensions/collection.dart';
 import 'package:collection/collection.dart';
 
@@ -157,6 +158,45 @@ class LibraryContext {
     });
   }
 
+  /// Returns the library cycles of the [libraries], and their transitive
+  /// dependencies, that are not loaded yet.
+  List<LibraryCycle> cyclesToLoad(Iterable<LibraryFileKind> libraries) {
+    var result = <LibraryCycle>[];
+    var visited = Set<LibraryCycle>.identity();
+    var stack = <LibraryCycle>[
+      for (var library in libraries) library.libraryCycle,
+    ];
+    while (stack.isNotEmpty) {
+      var cycle = stack.removeLast();
+      if (loadedBundles.contains(cycle) || !visited.add(cycle)) {
+        continue;
+      }
+      result.add(cycle);
+      stack.addAll(cycle.directDependencies);
+    }
+    return result;
+  }
+
+  /// Loads the linked bundle for [cycle], or links it if not available.
+  ///
+  /// Direct dependencies must already be loaded. When the state is shared
+  /// by multiple isolates, see `ParallelAnalysis`, this method can be invoked
+  /// concurrently for different cycles. Then [createTypeProvider] should be
+  /// invoked after all cycles are loaded.
+  void loadCycle(
+    LibraryCycle cycle, {
+    required OperationPerformanceImpl performance,
+  }) {
+    fileSystemState.withParsedUnitsForLinking(() {
+      _loadBundle(cycle: cycle, performance: performance);
+    });
+  }
+
+  /// Ensures that the type provider is created.
+  void createTypeProvider() {
+    _createElementFactoryTypeProvider();
+  }
+
   /// Load data required to resolve the given [targetLibrary].
   ///
   /// In addition to [load], this loads the libraries imported by `@docImport`s,
@@ -207,6 +247,16 @@ class LibraryContext {
     loadedBundles.clear();
 
     return keySet;
+  }
+
+  /// The controller for events, `null` if events are disabled, or the state
+  /// is shared by multiple isolates, see `ParallelAnalysis`, because the
+  /// controller is not safe for concurrent use.
+  StreamController<Object>? get _eventsController {
+    if (SharedStateLock.current != null) {
+      return null;
+    }
+    return eventsController;
   }
 
   /// Returns not yet loaded cycles starting from [root] in post-order, so
@@ -268,7 +318,8 @@ class LibraryContext {
     required LibraryCycle cycle,
     required OperationPerformanceImpl performance,
   }) {
-    if (!loadedBundles.add(cycle)) return;
+    if (!withSharedStateLock(() => loadedBundles.add(cycle))) return;
+    var eventsController = _eventsController;
     addToLogRing('[load][cycle: $cycle]');
 
     performance.getDataInt('cycleCount').increment();
@@ -416,8 +467,10 @@ class LibraryContext {
           libraryManifests: probe.libraryManifests,
         );
       });
-      elementFactory.addBundle(bundleReader);
-      elementFactory.libraryManifests.addAll(probe.libraryManifests);
+      withSharedStateLock(() {
+        elementFactory.addBundle(bundleReader);
+        elementFactory.libraryManifests.addAll(probe.libraryManifests);
+      });
       addToLogRing('[load][addedBundle][cycle: $cycle]');
     }
   }
@@ -488,7 +541,7 @@ class LibraryContext {
         );
       });
 
-      eventsController?.add(
+      _eventsController?.add(
         CheckLinkedBundleRequirements(cycle: cycle, failure: failure),
       );
 

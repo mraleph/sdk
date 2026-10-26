@@ -59,6 +59,7 @@ import 'package:analyzer/src/summary2/export.dart';
 import 'package:analyzer/src/summary2/linked_element_factory.dart';
 import 'package:analyzer/src/summary2/reference.dart';
 import 'package:analyzer/src/util/file_paths.dart' as file_paths;
+import 'package:analyzer/src/util/shared_state_lock.dart';
 import 'package:analyzer/src/utilities/extensions/collection.dart';
 import 'package:analyzer/src/utilities/extensions/element.dart';
 import 'package:analyzer/src/utilities/extensions/object.dart';
@@ -1360,6 +1361,9 @@ class ConstructorFragmentImpl extends ExecutableFragmentImpl
   }
 }
 
+/// The value of a deferred reading callback while it is running.
+void _deferredReadingInProgress() {}
+
 /// This mixin is used to set up loading class members from summaries only when
 /// they are requested. The summary reader uses [deferReadMembers], and
 /// getters invoke [ensureReadMembers].
@@ -1384,14 +1388,33 @@ mixin DeferredMembersReadingMixin {
   }
 
   void ensureReadMembers() {
-    if (_readMembersCallback case var callback?) {
-      _readMembersCallback = null;
-      callback();
+    if (_readMembersCallback == null && _applyMembersOffsets == null) {
+      return;
+    }
+    withSharedStateLock(_ensureReadMembersLocked);
+  }
+
+  /// Callbacks are cleared only after they are done, so that other isolates
+  /// that share this element don't see partially read members.
+  void _ensureReadMembersLocked() {
+    if (_readMembersCallback case var callback?
+        when !identical(callback, _deferredReadingInProgress)) {
+      _readMembersCallback = _deferredReadingInProgress;
+      try {
+        callback();
+      } finally {
+        _readMembersCallback = null;
+      }
     }
 
-    if (_applyMembersOffsets case var callback?) {
-      _applyMembersOffsets = null;
-      callback();
+    if (_applyMembersOffsets case var callback?
+        when !identical(callback, _deferredReadingInProgress)) {
+      _applyMembersOffsets = _deferredReadingInProgress;
+      try {
+        callback();
+      } finally {
+        _applyMembersOffsets = null;
+      }
     }
   }
 }
@@ -1426,18 +1449,31 @@ mixin DeferredResolutionReadingMixin {
   }
 
   void _ensureReadResolution() {
+    if (_readResolutionCallback == null) {
+      return;
+    }
     if (DeferredResolutionReadingHelper._lockResolutionLoading > 0) {
       return;
     }
+    withSharedStateLock(_ensureReadResolutionLocked);
+  }
 
-    if (_readResolutionCallback case var callback?) {
-      _readResolutionCallback = null;
-      callback();
-
-      // The callback read all AST nodes, apply offsets.
-      if (_applyResolutionConstantOffsets case var callback?) {
-        _applyResolutionConstantOffsets = null;
+  /// The callback is cleared only after it is done, so that other isolates
+  /// that share this element don't see partially read resolution.
+  void _ensureReadResolutionLocked() {
+    if (_readResolutionCallback case var callback?
+        when !identical(callback, _deferredReadingInProgress)) {
+      _readResolutionCallback = _deferredReadingInProgress;
+      try {
         callback();
+
+        // The callback read all AST nodes, apply offsets.
+        if (_applyResolutionConstantOffsets case var callback?) {
+          _applyResolutionConstantOffsets = null;
+          callback();
+        }
+      } finally {
+        _readResolutionCallback = null;
       }
     }
   }
@@ -1532,7 +1568,7 @@ class DocImportPrefixElementImpl extends PrefixElementImpl {
 /// The synthetic element representing the declaration of the type `dynamic`.
 class DynamicElementImpl extends ElementImpl {
   /// The unique instance of this class.
-  static final DynamicElementImpl instance = DynamicElementImpl._();
+  static DynamicElementImpl instance = DynamicElementImpl._();
 
   new _();
 
@@ -1586,7 +1622,7 @@ class DynamicElementImpl extends ElementImpl {
 /// The synthetic element representing the declaration of the type `dynamic`.
 class DynamicFragmentImpl extends FragmentImpl {
   /// The unique instance of this class.
-  static final DynamicFragmentImpl instance = DynamicFragmentImpl._();
+  static DynamicFragmentImpl instance = DynamicFragmentImpl._();
 
   /// Initialize a newly created instance of this class. Instances of this class
   /// should <b>not</b> be created except as part of creating the type
@@ -2139,7 +2175,10 @@ abstract class ElementImpl implements Element {
   /// We ask it only when [_ElementStorageFlag.element_hasSinceSdkVersionValue]
   /// is `true`, so
   /// don't pay for a hash lookup when we know that the result is `null`.
-  static final Expando<Version> _sinceSdkVersion = Expando<Version>();
+  ///
+  /// Must be the same for all isolates that share the element model, see
+  /// `ParallelAnalysis`.
+  static Expando<Version> sinceSdkVersionStorage = Expando<Version>();
 
   @override
   @trackedIncludedInId
@@ -2304,16 +2343,29 @@ abstract class ElementImpl implements Element {
   @override
   @trackedIndirectly
   Version? get sinceSdkVersion {
+    if (SharedStateLock.current != null) {
+      if (hasSinceSdkVersionComputed && !hasSinceSdkVersionValue) {
+        return null;
+      }
+      return withSharedStateLock(_sinceSdkVersionImpl);
+    }
+    return _sinceSdkVersionImpl();
+  }
+
+  /// The flags of shared elements and [sinceSdkVersionStorage] must be updated
+  /// under [SharedStateLock].
+  Version? _sinceSdkVersionImpl() {
     if (!hasSinceSdkVersionComputed) {
-      hasSinceSdkVersionComputed = true;
+      // Set after the value, see the fast path in [sinceSdkVersion].
       var result = SinceSdkVersionComputer().compute(this);
       if (result != null) {
-        _sinceSdkVersion[this] = result;
+        sinceSdkVersionStorage[this] = result;
         hasSinceSdkVersionValue = true;
       }
+      hasSinceSdkVersionComputed = true;
     }
     if (hasSinceSdkVersionValue) {
-      return _sinceSdkVersion[this];
+      return sinceSdkVersionStorage[this];
     }
     return null;
   }
@@ -6803,6 +6855,14 @@ class LibraryElementImpl extends ElementImpl
   @trackedInternal
   bool hasTypeProviderSystemSet = false;
 
+  /// Whether this library is being read from a summary, so is incomplete.
+  ///
+  /// The library is published in its [reference] before it is fully read,
+  /// so isolates that share the element model must not use it until this
+  /// flag is cleared.
+  @trackedInternal
+  bool isBeingRead = false;
+
   @override
   @trackedIndirectly
   late TypeProviderImpl typeProvider;
@@ -9538,7 +9598,7 @@ class MultiplyDefinedFragmentImpl extends FragmentImpl
 /// The synthetic element representing the declaration of the type `Never`.
 class NeverElementImpl extends ElementImpl {
   /// The unique instance of this class.
-  static final instance = NeverElementImpl._();
+  static NeverElementImpl instance = NeverElementImpl._();
 
   new _();
 
@@ -9599,7 +9659,7 @@ class NeverElementImpl extends ElementImpl {
 /// The synthetic element representing the declaration of the type `Never`.
 class NeverFragmentImpl extends FragmentImpl {
   /// The unique instance of this class.
-  static final instance = NeverFragmentImpl._();
+  static NeverFragmentImpl instance = NeverFragmentImpl._();
 
   /// Initialize a newly created instance of this class. Instances of this class
   /// should <b>not</b> be created except as part of creating the type
@@ -12389,31 +12449,91 @@ enum _PropertyInducingElementFlags {
 /// Instances of [List]s that are used as "not yet computed" values, they
 /// must be not `null`, and not identical to `const <T>[]`.
 class _Sentinel {
-  static final List<ClassFragmentImpl> classFragment = List.unmodifiable([]);
-  static final List<ConstructorFragmentImpl> constructorFragment =
+  static List<ClassFragmentImpl> classFragment = List.unmodifiable([]);
+  static List<ConstructorFragmentImpl> constructorFragment = List.unmodifiable(
+    [],
+  );
+  static List<EnumFragmentImpl> enumFragment = List.unmodifiable([]);
+  static List<ExtensionFragmentImpl> extensionFragment = List.unmodifiable([]);
+  static List<ExtensionTypeFragmentImpl> extensionTypeFragment =
       List.unmodifiable([]);
-  static final List<EnumFragmentImpl> enumFragment = List.unmodifiable([]);
-  static final List<ExtensionFragmentImpl> extensionFragment =
+  static List<FieldFragmentImpl> fieldFragment = List.unmodifiable([]);
+  static List<GetterFragmentImpl> getterFragment = List.unmodifiable([]);
+  static List<MethodFragmentImpl> methodFragment = List.unmodifiable([]);
+  static List<MixinFragmentImpl> mixinFragment = List.unmodifiable([]);
+  static List<SetterFragmentImpl> setterFragment = List.unmodifiable([]);
+  static List<TypeAliasFragmentImpl> typeAliasFragment = List.unmodifiable([]);
+  static List<TopLevelFunctionFragmentImpl> topLevelFunctionFragment =
       List.unmodifiable([]);
-  static final List<ExtensionTypeFragmentImpl> extensionTypeFragment =
-      List.unmodifiable([]);
-  static final List<FieldFragmentImpl> fieldFragment = List.unmodifiable([]);
-  static final List<GetterFragmentImpl> getterFragment = List.unmodifiable([]);
-  static final List<MethodFragmentImpl> methodFragment = List.unmodifiable([]);
-  static final List<MixinFragmentImpl> mixinFragment = List.unmodifiable([]);
-  static final List<SetterFragmentImpl> setterFragment = List.unmodifiable([]);
-  static final List<TypeAliasFragmentImpl> typeAliasFragment =
-      List.unmodifiable([]);
-  static final List<TopLevelFunctionFragmentImpl> topLevelFunctionFragment =
-      List.unmodifiable([]);
-  static final List<TopLevelVariableFragmentImpl> topLevelVariableFragment =
-      List.unmodifiable([]);
-
-  static final List<ConstructorElementImpl> constructorElement =
+  static List<TopLevelVariableFragmentImpl> topLevelVariableFragment =
       List.unmodifiable([]);
 
-  static final List<LibraryExportImpl> libraryExport = List.unmodifiable([]);
-  static final List<LibraryImportImpl> libraryImport = List.unmodifiable([]);
+  static List<ConstructorElementImpl> constructorElement = List.unmodifiable(
+    [],
+  );
+
+  static List<LibraryExportImpl> libraryExport = List.unmodifiable([]);
+  static List<LibraryImportImpl> libraryImport = List.unmodifiable([]);
+}
+
+/// The values of static fields of this library that must be the same for
+/// all isolates that share the element model, see `ParallelAnalysis`.
+///
+/// Static fields are per isolate, so a new isolate must adopt the values of
+/// the isolate that created the element model, using [adoptElementStatics],
+/// before it accesses any of these fields.
+List<Object> captureElementStatics() {
+  return List.unmodifiable(<Object>[
+    DynamicElementImpl.instance,
+    DynamicFragmentImpl.instance,
+    NeverElementImpl.instance,
+    NeverFragmentImpl.instance,
+    ElementImpl.sinceSdkVersionStorage,
+    _Sentinel.classFragment,
+    _Sentinel.constructorFragment,
+    _Sentinel.enumFragment,
+    _Sentinel.extensionFragment,
+    _Sentinel.extensionTypeFragment,
+    _Sentinel.fieldFragment,
+    _Sentinel.getterFragment,
+    _Sentinel.methodFragment,
+    _Sentinel.mixinFragment,
+    _Sentinel.setterFragment,
+    _Sentinel.typeAliasFragment,
+    _Sentinel.topLevelFunctionFragment,
+    _Sentinel.topLevelVariableFragment,
+    _Sentinel.constructorElement,
+    _Sentinel.libraryExport,
+    _Sentinel.libraryImport,
+  ]);
+}
+
+/// See [captureElementStatics].
+void adoptElementStatics(List<Object> values) {
+  var i = 0;
+  T next<T>() => values[i++] as T;
+  DynamicElementImpl.instance = next();
+  DynamicFragmentImpl.instance = next();
+  NeverElementImpl.instance = next();
+  NeverFragmentImpl.instance = next();
+  ElementImpl.sinceSdkVersionStorage = next();
+  _Sentinel.classFragment = next();
+  _Sentinel.constructorFragment = next();
+  _Sentinel.enumFragment = next();
+  _Sentinel.extensionFragment = next();
+  _Sentinel.extensionTypeFragment = next();
+  _Sentinel.fieldFragment = next();
+  _Sentinel.getterFragment = next();
+  _Sentinel.methodFragment = next();
+  _Sentinel.mixinFragment = next();
+  _Sentinel.setterFragment = next();
+  _Sentinel.typeAliasFragment = next();
+  _Sentinel.topLevelFunctionFragment = next();
+  _Sentinel.topLevelVariableFragment = next();
+  _Sentinel.constructorElement = next();
+  _Sentinel.libraryExport = next();
+  _Sentinel.libraryImport = next();
+  assert(i == values.length);
 }
 
 enum _TopLevelFunctionElementFlags {

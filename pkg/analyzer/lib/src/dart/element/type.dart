@@ -33,7 +33,7 @@ List<TypeImpl> fixedTypeList(TypeImpl e1, [TypeImpl? e2]) {
 class DynamicTypeImpl extends TypeImpl
     implements DynamicType, SharedDynamicType {
   /// The instance of this class without an alias.
-  static final DynamicTypeImpl instance = DynamicTypeImpl._();
+  static DynamicTypeImpl instance = DynamicTypeImpl._();
 
   factory({InstantiatedTypeAliasElementImpl? alias}) {
     if (alias == null) {
@@ -1136,7 +1136,7 @@ class InterfaceTypeImpl extends TypeImpl implements InterfaceType {
 class InvalidTypeImpl extends TypeImpl
     implements InvalidType, SharedInvalidType {
   /// The unique instance of this class.
-  static final InvalidTypeImpl instance = InvalidTypeImpl._();
+  static InvalidTypeImpl instance = InvalidTypeImpl._();
 
   /// Prevent the creation of instances of this class.
   new _();
@@ -1189,12 +1189,12 @@ class InvalidTypeImpl extends TypeImpl
 /// The type `Never` represents the uninhabited bottom type.
 class NeverTypeImpl extends TypeImpl implements NeverType {
   /// The instance of this class without an alias, nullable.
-  static final NeverTypeImpl instanceNullable = NeverTypeImpl._(
+  static NeverTypeImpl instanceNullable = NeverTypeImpl._(
     nullabilitySuffix: NullabilitySuffix.question,
   );
 
   /// The instance of this class without an alias, non-nullable.
-  static final NeverTypeImpl instance = NeverTypeImpl._(
+  static NeverTypeImpl instance = NeverTypeImpl._(
     nullabilitySuffix: NullabilitySuffix.none,
   );
 
@@ -1761,7 +1761,7 @@ class TypeParameterTypeImpl extends TypeImpl implements TypeParameterType {
 /// A concrete implementation of a [VoidType].
 class VoidTypeImpl extends TypeImpl implements VoidType, SharedVoidType {
   /// The instance of this class without an alias.
-  static final VoidTypeImpl instance = VoidTypeImpl._();
+  static VoidTypeImpl instance = VoidTypeImpl._();
 
   factory({InstantiatedTypeAliasElementImpl? alias}) {
     if (alias == null) {

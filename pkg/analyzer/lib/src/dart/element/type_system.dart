@@ -103,7 +103,11 @@ class TypeSystemImpl implements TypeSystem {
   /// The implementation of the subtyping relation.
   late final SubtypeHelper _subtypeHelper;
 
-  int _typeOperationDepth = 0;
+  /// The depth of active recursive type operations.
+  ///
+  /// Static fields are per isolate, so isolates that share type systems,
+  /// see `ParallelAnalysis`, track their own depths.
+  static int _typeOperationDepth = 0;
 
   new({required TypeProvider typeProvider})
     : typeProvider = typeProvider as TypeProviderImpl {

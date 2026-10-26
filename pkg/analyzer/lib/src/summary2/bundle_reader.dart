@@ -131,6 +131,7 @@ class LibraryReader {
       0,
       featureSet,
     );
+    _libraryElement.isBeingRead = true;
     _reference.element = _libraryElement;
     _libraryElement.reference = _reference;
 

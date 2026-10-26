@@ -166,6 +166,15 @@ final class AnalysisOptionsExcludePattern {
 /// A set of analysis options used to control the behavior of an analysis
 /// context.
 class AnalysisOptionsImpl implements AnalysisOptions {
+  /// If not `null`, maps lint rules of options to the instances that the
+  /// current isolate should use.
+  ///
+  /// Lint rules keep the state of the current analysis, so isolates that
+  /// share analysis options, see `ParallelAnalysis`, use their own instances.
+  /// Static fields are per isolate.
+  static List<AbstractAnalysisRule> Function(List<AbstractAnalysisRule>)?
+  isolateLintRules;
+
   /// The cached [unlinkedSignature].
   Uint32List? _unlinkedSignature;
 
@@ -211,8 +220,7 @@ class AnalysisOptionsImpl implements AnalysisOptions {
   @override
   final bool warning;
 
-  @override
-  final List<AbstractAnalysisRule> lintRules;
+  final List<AbstractAnalysisRule> _lintRules;
 
   /// Whether linter exceptions should be propagated to the caller (by
   /// rethrowing them).
@@ -260,7 +268,7 @@ class AnalysisOptionsImpl implements AnalysisOptions {
     required this.errorProcessors,
     required this.lint,
     required this.warning,
-    required this.lintRules,
+    required this._lintRules,
     required this.propagateLinterExceptions,
     required this.strictCasts,
     required this.strictInference,
@@ -272,6 +280,14 @@ class AnalysisOptionsImpl implements AnalysisOptions {
   }) {
     assert(unignorableDiagnosticCodeNames.every((n) => n == n.toLowerCase()));
     (codeStyleOptions as CodeStyleOptionsImpl).options = this;
+  }
+
+  @override
+  List<AbstractAnalysisRule> get lintRules {
+    if (isolateLintRules case var isolateLintRules?) {
+      return isolateLintRules(_lintRules);
+    }
+    return _lintRules;
   }
 
   @Deprecated(

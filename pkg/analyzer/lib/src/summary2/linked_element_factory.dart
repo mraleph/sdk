@@ -14,6 +14,7 @@ import 'package:analyzer/src/fine/library_manifest.dart';
 import 'package:analyzer/src/summary2/bundle_reader.dart';
 import 'package:analyzer/src/summary2/export.dart';
 import 'package:analyzer/src/summary2/reference.dart';
+import 'package:analyzer/src/util/shared_state_lock.dart';
 import 'package:analyzer/src/utilities/uri_cache.dart';
 import 'package:meta/meta.dart';
 
@@ -34,7 +35,6 @@ class LinkedElementFactory {
   AnalysisSessionImpl analysisSession;
   final RootReference rootReference;
   final Map<Uri, LibraryReader> _libraryReaders = {};
-  bool isApplyingInformativeData = false;
   final Map<Uri, LibraryManifestHandle> libraryManifests = {};
 
   new(this.analysisContext, this.analysisSession, this.rootReference) {
@@ -97,21 +97,30 @@ class LinkedElementFactory {
       return;
     }
 
-    analysisContext.setTypeProviders(
-      typeProvider: TypeProviderImpl(
-        coreLibrary: dartCore,
-        asyncLibrary: dartAsync,
-      ),
-    );
-
-    // During linking we create libraries when typeProvider is not ready.
-    // Update these libraries now, when typeProvider is ready.
-    for (var reference in rootReference.children) {
-      var libraryElement = reference.element as LibraryElementImpl?;
-      if (libraryElement != null && !libraryElement.hasTypeProviderSystemSet) {
-        setLibraryTypeSystem(libraryElement);
+    // Libraries are created under the same lock, so all of them get the
+    // type provider, either here, or when they are created.
+    withSharedStateLock(() {
+      if (analysisContext.hasTypeProvider) {
+        return;
       }
-    }
+
+      analysisContext.setTypeProviders(
+        typeProvider: TypeProviderImpl(
+          coreLibrary: dartCore,
+          asyncLibrary: dartAsync,
+        ),
+      );
+
+      // During linking we create libraries when typeProvider is not ready.
+      // Update these libraries now, when typeProvider is ready.
+      for (var reference in rootReference.children) {
+        var libraryElement = reference.element as LibraryElementImpl?;
+        if (libraryElement != null &&
+            !libraryElement.hasTypeProviderSystemSet) {
+          setLibraryTypeSystem(libraryElement);
+        }
+      }
+    });
   }
 
   void discardDecodedLibraryManifests() {
@@ -149,6 +158,15 @@ class LinkedElementFactory {
 
   ElementImpl elementOfReference3(Reference reference) {
     if (reference.element case var element?) {
+      if (element is! LibraryElementImpl || !element.isBeingRead) {
+        return element;
+      }
+    }
+    return withSharedStateLock(() => _elementOfReference3(reference));
+  }
+
+  ElementImpl _elementOfReference3(Reference reference) {
+    if (reference.element case var element?) {
       return element;
     }
 
@@ -181,11 +199,17 @@ class LinkedElementFactory {
   }
 
   LibraryElementImpl? libraryOfUri(Uri uri) {
-    var reference = rootReference.getOrCreateLibrary(uri);
-    if (reference.element case LibraryElementImpl element) {
+    if (rootReference.libraryIfExists(uri)?.element
+        case LibraryElementImpl element when !element.isBeingRead) {
       return element;
     }
-    return _createLibraryElementForReading(uri);
+    return withSharedStateLock(() {
+      var reference = rootReference.getOrCreateLibrary(uri);
+      if (reference.element case LibraryElementImpl element) {
+        return element;
+      }
+      return _createLibraryElementForReading(uri);
+    });
   }
 
   LibraryElementImpl libraryOfUri2(Uri uri) {
@@ -274,6 +298,7 @@ class LinkedElementFactory {
 
     var libraryElement = reader.readElement(librarySource: librarySource);
     setLibraryTypeSystem(libraryElement);
+    libraryElement.isBeingRead = false;
     return libraryElement;
   }
 

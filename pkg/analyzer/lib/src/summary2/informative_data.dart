@@ -28,6 +28,12 @@ Uint8List writeUnitInformative(CompilationUnit unit) {
 }
 
 class InformativeDataApplier {
+  /// Whether [applyToLibrary] is running in the current isolate.
+  ///
+  /// Static fields are per isolate, so isolates that share the element
+  /// factory, see `ParallelAnalysis`, can apply data concurrently.
+  static bool _isApplyingToLibrary = false;
+
   bool _shouldDeferApplyMembersOffsets = true;
 
   void applyFromBytes(
@@ -43,10 +49,10 @@ class InformativeDataApplier {
     LibraryElementImpl libraryElement,
     Map<Uri, Uint8List> unitsInformativeBytes,
   ) {
-    if (elementFactory.isApplyingInformativeData) {
+    if (_isApplyingToLibrary) {
       throw StateError('Unexpected recursion.');
     }
-    elementFactory.isApplyingInformativeData = true;
+    _isApplyingToLibrary = true;
 
     for (var libraryFragment in libraryElement.internal.fragments) {
       var uri = libraryFragment.source.uri;
@@ -55,7 +61,7 @@ class InformativeDataApplier {
       }
     }
 
-    elementFactory.isApplyingInformativeData = false;
+    _isApplyingToLibrary = false;
   }
 
   void _applyFromBytes(
