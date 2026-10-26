@@ -2088,7 +2088,7 @@ void Scavenger::Scavenge(Thread* thread, GCType type, GCReason reason) {
 }
 
 static constexpr intptr_t kMinAutoScavengeWorkers = 2;
-static constexpr intptr_t kMaxAutoScavengeWorkers = 4;
+static constexpr intptr_t kMaxAutoScavengeWorkers = 8;
 
 intptr_t Scavenger::NumScavengeWorkers() {
   intptr_t num_tasks = FLAG_scavenger_tasks;
