@@ -380,6 +380,9 @@ class AnalysisDriver {
   Stream<ExceptionResult> get exceptions => _exceptionController.stream;
 
   /// The current file system state.
+  /// The byte store, which parallel analysis shares between isolates.
+  ByteStore get byteStoreForParallelAnalysis => _byteStore;
+
   FileSystemState get fsState => _fsState;
 
   bool get hasPendingFileChanges => _pendingFileChanges.isNotEmpty;
@@ -581,6 +584,75 @@ class AnalysisDriver {
       performance,
     ) {
       return _analyzeFileImpl(path: path, performance: performance);
+    });
+  }
+
+  /// Returns diagnostics for all files of [library], either read from the
+  /// byte store, or computed by analyzing the library and then stored.
+  ///
+  /// Unlike [getErrors], this method is synchronous, does not notify any
+  /// listeners, and does not update the state of the driver, so it can be
+  /// invoked concurrently by multiple isolates that share this driver, see
+  /// `ParallelAnalysis`. The element models of the [library] and its
+  /// dependencies must be already loaded.
+  List<(FileState, List<Diagnostic>)> computeLibraryDiagnostics(
+    LibraryFileKind library, {
+    OperationPerformanceImpl? performance,
+  }) {
+    if (withFineDependencies) {
+      throw StateError('Fine dependencies are not supported.');
+    }
+    performance ??= OperationPerformanceImpl('<root>');
+
+    var keys = [
+      for (var file in library.files)
+        _getResolvedUnitKey(_getResolvedUnitSignature(library, file)),
+    ];
+
+    var cached = performance.run('readCache', (_) {
+      var cached = <(FileState, List<Diagnostic>)>[];
+      var files = library.files;
+      for (var i = 0; i < files.length; i++) {
+        var bytes = _byteStore.get(keys[i]);
+        if (bytes == null) {
+          return null;
+        }
+        var unit = AnalysisDriverResolvedUnit.fromBuffer(bytes);
+        var file = files[i];
+        cached.add((file, _getDiagnosticsFromSerialized(file, unit.errors)));
+      }
+      return cached;
+    });
+    if (cached != null) {
+      return cached;
+    }
+
+    var elementFactory = libraryContext.elementFactory;
+    var libraryElement = elementFactory.libraryOfUri2(library.file.uri);
+    var unitResults = performance.run('LibraryAnalyzer', (performance) {
+      return LibraryAnalyzer(
+        library.file.analysisOptions,
+        declaredVariables,
+        libraryElement,
+        elementFactory.analysisSession.inheritanceManager,
+        library,
+        performance: performance,
+      ).analyze();
+    });
+
+    return performance.run('writeCache', (_) {
+      var result = <(FileState, List<Diagnostic>)>[];
+      for (var unitResult in unitResults) {
+        var file = unitResult.file;
+        var signature = _getResolvedUnitSignature(library, file);
+        var bytes = AnalysisDriverResolvedUnitBuilder(
+          errors: unitResult.diagnostics.map(ErrorEncoding.encode).toList(),
+          index: AnalysisDriverUnitIndexBuilder(),
+        ).toBuffer();
+        _byteStore.putGet(_getResolvedUnitKey(signature), bytes);
+        result.add((file, unitResult.diagnostics));
+      }
+      return result;
     });
   }
 

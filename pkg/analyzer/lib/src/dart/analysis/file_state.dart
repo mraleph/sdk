@@ -5,6 +5,7 @@
 /// @docImport 'package:analyzer/dart/analysis/analysis_options.dart';
 library;
 
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:_fe_analyzer_shared/src/scanner/string_canonicalizer.dart';
@@ -42,12 +43,14 @@ import 'package:analyzer/src/summary/package_bundle_reader.dart';
 import 'package:analyzer/src/summary2/informative_data.dart';
 import 'package:analyzer/src/util/file_paths.dart' as file_paths;
 import 'package:analyzer/src/util/performance/operation_performance.dart';
+import 'package:analyzer/src/util/shared_state_lock.dart';
 import 'package:analyzer/src/util/uri.dart';
 import 'package:analyzer/src/utilities/extensions/collection.dart';
 import 'package:analyzer/src/utilities/uri_cache.dart';
 import 'package:analyzer/src/workspace/workspace.dart';
 import 'package:collection/collection.dart';
 import 'package:convert/convert.dart';
+import 'package:crypto/crypto.dart';
 import 'package:meta/meta.dart';
 import 'package:path/path.dart' as path;
 import 'package:pub_semver/pub_semver.dart';
@@ -658,29 +661,24 @@ class FileState {
     performance ??= OperationPerformanceImpl('<root>');
     _invalidateCurrentUnresolvedData();
 
-    var rawFileState = _fsState.fileContentStrategy.get(path);
+    var prefetched = _fsState.prefetchedFiles?.remove(path);
+    var rawFileState =
+        prefetched?.content ?? _fsState.fileContentStrategy.get(path);
     var contentChanged = _fileContent?.contentHash != rawFileState.contentHash;
     _fileContent = rawFileState;
 
     // Prepare the unlinked bundle key.
     var previousUnlinkedKey = _unlinkedKey;
     {
-      var signature = ApiSignature();
-      signature.addUint32List(_fsState._saltForUnlinked);
-      signature.addFeatureSet(featureSet);
-      signature.addLanguageVersion(packageLanguageVersion);
-      signature.addString(contentHash);
-      signature.addBool(exists);
-      _unlinkedSignature = signature.toByteList();
-      var signatureHex = hex.encode(_unlinkedSignature!);
-      // TODO(scheglov): Use the path as the key, and store the signature.
-      _unlinkedKey = '$signatureHex.unlinked2';
+      _unlinkedSignature = _computeUnlinkedSignature(rawFileState);
+      _unlinkedKey = _unlinkedKeyForSignature(_unlinkedSignature!);
     }
 
     // Prepare the unlinked unit.
     performance.run('getUnlinkedUnit', (performance) {
       _driverUnlinkedUnit = _getUnlinkedUnit(
         previousUnlinkedKey,
+        prefetched: prefetched,
         performance: performance,
       );
     });
@@ -723,10 +721,50 @@ class FileState {
     }
   }
 
+  /// Reads the content of the file, and computes its unlinked unit, or
+  /// reads it from the byte store.
+  ///
+  /// Unlike [refresh], this method does not update this file, or the file
+  /// system state, so it can be invoked concurrently for files created by
+  /// [FileSystemState.newDetachedFile], see `ParallelAnalysis`. The result
+  /// should be put into [FileSystemState.prefetchedFiles], to be used by
+  /// [refresh] of the registered file with the same path.
+  PrefetchedFile prefetch() {
+    var content = _readFileContent(resource);
+    var unlinkedKey = _unlinkedKeyForSignature(
+      _computeUnlinkedSignature(content),
+    );
+
+    var bytes = _fsState._byteStore.get(unlinkedKey);
+    if (bytes != null && bytes.isNotEmpty) {
+      return PrefetchedFile._(
+        content: content,
+        unlinkedKey: unlinkedKey,
+        unlinkedUnit: AnalysisDriverUnlinkedUnit.fromBytes(bytes),
+        parsedUnit: null,
+      );
+    }
+
+    // This file is detached, so we can update it.
+    _fileContent = content;
+    var performance = OperationPerformanceImpl('<root>');
+    var unit = parse(performance: performance);
+    var unlinkedUnit = _computeUnlinkedUnit(unit, performance: performance);
+    _fsState._byteStore.putGet(unlinkedKey, unlinkedUnit.toBytes());
+    return PrefetchedFile._(
+      content: content,
+      unlinkedKey: unlinkedKey,
+      unlinkedUnit: unlinkedUnit,
+      parsedUnit: unit,
+    );
+  }
+
   /// Takes the parsed [CompilationUnitImpl] cached during
   /// [FileSystemState.withParsedUnitsForLinking], or returns `null` if none.
   CompilationUnitImpl? takeParsedUnitForLinking() {
-    return _fsState._unlinkedUnitsForLinking?.remove(this);
+    return withSharedStateLock(() {
+      return _fsState._unlinkedUnitsForLinking?.remove(this);
+    });
   }
 
   @override
@@ -811,38 +849,21 @@ class FileState {
     return _fsState.getFileForUri(absoluteUri);
   }
 
-  /// Return the unlinked unit, freshly deserialized from bytes,
-  /// previously deserialized from bytes, or new.
-  AnalysisDriverUnlinkedUnit _getUnlinkedUnit(
-    String? previousUnlinkedKey, {
+  /// Returns the signature of the unlinked data for the [content].
+  Uint8List _computeUnlinkedSignature(FileContent content) {
+    var signature = ApiSignature();
+    signature.addUint32List(_fsState._saltForUnlinked);
+    signature.addFeatureSet(featureSet);
+    signature.addLanguageVersion(packageLanguageVersion);
+    signature.addString(content.contentHash);
+    signature.addBool(content.exists);
+    return signature.toByteList();
+  }
+
+  AnalysisDriverUnlinkedUnit _computeUnlinkedUnit(
+    CompilationUnitImpl unit, {
     required OperationPerformanceImpl performance,
   }) {
-    if (previousUnlinkedKey != null) {
-      if (previousUnlinkedKey != _unlinkedKey) {
-        _fsState.unlinkedUnitStore.release(previousUnlinkedKey);
-      } else {
-        return _driverUnlinkedUnit!;
-      }
-    }
-
-    var testData = _fsState.testData?.forFile(resource, uri);
-    var fromStore = _fsState.unlinkedUnitStore.get(_unlinkedKey!);
-    if (fromStore != null) {
-      testData?.unlinkedKeyGet.add(unlinkedKey);
-      return fromStore;
-    }
-
-    var bytes = _fsState._byteStore.get(_unlinkedKey!);
-    if (bytes != null && bytes.isNotEmpty) {
-      testData?.unlinkedKeyGet.add(unlinkedKey);
-      var result = AnalysisDriverUnlinkedUnit.fromBytes(bytes);
-      _fsState.unlinkedUnitStore.put(_unlinkedKey!, result);
-      return result;
-    }
-
-    var unit = parse(performance: performance);
-    _fsState._unlinkedUnitsForLinking?[this] = unit;
-
     return performance.run('compute', (performance) {
       var unlinkedUnit = performance.run('serializeAstUnlinked2', (
         performance,
@@ -861,19 +882,65 @@ class FileState {
             canContainAnalyzerDiagnosticExpectations(uriStr),
       );
       var subtypedNames = computeSubtypedNames(unit);
-      var driverUnlinkedUnit = AnalysisDriverUnlinkedUnit(
+      return AnalysisDriverUnlinkedUnit(
         definedTopLevelNames: definedNames.topLevelNames,
         definedClassMemberNames: definedNames.classMemberNames,
         referencedNames: referencedNames,
         subtypedNames: subtypedNames,
         unit: unlinkedUnit,
       );
-      var bytes = driverUnlinkedUnit.toBytes();
-      _fsState._byteStore.putGet(_unlinkedKey!, bytes);
-      testData?.unlinkedKeyPut.add(unlinkedKey);
-      _fsState.unlinkedUnitStore.put(_unlinkedKey!, driverUnlinkedUnit);
-      return driverUnlinkedUnit;
     });
+  }
+
+  /// Return the unlinked unit, freshly deserialized from bytes,
+  /// previously deserialized from bytes, prefetched, or new.
+  AnalysisDriverUnlinkedUnit _getUnlinkedUnit(
+    String? previousUnlinkedKey, {
+    required PrefetchedFile? prefetched,
+    required OperationPerformanceImpl performance,
+  }) {
+    if (previousUnlinkedKey != null) {
+      if (previousUnlinkedKey != _unlinkedKey) {
+        _fsState.unlinkedUnitStore.release(previousUnlinkedKey);
+      } else {
+        return _driverUnlinkedUnit!;
+      }
+    }
+
+    var testData = _fsState.testData?.forFile(resource, uri);
+    var fromStore = _fsState.unlinkedUnitStore.get(_unlinkedKey!);
+    if (fromStore != null) {
+      testData?.unlinkedKeyGet.add(unlinkedKey);
+      return fromStore;
+    }
+
+    if (prefetched != null && prefetched.unlinkedKey == _unlinkedKey) {
+      if (prefetched.parsedUnit case var unit?) {
+        _fsState._unlinkedUnitsForLinking?[this] = unit;
+      }
+      _fsState.unlinkedUnitStore.put(_unlinkedKey!, prefetched.unlinkedUnit);
+      return prefetched.unlinkedUnit;
+    }
+
+    var bytes = _fsState._byteStore.get(_unlinkedKey!);
+    if (bytes != null && bytes.isNotEmpty) {
+      testData?.unlinkedKeyGet.add(unlinkedKey);
+      var result = AnalysisDriverUnlinkedUnit.fromBytes(bytes);
+      _fsState.unlinkedUnitStore.put(_unlinkedKey!, result);
+      return result;
+    }
+
+    var unit = parse(performance: performance);
+    _fsState._unlinkedUnitsForLinking?[this] = unit;
+
+    var driverUnlinkedUnit = _computeUnlinkedUnit(
+      unit,
+      performance: performance,
+    );
+    _fsState._byteStore.putGet(_unlinkedKey!, driverUnlinkedUnit.toBytes());
+    testData?.unlinkedKeyPut.add(unlinkedKey);
+    _fsState.unlinkedUnitStore.put(_unlinkedKey!, driverUnlinkedUnit);
+    return driverUnlinkedUnit;
   }
 
   /// Invalidate any data that depends on the current unlinked data of the file,
@@ -955,6 +1022,32 @@ class FileState {
     } else {
       _kind = LibraryFileKind(file: this, name: null);
     }
+  }
+
+  /// Reads the content of the [file], same as [FileContentCache].
+  static StoredFileContent _readFileContent(File file) {
+    Uint8List contentBytes;
+    String content;
+    bool exists;
+    try {
+      contentBytes = file.readAsBytesSync();
+      content = utf8.decode(contentBytes);
+      exists = true;
+    } catch (_) {
+      contentBytes = Uint8List(0);
+      content = '';
+      exists = false;
+    }
+    return StoredFileContent(
+      content: content,
+      contentHash: hex.encode(md5.convert(contentBytes).bytes),
+      exists: exists,
+    );
+  }
+
+  static String _unlinkedKeyForSignature(Uint8List signature) {
+    // TODO(scheglov): Use the path as the key, and store the signature.
+    return '${hex.encode(signature)}.unlinked2';
   }
 
   static UnlinkedUnit serializeAstUnlinked2(
@@ -1307,6 +1400,10 @@ class FileSystemState {
   /// calls never retain ASTs.
   Map<FileState, CompilationUnitImpl>? _unlinkedUnitsForLinking;
 
+  /// The files prefetched by [FileState.prefetch], used by
+  /// [FileState.refresh] when the file is created.
+  Map<String, PrefetchedFile>? prefetchedFiles;
+
   new(
     this._byteStore,
     this.resourceProvider,
@@ -1404,6 +1501,21 @@ class FileSystemState {
     knownFiles.clear();
     _unlinkedUnitsForLinking?.clear();
     return result;
+  }
+
+  /// Creates a [FileState] for the [path] that is not registered in this
+  /// state, so can be used to [FileState.prefetch] the file concurrently.
+  ///
+  /// Returns `null` if the file is already known, or has no URI.
+  FileState? newDetachedFile(String path) {
+    if (_pathToFile.containsKey(path)) {
+      return null;
+    }
+    var uri = _sourceFactory.pathToUri(path);
+    if (uri == null) {
+      return null;
+    }
+    return _createFile(resourceProvider.getFile(path), path, uri);
   }
 
   FileState? getExisting(File file) {
@@ -1597,6 +1709,19 @@ class FileSystemState {
     return unused;
   }
 
+  /// Starts retaining newly-parsed units, like [withParsedUnitsForLinking],
+  /// but until [stopRetainingParsedUnits], so can be used across
+  /// asynchronous operations.
+  void startRetainingParsedUnits() {
+    _unlinkedUnitsForLinking ??= Map.identity();
+  }
+
+  /// See [startRetainingParsedUnits].
+  void stopRetainingParsedUnits() {
+    _unlinkedUnitsForLinking?.clear();
+    _unlinkedUnitsForLinking = null;
+  }
+
   /// Runs [operation] while retaining newly-parsed unlinked AST units in
   /// [_unlinkedUnitsForLinking] so they can be taken once by
   /// [FileState.takeParsedUnitForLinking] during linking, and clears any
@@ -1631,12 +1756,7 @@ class FileSystemState {
   AnalysisOptionsImpl _getAnalysisOptions(File file) =>
       _analysisOptionsMap[file];
 
-  FileState _newFile(
-    File resource,
-    String path,
-    Uri uri, {
-    OperationPerformanceImpl? performance,
-  }) {
+  FileState _createFile(File resource, String path, Uri uri) {
     FileSource uriSource = FileSource(resource, uri);
     WorkspacePackageImpl? workspacePackage = _workspace?.findPackageFor(path);
     AnalysisOptionsImpl analysisOptions = _getAnalysisOptions(resource);
@@ -1646,7 +1766,7 @@ class FileSystemState {
       workspacePackage,
       analysisOptions,
     );
-    var file = FileState._(
+    return FileState._(
       this,
       path,
       uri,
@@ -1656,6 +1776,15 @@ class FileSystemState {
       packageLanguageVersion,
       analysisOptions,
     );
+  }
+
+  FileState _newFile(
+    File resource,
+    String path,
+    Uri uri, {
+    OperationPerformanceImpl? performance,
+  }) {
+    var file = _createFile(resource, path, uri);
     _pathToFile[path] = file;
     _uriToFile[uri] = file;
     knownFilePaths.add(path);
@@ -2187,6 +2316,57 @@ final class PartIncludeWithUriStr<U extends DirectiveUriWithString>
     required super.selectedUri,
     required super.uris,
   });
+}
+
+/// The content and unlinked unit of a file, computed by [FileState.prefetch].
+class PrefetchedFile {
+  final StoredFileContent content;
+  final String unlinkedKey;
+  final AnalysisDriverUnlinkedUnit unlinkedUnit;
+
+  /// The parsed unit, if [unlinkedUnit] was computed, not read.
+  final CompilationUnitImpl? parsedUnit;
+
+  new _({
+    required this.content,
+    required this.unlinkedKey,
+    required this.unlinkedUnit,
+    required this.parsedUnit,
+  });
+
+  /// The relative URIs of files that this file references.
+  Iterable<String> get referencedUris sync* {
+    var unit = unlinkedUnit.unit;
+    Iterable<String> ofConfigurable(
+      UnlinkedConfigurableUriDirective directive,
+    ) sync* {
+      if (directive.uri case var uri?) yield uri;
+      for (var configuration in directive.configurations) {
+        if (configuration.uri case var uri?) yield uri;
+      }
+    }
+
+    for (var directive in unit.imports) {
+      yield* ofConfigurable(directive);
+    }
+    for (var directive in unit.exports) {
+      yield* ofConfigurable(directive);
+    }
+    for (var directive in unit.parts) {
+      yield* ofConfigurable(directive);
+    }
+    var docImports = [
+      ...?unit.libraryDirective?.docImports,
+      ...?unit.partOfNameDirective?.docImports,
+      ...?unit.partOfUriDirective?.docImports,
+    ];
+    for (var directive in docImports) {
+      yield* ofConfigurable(directive);
+    }
+    if (unit.partOfUriDirective?.uri case var uri?) {
+      yield uri;
+    }
+  }
 }
 
 /// The file has `part of name` directive.
