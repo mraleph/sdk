@@ -39,6 +39,10 @@ DEFINE_FLAG(int,
             "The max number of pages the old generation can grow at a time");
 DEFINE_FLAG(bool, log_growth, false, "Log PageSpace growth policy decisions.");
 
+// Max factor by which the growth ratio heuristic is scaled when the GC time
+// exceeds old_gen_growth_time_ratio.
+static constexpr intptr_t kMaxGrowthRatioScale = 8;
+
 // The initial estimate of how many words we can mark per microsecond (usage
 // before / mark-sweep time). This is a conservative value observed running
 // Flutter on a Nexus 4. After the first mark-sweep, we instead use a value
@@ -936,7 +940,9 @@ bool PageSpace::ShouldPerformIdleMarkCompact(int64_t deadline) {
 
 void PageSpace::IncrementalMarkWithSizeBudget(intptr_t size) {
   if (marker_ != nullptr) {
+    const int64_t start = OS::GetCurrentMonotonicMicros();
     marker_->IncrementalMarkWithSizeBudget(this, size);
+    assist_micros_.fetch_add(OS::GetCurrentMonotonicMicros() - start);
   }
 }
 
@@ -949,11 +955,14 @@ void PageSpace::IncrementalMarkWithTimeBudget(int64_t deadline) {
 void PageSpace::IncrementalSweepWithSizeBudget(intptr_t size) {
   if (size >= kAllocatablePageSize) {
     // Sweeping work is less divisible than marking work.
+    const int64_t start = OS::GetCurrentMonotonicMicros();
     Sweep(/*exclusive=*/false, /*one_page=*/true);
+    assist_micros_.fetch_add(OS::GetCurrentMonotonicMicros() - start);
   }
 }
 
 void PageSpace::AssistTasks(MonitorLocker* ml) {
+  const int64_t start = OS::GetCurrentMonotonicMicros();
   if (phase() == PageSpace::kMarking) {
     ml->Exit();
     marker_->IncrementalMarkWithUnlimitedBudget(this);
@@ -965,6 +974,7 @@ void PageSpace::AssistTasks(MonitorLocker* ml) {
     SweepLarge();
     ml->Enter();
   }
+  assist_micros_.fetch_add(OS::GetCurrentMonotonicMicros() - start);
 }
 
 void PageSpace::TryReleaseReservation() {
@@ -1211,8 +1221,11 @@ void PageSpace::CollectGarbageHelper(Thread* thread,
   int64_t end = OS::GetCurrentMonotonicMicros();
 
   // Record signals for growth control. Include size of external allocations.
+  const intptr_t mutators =
+      Utils::Maximum(static_cast<intptr_t>(1), isolate_group->MutatorCount());
   page_space_controller_.EvaluateGarbageCollection(
-      usage_before, GetCurrentUsage(), start, end);
+      usage_before, GetCurrentUsage(), start, end,
+      assist_micros_.exchange(0) / mutators);
 
   UpdateMaxUsed();
   if (heap_ != nullptr) {
@@ -1700,10 +1713,16 @@ bool PageSpaceController::ReachedIdleThreshold(SpaceUsage current) const {
 void PageSpaceController::EvaluateGarbageCollection(SpaceUsage before,
                                                     SpaceUsage after,
                                                     int64_t start,
-                                                    int64_t end) {
+                                                    int64_t end,
+                                                    int64_t assist_micros) {
   ASSERT(end >= start);
-  history_.AddGarbageCollectionTime(start, end);
+  history_.AddGarbageCollectionTime(start, end, assist_micros);
   const int gc_time_fraction = history_.GarbageCollectionTimeFraction();
+  if (FLAG_log_growth) {
+    THR_Print("%s: gc_time_fraction=%d%%, assists=%" Pd64 "us per mutator\n",
+              heap_->isolate_group()->source()->name, gc_time_fraction,
+              assist_micros);
+  }
 
   // Assume garbage increases linearly with allocation:
   // G = kA, and estimate k from the previous cycle.
@@ -1778,6 +1797,18 @@ void PageSpaceController::EvaluateGarbageCollection(SpaceUsage before,
         growth_in_pages =
             Utils::Maximum(growth_in_pages, growth_ratio_heuristic);
       }
+    }
+    // When little garbage is found, e.g. while the heap is growing, the
+    // search above cannot reduce the time spent in GC. Grow the headroom in
+    // proportion to the excess GC time instead.
+    if (garbage_collection_time_ratio_ != 0 &&
+        gc_time_fraction > garbage_collection_time_ratio_) {
+      const intptr_t scale = Utils::Minimum(
+          kMaxGrowthRatioScale,
+          static_cast<intptr_t>(gc_time_fraction /
+                                garbage_collection_time_ratio_));
+      growth_in_pages =
+          Utils::Maximum(growth_in_pages, growth_ratio_heuristic * scale);
     }
   } else {
     growth_in_pages = 0;
@@ -1880,11 +1911,14 @@ void PageSpaceController::RecordUpdate(SpaceUsage before,
   }
 }
 
-void PageSpaceGarbageCollectionHistory::AddGarbageCollectionTime(int64_t start,
-                                                                 int64_t end) {
+void PageSpaceGarbageCollectionHistory::AddGarbageCollectionTime(
+    int64_t start,
+    int64_t end,
+    int64_t assist_micros) {
   Entry entry;
   entry.start = start;
   entry.end = end;
+  entry.assist_micros = assist_micros;
   history_.Add(entry);
 }
 
@@ -1896,6 +1930,9 @@ int PageSpaceGarbageCollectionHistory::GarbageCollectionTimeFraction() {
     Entry previous = history_.Get(i + 1);
     gc_time += current.end - current.start;
     total_time += current.end - previous.end;
+    // Assists happen between collections.
+    gc_time += Utils::Minimum(current.assist_micros,
+                              current.start - previous.end);
   }
   if (total_time == 0) {
     return 0;

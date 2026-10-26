@@ -34,7 +34,11 @@ class PageSpaceGarbageCollectionHistory {
   PageSpaceGarbageCollectionHistory() {}
   ~PageSpaceGarbageCollectionHistory() {}
 
-  void AddGarbageCollectionTime(int64_t start, int64_t end);
+  // [assist_micros] is the time mutators spent assisting concurrent marking
+  // and sweeping since the previous collection, per mutator.
+  void AddGarbageCollectionTime(int64_t start,
+                                int64_t end,
+                                int64_t assist_micros);
 
   int GarbageCollectionTimeFraction();
 
@@ -44,6 +48,7 @@ class PageSpaceGarbageCollectionHistory {
   struct Entry {
     int64_t start;
     int64_t end;
+    int64_t assist_micros;
   };
   static constexpr intptr_t kHistoryLength = 4;
   RingBuffer<Entry, kHistoryLength> history_;
@@ -76,7 +81,8 @@ class PageSpaceController {
   void EvaluateGarbageCollection(SpaceUsage before,
                                  SpaceUsage after,
                                  int64_t start,
-                                 int64_t end);
+                                 int64_t end,
+                                 int64_t assist_micros);
   void EvaluateAfterLoading(SpaceUsage after);
 
   void set_last_usage(SpaceUsage current) { last_usage_ = current; }
@@ -261,6 +267,10 @@ class PageSpace {
   void IncrementalMarkWithTimeBudget(int64_t deadline);
   void IncrementalSweepWithSizeBudget(intptr_t size);
   void AssistTasks(MonitorLocker* ml);
+
+  // Time mutators spent assisting concurrent marking and sweeping, summed
+  // over all mutators.
+  RelaxedAtomic<int64_t> assist_micros_ = {0};
 
   void AddGCTime(int64_t micros) { gc_time_micros_ += micros; }
 
