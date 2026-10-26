@@ -5764,6 +5764,14 @@ class TypeAnalyzer extends ThrowingAstVisitor2<void>
 
     if (node.defaultClause case var defaultClause?) {
       var defaultValue = defaultClause.value2;
+      // Linked elements have their own detached initializers, attaching them
+      // to this unit would keep the whole resolved unit alive.
+      var isLinkedInitializer = switch (fragment.constantInitializer2) {
+        ExpressionImpl(:var parentInPrimaryView) =>
+          parentInPrimaryView == null ||
+              parentInPrimaryView is ConstantContextForExpressionImpl,
+        _ => false,
+      };
       analyzeExpression(
         defaultValue,
         SharedTypeSchemaView(fragment.element.type),
@@ -5774,8 +5782,10 @@ class TypeAnalyzer extends ThrowingAstVisitor2<void>
       // expression. Keep the element model on that resolved expression so
       // constant evaluation and other element consumers don't observe the
       // detached parser node.
-      fragment.constantInitializer2 = defaultValue;
-      fragment.element.resetConstantInitializer();
+      if (!isLinkedInitializer) {
+        fragment.constantInitializer2 = defaultValue;
+        fragment.element.resetConstantInitializer();
+      }
     }
   }
 
