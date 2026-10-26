@@ -5851,6 +5851,13 @@ sealed class InterfaceElementImpl extends InstanceElementImpl
   /// The cached result of [allSupertypes].
   List<InterfaceTypeImpl>? _allSupertypes;
 
+  /// The interface of this element computed by [InheritanceManager3].
+  ///
+  /// It is published here only when complete, so that isolates that share
+  /// the element model, see `ParallelAnalysis`, can read it without locking.
+  @trackedInternal
+  InterfaceCacheEntry? interfaceCacheEntry;
+
   List<ConstructorElementImpl> _constructors = _Sentinel.constructorElement;
 
   /// This callback is set during mixins inference to handle reentrant calls.

@@ -12,6 +12,7 @@ import 'package:analyzer/src/dart/element/type.dart';
 import 'package:analyzer/src/dart/element/type_algebra.dart';
 import 'package:analyzer/src/dart/element/type_system.dart';
 import 'package:analyzer/src/fine/requirements.dart';
+import 'package:analyzer/src/util/shared_state_lock.dart';
 import 'package:analyzer/src/utilities/extensions/collection.dart';
 
 /// The lookup through `super` found a member with the name, but it is not
@@ -181,9 +182,16 @@ class InheritanceManager3 {
     element as InterfaceElementImpl; // TODO(scheglov): remove cast
 
     var interface = getInterface(element);
-    var inheritedMap = interface.inheritedMap;
-    if (inheritedMap == null) {
-      inheritedMap = interface.inheritedMap = {};
+    if (interface.inheritedMap case var inheritedMap?) {
+      return inheritedMap;
+    }
+    // Published only when complete, under the lock for isolates that share
+    // interfaces, see `ParallelAnalysis`.
+    return withSharedStateLock(() {
+      if (interface.inheritedMap case var inheritedMap?) {
+        return inheritedMap;
+      }
+      var inheritedMap = <Name, InternalExecutableElement>{};
       _findMostSpecificFromNamedCandidates(
         element,
         inheritedMap,
@@ -191,8 +199,8 @@ class InheritanceManager3 {
             ? interface.redeclared
             : interface.overridden,
       );
-    }
-    return inheritedMap;
+      return interface.inheritedMap = inheritedMap;
+    });
   }
 
   /// Returns the interface of the given [element].
@@ -392,7 +400,11 @@ class InheritanceManager3 {
   /// Remove interfaces for classes defined in specified libraries.
   void removeOfLibraries(Set<Uri> uriSet) {
     _interfaces.removeWhere((element, _) {
-      return uriSet.contains(element.library.uri);
+      if (uriSet.contains(element.library.uri)) {
+        element.interfaceCacheEntry = null;
+        return true;
+      }
+      return false;
     });
   }
 
@@ -609,6 +621,18 @@ class InheritanceManager3 {
   /// Implementation of [getInterface], without dependency tracking.
   Interface _getInterface(InterfaceElement element) {
     element as InterfaceElementImpl; // TODO(scheglov): remove cast
+    if (element.interfaceCacheEntry case var entry?
+        when identical(entry.manager, this)) {
+      return entry.interface;
+    }
+    if (SharedStateLock.current == null) {
+      return _computeInterface(element);
+    }
+    // Interfaces are shared by isolates, see `ParallelAnalysis`.
+    return withSharedStateLock(() => _computeInterface(element));
+  }
+
+  Interface _computeInterface(InterfaceElementImpl element) {
     var result = _interfaces[element];
     if (result != null) {
       return result;
@@ -632,6 +656,7 @@ class InheritanceManager3 {
     }
 
     _interfaces[element] = result;
+    element.interfaceCacheEntry = InterfaceCacheEntry(this, result);
     return result;
   }
 
@@ -1483,6 +1508,14 @@ class InheritanceManager3 {
           return typeSystem.topMerge(previous, next) as FunctionTypeImpl;
         });
   }
+}
+
+/// The [Interface] of an element, computed by the [manager].
+final class InterfaceCacheEntry {
+  final InheritanceManager3 manager;
+  final Interface interface;
+
+  new(this.manager, this.interface);
 }
 
 /// The instance interface of an [InterfaceType].

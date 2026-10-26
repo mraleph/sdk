@@ -17,15 +17,16 @@ import 'package:analyzer/src/summary2/linked_element_factory.dart';
 
 /// A concrete implementation of an analysis session.
 class AnalysisSessionImpl implements AnalysisSession {
-  /// If not `null`, the caches that the current isolate uses instead of
-  /// [_classHierarchy] and [_inheritanceManager].
+  /// If not `null`, the class hierarchies that the current isolate uses
+  /// instead of [_classHierarchy].
   ///
   /// When the element model is shared by multiple isolates, see
-  /// `ParallelAnalysis`, each isolate uses its own caches, because they are
-  /// not safe for concurrent modification. Static fields are per isolate.
-  static Expando<(ClassHierarchy, InheritanceManager3)>? _isolateCaches;
-  static AnalysisSessionImpl? _lastIsolateCachesSession;
-  static (ClassHierarchy, InheritanceManager3)? _lastIsolateCaches;
+  /// `ParallelAnalysis`, each isolate uses its own class hierarchy, because
+  /// it is not safe for concurrent modification. Static fields are per
+  /// isolate. The [inheritanceManager] is safe to share.
+  static Expando<ClassHierarchy>? _isolateClassHierarchies;
+  static AnalysisSessionImpl? _lastIsolateSession;
+  static ClassHierarchy? _lastIsolateClassHierarchy;
 
   /// The analysis driver performing analysis for this session.
   final driver.AnalysisDriver _driver;
@@ -43,8 +44,8 @@ class AnalysisSessionImpl implements AnalysisSession {
   AnalysisContext get analysisContext => _driver.analysisContext!;
 
   ClassHierarchy get classHierarchy {
-    if (_isolateCaches case var isolateCaches?) {
-      return _getIsolateCaches(isolateCaches).$1;
+    if (_isolateClassHierarchies case var isolateClassHierarchies?) {
+      return _getIsolateClassHierarchy(isolateClassHierarchies);
     }
     return _classHierarchy;
   }
@@ -56,12 +57,7 @@ class AnalysisSessionImpl implements AnalysisSession {
     return _driver.libraryContext.elementFactory;
   }
 
-  InheritanceManager3 get inheritanceManager {
-    if (_isolateCaches case var isolateCaches?) {
-      return _getIsolateCaches(isolateCaches).$2;
-    }
-    return _inheritanceManager;
-  }
+  InheritanceManager3 get inheritanceManager => _inheritanceManager;
 
   @override
   ResourceProvider get resourceProvider => _driver.resourceProvider;
@@ -176,27 +172,24 @@ class AnalysisSessionImpl implements AnalysisSession {
     return _driver.getUnitElement(path);
   }
 
-  (ClassHierarchy, InheritanceManager3) _getIsolateCaches(
-    Expando<(ClassHierarchy, InheritanceManager3)> isolateCaches,
+  ClassHierarchy _getIsolateClassHierarchy(
+    Expando<ClassHierarchy> isolateClassHierarchies,
   ) {
-    if (identical(_lastIsolateCachesSession, this)) {
-      return _lastIsolateCaches!;
+    if (identical(_lastIsolateSession, this)) {
+      return _lastIsolateClassHierarchy!;
     }
-    var result = isolateCaches[this] ??= (
-      ClassHierarchy(),
-      InheritanceManager3(),
-    );
-    _lastIsolateCachesSession = this;
-    _lastIsolateCaches = result;
+    var result = isolateClassHierarchies[this] ??= ClassHierarchy();
+    _lastIsolateSession = this;
+    _lastIsolateClassHierarchy = result;
     return result;
   }
 
-  /// Makes the current isolate use its own class hierarchy and inheritance
-  /// caches for all sessions, if [enable] is `true`, or the shared caches
-  /// of sessions, if `false`.
+  /// Makes the current isolate use its own class hierarchies for all
+  /// sessions, if [enable] is `true`, or the shared class hierarchies of
+  /// sessions, if `false`.
   static void useIsolateCaches(bool enable) {
-    _isolateCaches = enable ? Expando() : null;
-    _lastIsolateCachesSession = null;
-    _lastIsolateCaches = null;
+    _isolateClassHierarchies = enable ? Expando() : null;
+    _lastIsolateSession = null;
+    _lastIsolateClassHierarchy = null;
   }
 }

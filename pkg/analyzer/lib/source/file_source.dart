@@ -72,7 +72,10 @@ class FileSource extends Source {
   @override
   bool operator ==(Object other) {
     if (other is FileSource) {
-      return id == other.id;
+      // IDs are allocated per isolate, so sources created by different
+      // isolates that share them, see `ParallelAnalysis`, have different IDs.
+      return id == other.id ||
+          (uri == other.uri && file.path == other.file.path);
     } else if (other is Source) {
       return uri == other.uri;
     }
