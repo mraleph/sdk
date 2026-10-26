@@ -148,6 +148,7 @@ class DependencyQueues {
   static const int _completedCountOffset = mutexSize + conditionSize;
   static const int _isAbortedOffset = _completedCountOffset + 8;
   static const int _versionOffset = _isAbortedOffset + 8;
+  static const int _completedLeadingCountOffset = _versionOffset + 8;
   static const int _globalSize = 256;
 
   /// The size of the header of each heap: the mutex, and the count.
@@ -164,6 +165,9 @@ class DependencyQueues {
   /// The priority of each task, higher is taken first.
   final List<int> priorities;
 
+  /// The number of leading tasks, whose completion is counted separately.
+  final int leadingTaskCount;
+
   final int address;
 
   new _(
@@ -171,6 +175,7 @@ class DependencyQueues {
     this.taskCount,
     this.dependents,
     this.priorities,
+    this.leadingTaskCount,
     this.address,
   );
 
@@ -181,8 +186,9 @@ class DependencyQueues {
   factory allocate(
     int workerCount,
     List<List<int>> dependencies,
-    List<int> priorities,
-  ) {
+    List<int> priorities, {
+    int leadingTaskCount = 0,
+  }) {
     var taskCount = dependencies.length;
     var dependents = List.generate(taskCount, (_) => <int>[]);
     for (var task = 0; task < taskCount; task++) {
@@ -201,6 +207,7 @@ class DependencyQueues {
       taskCount,
       dependents,
       priorities,
+      leadingTaskCount,
       memory.address,
     );
     var readyCount = 0;
@@ -216,6 +223,24 @@ class DependencyQueues {
 
   Pointer<Int64> get _completedCount {
     return Pointer.fromAddress(address + _completedCountOffset);
+  }
+
+  Pointer<Int64> get _completedLeadingCount {
+    return Pointer.fromAddress(address + _completedLeadingCountOffset);
+  }
+
+  /// Whether all tasks are completed, or the queues are aborted.
+  bool get isDone {
+    return _withLock(_globalMutex, () {
+      return _isAborted.value != 0 || _completedCount.value == taskCount;
+    });
+  }
+
+  /// Whether all leading tasks, see [leadingTaskCount], are completed.
+  bool get isLeadingDone {
+    return _withLock(_globalMutex, () {
+      return _completedLeadingCount.value == leadingTaskCount;
+    });
   }
 
   NativeCondition get _condition {
@@ -266,6 +291,9 @@ class DependencyQueues {
 
     _withLock(_globalMutex, () {
       _completedCount.value++;
+      if (task < leadingTaskCount) {
+        _completedLeadingCount.value++;
+      }
       if (ready.isNotEmpty) {
         _version.value++;
       }
@@ -313,6 +341,29 @@ class DependencyQueues {
     }
   }
 
+  /// Returns a ready task for the [worker], from its own heap, or stolen
+  /// from another heap, or `null` if there is none now.
+  ///
+  /// Only tasks with priority at least [minPriority] are taken.
+  int? tryTake(
+    int worker, {
+    int minPriority = 0,
+    void Function(int victim)? onSteal,
+  }) {
+    if (_isAborted.value != 0) {
+      return null;
+    }
+    if (_withLock(_heapMutex(worker), () => _pop(worker, minPriority))
+        case var task?) {
+      return task;
+    }
+    if (_steal(worker, minPriority) case (var victim, var task)) {
+      onSteal?.call(victim);
+      return task;
+    }
+    return null;
+  }
+
   Pointer<Int64> _heapCount(int worker) {
     return Pointer.fromAddress(_heapHeaderAddress(worker) + _heapCountOffset);
   }
@@ -337,7 +388,7 @@ class DependencyQueues {
 
   /// Removes the task with the highest priority from the heap of the
   /// [worker], must be invoked under its mutex.
-  int? _pop(int worker) {
+  int? _pop(int worker, [int minPriority = 0]) {
     var countPointer = _heapCount(worker);
     var count = countPointer.value;
     if (count == 0) {
@@ -345,6 +396,9 @@ class DependencyQueues {
     }
     var items = _heapItems(worker);
     var result = items[0];
+    if (priorities[result] < minPriority) {
+      return null;
+    }
     count--;
     countPointer.value = count;
     var last = items[count];
@@ -391,11 +445,11 @@ class DependencyQueues {
   }
 
   /// Steals the task with the highest priority from other workers.
-  (int, int)? _steal(int worker) {
+  (int, int)? _steal(int worker, [int minPriority = 0]) {
     while (true) {
       // Racy look at tops of heaps, to choose the victim.
       int? bestVictim;
-      var bestPriority = -1;
+      var bestPriority = minPriority - 1;
       for (var i = 1; i < workerCount; i++) {
         var victim = (worker + i) % workerCount;
         if (_heapCount(victim).value > 0) {
@@ -410,7 +464,8 @@ class DependencyQueues {
         return null;
       }
       var victim = bestVictim;
-      if (_withLock(_heapMutex(victim), () => _pop(victim)) case var task?) {
+      if (_withLock(_heapMutex(victim), () => _pop(victim, minPriority))
+          case var task?) {
         return (victim, task);
       }
     }
@@ -533,6 +588,25 @@ class GrowingQueue {
     _withLock(() {
       _pushed.value += count;
       _condition.broadcast();
+    });
+  }
+
+  /// Whether the queue is closed, and all its tasks are taken.
+  bool get isDrained {
+    return _withLock(() {
+      return _isClosed.value != 0 && _taken.value == _pushed.value;
+    });
+  }
+
+  /// For workers: returns a task, if one is available now.
+  int? tryTake() {
+    return _withLock(() {
+      var taken = _taken.value;
+      if (taken < _pushed.value) {
+        _taken.value = taken + 1;
+        return taken;
+      }
+      return null;
     });
   }
 

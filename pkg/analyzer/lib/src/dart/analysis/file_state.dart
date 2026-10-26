@@ -764,6 +764,18 @@ class FileState {
     );
   }
 
+  /// Parses this file for linking, the unit is taken by
+  /// [takeParsedUnitForLinking].
+  void parseForLinking() {
+    var unit = parse(
+      performance: OperationPerformanceImpl('<root>'),
+      scanComments: false,
+    );
+    withSharedStateLock(() {
+      _fsState._unlinkedUnitsForLinking?[this] = unit;
+    });
+  }
+
   /// Takes the parsed [CompilationUnitImpl] cached during
   /// [FileSystemState.withParsedUnitsForLinking], or returns `null` if none.
   CompilationUnitImpl? takeParsedUnitForLinking() {

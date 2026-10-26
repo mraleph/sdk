@@ -37,6 +37,10 @@ Future<void> main(List<String> args) async {
     ..addOption('workers', defaultsTo: '1')
     ..addOption('dump', help: 'Write sorted diagnostics into this file.')
     ..addFlag('no-retain-asts', help: 'Parse files again for linking.')
+    ..addOption(
+      'parallel-parse-cycle-size',
+      help: 'Parse files of cycles of at least this size in parallel tasks.',
+    )
     ..addFlag('performance', help: 'Print the performance tree.')
     ..addFlag('workers-statistics', help: 'Print statistics of workers.')
     ..addOption(
@@ -123,6 +127,12 @@ Future<List<String>> _run(
       paths,
       isolateSetup: linter.registerLintRules,
       retainParsedUnits: !options.flag('no-retain-asts'),
+      parallelParseCycleSize: switch (options.option(
+        'parallel-parse-cycle-size',
+      )) {
+        var size? => int.parse(size),
+        null => 1 << 20,
+      },
       traceTasks: options.option('timeline') != null,
     );
     var timer = Stopwatch()..start();

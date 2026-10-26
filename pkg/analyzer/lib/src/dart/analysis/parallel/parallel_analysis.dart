@@ -4,6 +4,7 @@
 
 import 'dart:async';
 import 'dart:developer';
+import 'dart:io' show sleep;
 import 'dart:math';
 import 'dart:isolate';
 
@@ -70,6 +71,11 @@ class ParallelAnalysis {
   /// so that linking does not parse them again.
   final bool retainParsedUnits;
 
+  /// Files of library cycles at least this large, in bytes, are parsed for
+  /// linking by separate tasks, in parallel, and the units that prefetching
+  /// parses are not kept. Zero disables these tasks.
+  final int parallelParseCycleSize;
+
   /// Statistics of each worker in the last analysis phase.
   List<WorkerStatistics> workerStatistics = const [];
 
@@ -81,6 +87,7 @@ class ParallelAnalysis {
     this.paths, {
     this.isolateSetup,
     this.retainParsedUnits = true,
+    this.parallelParseCycleSize = 1 << 20,
     this.traceTasks = false,
   });
 
@@ -106,14 +113,19 @@ class ParallelAnalysis {
       if (retainParsedUnits) {
         fsState.startRetainingParsedUnits();
       }
+      List<LibraryFileKind> libraries;
+      List<List<FileDiagnostics>>? pipelineResults;
       if (workerCount > 1) {
-        await _timeAsync('prefetch', () => _prefetch(pool));
+        (libraries, pipelineResults) = await _prefetchAndDiscover(pool);
+      } else {
+        libraries = _time('discover', () => _discoverLibraries(paths));
       }
-      var libraries = _time('discover', () => _discoverLibraries());
       fsState.prefetchedFiles = null;
 
       List<List<FileDiagnostics>> results;
-      if (workerCount > 1) {
+      if (pipelineResults != null) {
+        results = pipelineResults;
+      } else if (workerCount > 1) {
         results = await _timeAsync('linkAndAnalyze', () {
           return _linkAndAnalyze(pool, libraries);
         });
@@ -179,30 +191,34 @@ class ParallelAnalysis {
     _WorkerPool pool,
     List<LibraryFileKind> libraries,
   ) async {
+    var phase = _createLinkAndAnalyzePhase(libraries, libraries);
+    await pool.run(phase);
+    driver.fsState.stopRetainingParsedUnits();
+    driver.libraryContext.createTypeProvider();
+    workerStatistics = phase.statistics.cast<WorkerStatistics>();
+
+    return [
+      for (var (i, result) in phase.results.indexed)
+        result ?? (throw StateError('No result for ${libraries[i].file.path}')),
+    ];
+  }
+
+  /// Returns the phase that loads element models of the [loadLibraries], and
+  /// their dependencies, and computes diagnostics of the [libraries].
+  _LinkAndAnalyzePhase _createLinkAndAnalyzePhase(
+    List<LibraryFileKind> loadLibraries,
+    List<LibraryFileKind> libraries, {
+    bool boostLinking = false,
+  }) {
     var libraryContext = driver.libraryContext;
     var cycles = libraryContext.cyclesToLoad([
-      ...libraries,
-      for (var library in libraries) ...library.docImportedLibraries,
+      ...loadLibraries,
+      for (var library in loadLibraries) ...library.docImportedLibraries,
     ]);
     var cycleIndex = Map<LibraryCycle, int>.identity();
     for (var (i, cycle) in cycles.indexed) {
       cycleIndex[cycle] = i;
     }
-
-    // Link tasks are `[0, cycles.length)`, analysis tasks follow.
-    var dependencies = [
-      for (var cycle in cycles)
-        [
-          for (var dependency in cycle.directDependencies)
-            ?cycleIndex[dependency],
-        ],
-      for (var library in libraries)
-        {
-          ?cycleIndex[library.libraryCycle],
-          for (var docImported in library.docImportedLibraries)
-            ?cycleIndex[docImported.libraryCycle],
-        }.toList(),
-    ];
 
     int sizeOf(Iterable<LibraryFileKind> libraries) {
       var size = 0;
@@ -214,28 +230,64 @@ class ParallelAnalysis {
       return size;
     }
 
-    // Analysis of a library takes about 5 times longer than linking.
+    // Link tasks are `[0, cycles.length)`, analysis tasks follow, and then
+    // tasks that parse files of large cycles for linking.
+    var parseTasksStart = cycles.length + libraries.length;
+    var parseFiles = <FileState>[];
+    var cycleParseTasks = [
+      for (var cycle in cycles)
+        if (_isParallelParse &&
+            sizeOf(cycle.libraries) >= parallelParseCycleSize)
+          [
+            for (var library in cycle.libraries)
+              for (var file in library.files)
+                parseTasksStart + (parseFiles..add(file)).length - 1,
+          ]
+        else
+          const <int>[],
+    ];
+
+    var dependencies = [
+      for (var (i, cycle) in cycles.indexed)
+        [
+          for (var dependency in cycle.directDependencies)
+            ?cycleIndex[dependency],
+          ...cycleParseTasks[i],
+        ],
+      for (var library in libraries)
+        {
+          ?cycleIndex[library.libraryCycle],
+          for (var docImported in library.docImportedLibraries)
+            ?cycleIndex[docImported.libraryCycle],
+        }.toList(),
+      for (var _ in parseFiles) const <int>[],
+    ];
+
+    // Analysis of a library takes about 5 times longer than linking, and
+    // linking about 3 times longer than parsing.
     var costs = [
       for (var cycle in cycles) sizeOf(cycle.libraries),
       for (var library in libraries) 5 * sizeOf([library]),
+      for (var file in parseFiles) file.content.length ~/ 3,
     ];
 
-    var phase = _LinkAndAnalyzePhase(
+    var priorities = _criticalPathPriorities(dependencies, costs);
+    if (boostLinking) {
+      for (var task = 0; task < priorities.length; task++) {
+        if (task < cycles.length || task >= parseTasksStart) {
+          priorities[task] += _LinkAndAnalyzePhase.linkingPriority;
+        }
+      }
+    }
+
+    return _LinkAndAnalyzePhase(
       driver,
       cycles,
       libraries,
+      parseFiles,
       dependencies,
-      _criticalPathPriorities(dependencies, costs),
+      priorities,
     );
-    await pool.run(phase);
-    driver.fsState.stopRetainingParsedUnits();
-    libraryContext.createTypeProvider();
-    workerStatistics = phase.statistics.cast<WorkerStatistics>();
-
-    return [
-      for (var (i, result) in phase.results.indexed)
-        result ?? (throw StateError('No result for ${libraries[i].file.path}')),
-    ];
   }
 
   /// Returns the priority of each task: the cost of the most expensive path
@@ -281,7 +333,7 @@ class ParallelAnalysis {
   /// Discovers the libraries that contain [paths], and everything that is
   /// required to analyze them, so that the file state is not changed during
   /// the parallel analysis.
-  List<LibraryFileKind> _discoverLibraries() {
+  List<LibraryFileKind> _discoverLibraries(List<String> paths) {
     var fsState = driver.fsState;
     var libraries = <LibraryFileKind>{};
     for (var path in paths) {
@@ -309,15 +361,89 @@ class ParallelAnalysis {
     return libraries.toList();
   }
 
+  bool get _isParallelParse => retainParsedUnits && parallelParseCycleSize > 0;
+
   /// Reads files, and computes their unlinked data, in parallel, starting
   /// from [paths], and then the files that they reference, transitively.
   ///
   /// The results are used by [_discoverLibraries], when it creates files.
   /// Missing files are read on demand, so this is only an optimization.
-  Future<void> _prefetch(_WorkerPool pool) async {
-    var phase = _PrefetchPhase(driver, paths, retainParsedUnits);
+  _PrefetchPhase _createPrefetchPhase(
+    List<String> paths, {
+    Set<String> seenPaths = const {},
+  }) {
+    var phase = _PrefetchPhase(
+      driver,
+      paths,
+      retainParsedUnits && !_isParallelParse,
+    );
+    phase.addSeenPaths(seenPaths);
     driver.fsState.prefetchedFiles = phase.prefetchedFiles;
-    await pool.run(phase);
+    return phase;
+  }
+
+  /// Prefetches and discovers files in two waves, when possible.
+  ///
+  /// Files in `lib` directories are prefetched and discovered first. Then
+  /// their library cycles are linked, while the other files, e.g. tests,
+  /// which usually depend on them, are prefetched. This uses workers that
+  /// would otherwise wait for the linking of large library cycles.
+  ///
+  /// When the files are processed in two waves, the libraries are also
+  /// linked and analyzed, and their diagnostics are returned.
+  Future<(List<LibraryFileKind>, List<List<FileDiagnostics>>?)>
+  _prefetchAndDiscover(_WorkerPool pool) async {
+    var separator = driver.resourceProvider.pathContext.separator;
+    var libSegment = '${separator}lib$separator';
+    var firstPaths = [
+      for (var path in paths)
+        if (path.contains(libSegment)) path,
+    ];
+    var secondPaths = [
+      for (var path in paths)
+        if (!path.contains(libSegment)) path,
+    ];
+    if (firstPaths.isEmpty || secondPaths.isEmpty) {
+      await _timeAsync('prefetch', () => pool.run(_createPrefetchPhase(paths)));
+      return (_time('discover', () => _discoverLibraries(paths)), null);
+    }
+
+    var firstPrefetch = _createPrefetchPhase(firstPaths);
+    await _timeAsync('prefetch', () => pool.run(firstPrefetch));
+    var firstLibraries = _time('discover', () {
+      return _discoverLibraries(firstPaths);
+    });
+
+    var secondPrefetch = _createPrefetchPhase(
+      secondPaths,
+      seenPaths: firstPrefetch.seenPaths,
+    );
+    var first = _createLinkAndAnalyzePhase(
+      firstLibraries,
+      firstLibraries,
+      boostLinking: true,
+    );
+    var phase = _PipelinePhase(first, secondPrefetch, () {
+      var secondLibraries = _discoverLibraries(secondPaths);
+      return _createLinkAndAnalyzePhase(secondLibraries, secondLibraries);
+    });
+    await _timeAsync('linkAndAnalyze', () => pool.run(phase));
+    driver.fsState.stopRetainingParsedUnits();
+    driver.libraryContext.createTypeProvider();
+    workerStatistics = phase.statistics.cast<WorkerStatistics>();
+
+    var second = phase.second!;
+    return (
+      [...firstLibraries, ...second.libraries],
+      [
+        for (var dag in [first, second])
+          for (var (i, result) in dag.results.indexed)
+            result ??
+                (throw StateError(
+                  'No result for ${dag.libraries[i].file.path}',
+                )),
+      ],
+    );
   }
 
   T _time<T>(String name, T Function() operation) {
@@ -414,9 +540,13 @@ abstract class _IndependentTasksPhase extends _Phase {
 /// Links or reads bundles of library cycles, and computes diagnostics of
 /// libraries, respecting dependencies between these tasks.
 class _LinkAndAnalyzePhase extends _Phase {
+  /// Added to priorities of linking tasks, to prefer them to other tasks.
+  static const int linkingPriority = 1 << 40;
+
   final AnalysisDriver driver;
   final List<LibraryCycle> cycles;
   final List<LibraryFileKind> libraries;
+  final List<FileState> parseFiles;
   final List<List<int>> dependencies;
   final List<int> priorities;
   final List<List<FileDiagnostics>?> results;
@@ -427,6 +557,7 @@ class _LinkAndAnalyzePhase extends _Phase {
     this.driver,
     this.cycles,
     this.libraries,
+    this.parseFiles,
     this.dependencies,
     this.priorities,
   ) : results = List.filled(libraries.length, null);
@@ -453,8 +584,12 @@ class _LinkAndAnalyzePhase extends _Phase {
         },
       );
     }
-    var library = libraries[task - cycles.length];
-    return ('analyze', {'library': library.file.path});
+    var index = task - cycles.length;
+    if (index >= libraries.length) {
+      var file = parseFiles[index - libraries.length];
+      return ('parse', {'path': file.path});
+    }
+    return ('analyze', {'library': libraries[index].file.path});
   }
 
   @override
@@ -464,8 +599,19 @@ class _LinkAndAnalyzePhase extends _Phase {
 
   @override
   void prepare(int workerCount) {
-    _queues = DependencyQueues.allocate(workerCount, dependencies, priorities);
+    _queues = DependencyQueues.allocate(
+      workerCount,
+      dependencies,
+      priorities,
+      leadingTaskCount: cycles.length,
+    );
   }
+
+  /// Whether all tasks are completed.
+  bool get isDone => _queues.isDone;
+
+  /// Whether all library cycles are loaded.
+  bool get isLinked => _queues.isLeadingDone;
 
   @override
   void runTask(int task) {
@@ -478,9 +624,14 @@ class _LinkAndAnalyzePhase extends _Phase {
       return;
     }
 
+    var index = task - cycles.length;
+    if (index >= libraries.length) {
+      parseFiles[index - libraries.length].parseForLinking();
+      return;
+    }
+
     // Loading bundles does not create the type provider.
     libraryContext.createTypeProvider();
-    var index = task - cycles.length;
     var unitResults = driver.computeLibraryDiagnostics(libraries[index]);
     results[index] = [
       for (var (file, diagnostics) in unitResults)
@@ -491,6 +642,16 @@ class _LinkAndAnalyzePhase extends _Phase {
   @override
   int? take(int worker, WorkerStatistics statistics) {
     return _queues.take(worker, onSteal: (_) => statistics.stolenTasks++);
+  }
+
+  /// Returns a task for the [worker], with priority at least [minPriority],
+  /// if one is ready now.
+  int? tryTake(int worker, WorkerStatistics statistics, {int minPriority = 0}) {
+    return _queues.tryTake(
+      worker,
+      minPriority: minPriority,
+      onSteal: (_) => statistics.stolenTasks++,
+    );
   }
 }
 
@@ -550,6 +711,161 @@ abstract class _Phase {
   int? take(int worker, WorkerStatistics statistics);
 }
 
+/// Links and analyzes the libraries of the first wave, while the files of
+/// the second wave are prefetched, discovered, and then also linked and
+/// analyzed.
+///
+/// The main isolate discovers files to prefetch, then discovers the
+/// libraries of the second wave, and then works as other workers. Workers
+/// prefer linking, then prefetching, and then analysis.
+class _PipelinePhase extends _Phase {
+  final _LinkAndAnalyzePhase first;
+  final _PrefetchPhase prefetch;
+
+  /// Discovers the libraries of the second wave, and creates their phase.
+  final _LinkAndAnalyzePhase Function() createSecond;
+
+  /// The phase of the second wave, set by the main isolate after the first
+  /// wave is linked, and the second wave is discovered.
+  _LinkAndAnalyzePhase? second;
+
+  /// Protects [second] and [_hasSecond].
+  final NativeMutex _secondMutex = NativeMutex.allocate();
+  bool _hasSecond = false;
+
+  int _workerCount = 0;
+
+  new(this.first, this.prefetch, this.createSecond);
+
+  @override
+  void abort() {
+    first.abort();
+    prefetch.abort();
+    _takeSecond()?.abort();
+  }
+
+  @override
+  (String, Map<String, Object?>) describeTask(int task) {
+    throw UnsupportedError('Tasks are described by the nested phases.');
+  }
+
+  @override
+  void free() {
+    first.free();
+    prefetch.free();
+    _takeSecond()?.free();
+    _secondMutex.free();
+  }
+
+  @override
+  void prepare(int workerCount) {
+    _workerCount = workerCount;
+    first.prepare(workerCount);
+    prefetch.prepare(workerCount);
+    for (var phase in [first, prefetch]) {
+      phase.statistics = List.filled(workerCount, null);
+      phase.errors = List.filled(workerCount, null);
+    }
+  }
+
+  @override
+  void runTask(int task) {
+    throw UnsupportedError('Tasks are run by the nested phases.');
+  }
+
+  @override
+  void runWorker(int worker, WorkerStatistics statistics) {
+    first.traceTasks = prefetch.traceTasks = traceTasks;
+    if (worker == 0) {
+      prefetch.runWorker(worker, statistics);
+      _publishSecond(worker, statistics);
+    }
+
+    while (true) {
+      if (first.tryTake(
+            worker,
+            statistics,
+            minPriority: _LinkAndAnalyzePhase.linkingPriority,
+          )
+          case var task?) {
+        _run(first, worker, task, statistics);
+        continue;
+      }
+      if (prefetch.tryTake() case var task?) {
+        prefetch.runTracedTask(task);
+        prefetch.complete(worker, task);
+        statistics.tasks++;
+        continue;
+      }
+      var second = _takeSecond();
+      if (second?.tryTake(worker, statistics) case var task?) {
+        _run(second!, worker, task, statistics);
+        continue;
+      }
+      if (first.tryTake(worker, statistics) case var task?) {
+        _run(first, worker, task, statistics);
+        continue;
+      }
+      if (second != null && second.isDone && first.isDone) {
+        return;
+      }
+      sleep(const Duration(microseconds: 50));
+    }
+  }
+
+  @override
+  int? take(int worker, WorkerStatistics statistics) {
+    throw UnsupportedError('Tasks are taken from the nested phases.');
+  }
+
+  /// Waits until all library cycles of the first wave are loaded, so that
+  /// the second wave links only new cycles, and creates the second wave.
+  void _publishSecond(int worker, WorkerStatistics statistics) {
+    while (!first.isLinked) {
+      if (first.tryTake(
+            worker,
+            statistics,
+            minPriority: _LinkAndAnalyzePhase.linkingPriority,
+          )
+          case var task?) {
+        _run(first, worker, task, statistics);
+      } else {
+        sleep(const Duration(microseconds: 50));
+      }
+    }
+
+    var second = createSecond();
+    second.prepare(_workerCount);
+    second.statistics = List.filled(_workerCount, null);
+    second.errors = List.filled(_workerCount, null);
+    second.traceTasks = traceTasks;
+    _secondMutex.lock();
+    this.second = second;
+    _hasSecond = true;
+    _secondMutex.unlock();
+  }
+
+  void _run(
+    _LinkAndAnalyzePhase phase,
+    int worker,
+    int task,
+    WorkerStatistics statistics,
+  ) {
+    phase.runTracedTask(task);
+    phase.complete(worker, task);
+    statistics.tasks++;
+  }
+
+  _LinkAndAnalyzePhase? _takeSecond() {
+    _secondMutex.lock();
+    try {
+      return _hasSecond ? second : null;
+    } finally {
+      _secondMutex.unlock();
+    }
+  }
+}
+
 /// Reads files and computes their unlinked data, starting from the initial
 /// paths, and then files that they reference, transitively.
 ///
@@ -572,6 +888,9 @@ class _PrefetchPhase extends _Phase {
 
   /// The paths of seen files, used only by the main isolate.
   final Set<String> _seenPaths = {};
+
+  /// The paths of files that were prefetched, or were known before.
+  Set<String> get seenPaths => _seenPaths;
 
   /// Resolved absolute URIs, mapped to paths, or `null` if not analyzed.
   final Map<Uri, String?> _resolvedUris = {};
@@ -667,6 +986,17 @@ class _PrefetchPhase extends _Phase {
 
   @override
   int? take(int worker, WorkerStatistics statistics) => _queue.take();
+
+  /// Adds paths of files that are already known, and are not prefetched.
+  void addSeenPaths(Set<String> paths) {
+    _seenPaths.addAll(paths);
+  }
+
+  /// Returns a task, if one is available now.
+  int? tryTake() => _queue.tryTake();
+
+  /// Whether all tasks are taken, and no new tasks will be added.
+  bool get isDrained => _queue.isDrained;
 
   void _addReferencedPaths(
     FileState file,
