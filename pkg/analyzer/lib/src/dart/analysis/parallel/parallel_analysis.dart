@@ -3,6 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'dart:async';
+import 'dart:developer';
 import 'dart:math';
 import 'dart:isolate';
 
@@ -72,11 +73,15 @@ class ParallelAnalysis {
   /// Statistics of each worker in the last analysis phase.
   List<WorkerStatistics> workerStatistics = const [];
 
+  /// Whether to record timeline events for phases and tasks.
+  final bool traceTasks;
+
   new(
     this.driver,
     this.paths, {
     this.isolateSetup,
     this.retainParsedUnits = true,
+    this.traceTasks = false,
   });
 
   Future<List<FileDiagnostics>> run({int workerCount = 1}) async {
@@ -89,7 +94,12 @@ class ParallelAnalysis {
     }
 
     var pool = await _timeAsync('startWorkers', () {
-      return _WorkerPool.start(driver, workerCount, isolateSetup);
+      return _WorkerPool.start(
+        driver,
+        workerCount,
+        isolateSetup,
+        traceTasks: traceTasks,
+      );
     });
     var fsState = driver.fsState;
     try {
@@ -313,7 +323,7 @@ class ParallelAnalysis {
   T _time<T>(String name, T Function() operation) {
     var timer = Stopwatch()..start();
     try {
-      return operation();
+      return traceTasks ? Timeline.timeSync(name, operation) : operation();
     } finally {
       phaseTimes[name] = (phaseTimes[name] ?? 0) + timer.elapsedMilliseconds;
     }
@@ -321,9 +331,11 @@ class ParallelAnalysis {
 
   Future<T> _timeAsync<T>(String name, Future<T> Function() operation) async {
     var timer = Stopwatch()..start();
+    var task = traceTasks ? (TimelineTask()..start(name)) : null;
     try {
       return await operation();
     } finally {
+      task?.finish();
       phaseTimes[name] = (phaseTimes[name] ?? 0) + timer.elapsedMilliseconds;
     }
   }
@@ -353,6 +365,11 @@ class _AnalyzePhase extends _IndependentTasksPhase {
 
   new(this.driver, this.libraries, super.order)
     : results = List.filled(libraries.length, null);
+
+  @override
+  (String, Map<String, Object?>) describeTask(int task) {
+    return ('analyze', {'library': libraries[task].file.path});
+  }
 
   @override
   void runTask(int task) {
@@ -425,6 +442,22 @@ class _LinkAndAnalyzePhase extends _Phase {
   }
 
   @override
+  (String, Map<String, Object?>) describeTask(int task) {
+    if (task < cycles.length) {
+      var cycle = cycles[task];
+      return (
+        'link',
+        {
+          'library': cycle.libraries.first.file.path,
+          'libraries': cycle.libraries.length,
+        },
+      );
+    }
+    var library = libraries[task - cycles.length];
+    return ('analyze', {'library': library.file.path});
+  }
+
+  @override
   void free() {
     _queues.free();
   }
@@ -472,8 +505,14 @@ abstract class _Phase {
   /// Stops giving tasks to workers, invoked when a task fails.
   void abort() {}
 
+  /// Whether to record a timeline event for each task.
+  bool traceTasks = false;
+
   /// Invoked after the [task] is done by the [worker].
   void complete(int worker, int task) {}
+
+  /// Returns the name and the arguments of the timeline event of the [task].
+  (String, Map<String, Object?>) describeTask(int task);
 
   /// Frees resources allocated by [prepare].
   void free();
@@ -491,9 +530,19 @@ abstract class _Phase {
       if (task == null) {
         break;
       }
-      runTask(task);
+      runTracedTask(task);
       complete(worker, task);
       statistics.tasks++;
+    }
+  }
+
+  /// Runs the [task], with a timeline event if [traceTasks].
+  void runTracedTask(int task) {
+    if (traceTasks) {
+      var (name, arguments) = describeTask(task);
+      Timeline.timeSync(name, () => runTask(task), arguments: arguments);
+    } else {
+      runTask(task);
     }
   }
 
@@ -558,6 +607,11 @@ class _PrefetchPhase extends _Phase {
   }
 
   @override
+  (String, Map<String, Object?>) describeTask(int task) {
+    return ('prefetch', {'path': files[task]!.path});
+  }
+
+  @override
   void prepare(int workerCount) {
     _queue = GrowingQueue.allocate(_capacity);
   }
@@ -592,23 +646,19 @@ class _PrefetchPhase extends _Phase {
           break;
         }
         if (next.task case var task?) {
-          runTask(task);
+          runTracedTask(task);
           complete(worker, task);
           statistics.tasks++;
           continue;
         }
         seenCompletedCount += next.completed.length;
-        var newPaths = <String>[];
-        for (var task in next.completed) {
-          if (results[task] case var prefetched?) {
-            var file = files[task]!;
-            prefetchedFiles[file.path] = prefetched;
-            if (_followedPaths.contains(file.path)) {
-              _addReferencedPaths(file, prefetched, newPaths);
-            }
-          }
+        if (traceTasks) {
+          Timeline.timeSync('prefetchReferences', () {
+            _pushReferences(next.completed);
+          }, arguments: {'completed': next.completed.length});
+        } else {
+          _pushReferences(next.completed);
         }
-        _push(newPaths);
       }
     } finally {
       _queue.close();
@@ -653,6 +703,20 @@ class _PrefetchPhase extends _Phase {
         }
       }
     }
+  }
+
+  void _pushReferences(List<int> completed) {
+    var newPaths = <String>[];
+    for (var task in completed) {
+      if (results[task] case var prefetched?) {
+        var file = files[task]!;
+        prefetchedFiles[file.path] = prefetched;
+        if (_followedPaths.contains(file.path)) {
+          _addReferencedPaths(file, prefetched, newPaths);
+        }
+      }
+    }
+    _push(newPaths);
   }
 
   void _push(List<String> paths) {
@@ -703,6 +767,7 @@ class _SharedState {
   final NativeMutex byteStoreMutex;
   final SharedSingletons singletons;
   final void Function()? isolateSetup;
+  final bool traceTasks;
 
   /// The current phase, set by the main isolate before workers are asked to
   /// run it.
@@ -715,6 +780,7 @@ class _SharedState {
     required this.byteStoreMutex,
     required this.singletons,
     required this.isolateSetup,
+    required this.traceTasks,
   });
 }
 
@@ -735,6 +801,7 @@ class _WorkerPool {
   Future<void> run(_Phase phase) async {
     var workerCount = state.workerCount;
     phase.prepare(workerCount);
+    phase.traceTasks = state.traceTasks;
     phase.statistics = List.filled(workerCount, null);
     phase.errors = List.filled(workerCount, null);
 
@@ -810,8 +877,9 @@ class _WorkerPool {
   static Future<_WorkerPool> start(
     AnalysisDriver driver,
     int workerCount,
-    void Function()? isolateSetup,
-  ) async {
+    void Function()? isolateSetup, {
+    required bool traceTasks,
+  }) async {
     var state = _SharedState(
       driver: driver,
       workerCount: workerCount,
@@ -819,6 +887,7 @@ class _WorkerPool {
       byteStoreMutex: NativeMutex.allocate(),
       singletons: SharedSingletons.capture(),
       isolateSetup: isolateSetup,
+      traceTasks: traceTasks,
     );
     var handle = SharedObjectHandle.create(state);
     var port = ReceivePort();

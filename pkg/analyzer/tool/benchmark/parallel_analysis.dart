@@ -15,6 +15,7 @@
 /// ```
 library;
 
+import 'dart:developer';
 import 'dart:io';
 
 import 'package:analyzer/diagnostic/diagnostic.dart';
@@ -37,7 +38,11 @@ Future<void> main(List<String> args) async {
     ..addOption('dump', help: 'Write sorted diagnostics into this file.')
     ..addFlag('no-retain-asts', help: 'Parse files again for linking.')
     ..addFlag('performance', help: 'Print the performance tree.')
-    ..addFlag('workers-statistics', help: 'Print statistics of workers.');
+    ..addFlag('workers-statistics', help: 'Print statistics of workers.')
+    ..addOption(
+      'timeline',
+      help: 'Write the timeline of tasks and GC in the Chrome format.',
+    );
   var options = parser.parse(args);
 
   var root = p.normalize(p.absolute(options.option('root')!));
@@ -51,8 +56,20 @@ Future<void> main(List<String> args) async {
     }
   }
 
+  var timelinePath = options.option('timeline');
+  if (timelinePath != null) {
+    NativeRuntime.streamTimelineTo(
+      TimelineRecorder.chrome,
+      path: timelinePath,
+      streams: [TimelineStream.dart, TimelineStream.gc],
+    );
+  }
+
   var totalTimer = Stopwatch()..start();
   var lines = await _run(options, root, cachePath, workerCount);
+  if (timelinePath != null) {
+    NativeRuntime.stopStreamingTimeline();
+  }
 
   lines.sort();
   if (options.option('dump') case var dumpPath?) {
@@ -106,6 +123,7 @@ Future<List<String>> _run(
       paths,
       isolateSetup: linter.registerLintRules,
       retainParsedUnits: !options.flag('no-retain-asts'),
+      traceTasks: options.option('timeline') != null,
     );
     var timer = Stopwatch()..start();
     var diagnostics = await analysis.run(workerCount: workerCount);
