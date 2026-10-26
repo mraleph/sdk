@@ -237,7 +237,8 @@ class ParallelAnalysis {
     var cycleParseTasks = [
       for (var cycle in cycles)
         if (_isParallelParse &&
-            sizeOf(cycle.libraries) >= parallelParseCycleSize)
+            sizeOf(cycle.libraries) >= parallelParseCycleSize &&
+            driver.byteStoreForParallelAnalysis.get(cycle.linkedKey) == null)
           [
             for (var library in cycle.libraries)
               for (var file in library.files)
