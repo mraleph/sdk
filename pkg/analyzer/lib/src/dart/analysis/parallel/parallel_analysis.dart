@@ -733,9 +733,10 @@ class _PipelinePhase extends _Phase {
   /// wave is linked, and the second wave is discovered.
   _LinkAndAnalyzePhase? second;
 
-  /// Protects [second] and [_hasSecond].
+  /// Protects [second], [_hasSecond], and [_isAborted].
   final NativeMutex _secondMutex = NativeMutex.allocate();
   bool _hasSecond = false;
+  bool _isAborted = false;
 
   int _workerCount = 0;
 
@@ -743,6 +744,9 @@ class _PipelinePhase extends _Phase {
 
   @override
   void abort() {
+    _secondMutex.lock();
+    _isAborted = true;
+    _secondMutex.unlock();
     first.abort();
     prefetch.abort();
     _takeSecond()?.abort();
@@ -823,6 +827,9 @@ class _PipelinePhase extends _Phase {
       if (second != null && second.isDone && first.isDone) {
         return;
       }
+      if (_checkAborted()) {
+        return;
+      }
       sleep(const Duration(microseconds: 50));
     }
   }
@@ -835,7 +842,7 @@ class _PipelinePhase extends _Phase {
   /// Waits until all library cycles of the first wave are loaded, so that
   /// the second wave links only new cycles, and creates the second wave.
   void _publishSecond(int worker, WorkerStatistics statistics) {
-    while (!first.isLinked) {
+    while (!first.isLinked && !_checkAborted()) {
       if (first.tryTake(
             worker,
             statistics,
@@ -868,6 +875,15 @@ class _PipelinePhase extends _Phase {
     phase.runTracedTask(task);
     phase.complete(worker, task);
     statistics.tasks++;
+  }
+
+  bool _checkAborted() {
+    _secondMutex.lock();
+    try {
+      return _isAborted;
+    } finally {
+      _secondMutex.unlock();
+    }
   }
 
   _LinkAndAnalyzePhase? _takeSecond() {
