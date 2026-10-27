@@ -36,6 +36,9 @@ class WorkStealingQueues {
     var headersSize = workerCount * _headerSize;
     var memory = allocateZeroed(headersSize + taskCount * 4);
     var queues = WorkStealingQueues._(workerCount, memory.address);
+    for (var worker = 0; worker < workerCount; worker++) {
+      queues._mutex(worker).init();
+    }
 
     var itemsOffset = 0;
     for (var worker = 0; worker < workerCount; worker++) {
@@ -211,6 +214,11 @@ class DependencyQueues {
       leadingTaskCount,
       memory.address,
     );
+    queues._globalMutex.init();
+    queues._condition.init();
+    for (var worker = 0; worker < workerCount; worker++) {
+      queues._heapMutex(worker).init();
+    }
     var readyCount = 0;
     for (var task = 0; task < taskCount; task++) {
       var pending = dependencies[task].length;
@@ -515,7 +523,9 @@ class GrowingQueue {
 
   factory allocate(int capacity) {
     var memory = allocateZeroed(_headerSize + capacity * 4);
-    return GrowingQueue._(capacity, memory.address);
+    return GrowingQueue._(capacity, memory.address)
+      .._mutex.init()
+      .._condition.init();
   }
 
   /// The tasks in the order of completion.

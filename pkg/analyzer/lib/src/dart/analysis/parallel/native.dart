@@ -45,6 +45,18 @@ final _free = _process
       'free',
     );
 
+final _mutexInit = _process
+    .lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Void>),
+      int Function(Pointer<Void>, Pointer<Void>)
+    >('pthread_mutex_init', isLeaf: true);
+
+final _condInit = _process
+    .lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Void>),
+      int Function(Pointer<Void>, Pointer<Void>)
+    >('pthread_cond_init', isLeaf: true);
+
 /// Blocks, so must not be a leaf call: other isolates must be able to reach
 /// a safepoint while this isolate waits.
 final _mutexLock = _process
@@ -71,12 +83,12 @@ final _condBroadcast = _process
       isLeaf: true,
     );
 
-/// The size reserved for `pthread_cond_t`, which is 48 bytes on x64 Linux.
-/// Zero-initialized memory is a valid default condition variable in glibc.
+/// The size reserved for `pthread_cond_t`, which is 48 bytes on x64 Linux
+/// and on macOS.
 const int conditionSize = 64;
 
-/// The size reserved for `pthread_mutex_t`, which is 40 bytes on x64 Linux.
-/// Zero-initialized memory is a valid default mutex in glibc.
+/// The size reserved for `pthread_mutex_t`, which is 40 bytes on x64 Linux,
+/// and 64 bytes on macOS.
 const int mutexSize = 64;
 
 /// Allocates [size] bytes of zero-initialized native memory.
@@ -97,10 +109,18 @@ void freeNative(Pointer<NativeType> pointer) {
 extension type const NativeMutex(Pointer<Void> pointer) {
   /// Allocates a new mutex.
   factory allocate() {
-    return NativeMutex(allocateZeroed(mutexSize).cast());
+    return NativeMutex(allocateZeroed(mutexSize).cast())..init();
   }
 
   int get address => pointer.address;
+
+  /// Initializes the mutex, must be invoked before it is used, because
+  /// unlike in glibc, zero-initialized memory is not a valid mutex on macOS.
+  void init() {
+    if (_mutexInit(pointer, nullptr) != 0) {
+      throw StateError('Cannot initialize mutex.');
+    }
+  }
 
   void free() => freeNative(pointer);
 
@@ -136,6 +156,13 @@ extension type const SharedObjectHandle(int address) {
 /// A condition variable in native memory, can be used by any isolate of the
 /// process.
 extension type const NativeCondition(Pointer<Void> pointer) {
+  /// Initializes the condition, must be invoked before it is used.
+  void init() {
+    if (_condInit(pointer, nullptr) != 0) {
+      throw StateError('Cannot initialize condition variable.');
+    }
+  }
+
   /// Wakes up all isolates that [wait] on this condition.
   void broadcast() {
     _condBroadcast(pointer);
