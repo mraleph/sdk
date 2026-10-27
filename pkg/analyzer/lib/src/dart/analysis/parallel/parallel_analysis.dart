@@ -611,6 +611,9 @@ class _LinkAndAnalyzePhase extends _Phase {
   /// Whether all tasks are completed.
   bool get isDone => _queues.isDone;
 
+  /// The approximate highest priority of a ready task, or `-1` if none.
+  int peekPriority() => _queues.peekPriority();
+
   /// Whether all library cycles are loaded.
   bool get isLinked => _queues.isLeadingDone;
 
@@ -798,13 +801,23 @@ class _PipelinePhase extends _Phase {
         statistics.tasks++;
         continue;
       }
+      // Take the task with the higher priority from either wave.
       var second = _takeSecond();
-      if (second?.tryTake(worker, statistics) case var task?) {
-        _run(second!, worker, task, statistics);
-        continue;
+      var phases = [first, ?second];
+      if (second != null && second.peekPriority() > first.peekPriority()) {
+        phases = [second, first];
       }
-      if (first.tryTake(worker, statistics) case var task?) {
-        _run(first, worker, task, statistics);
+      int? task;
+      _LinkAndAnalyzePhase? taskPhase;
+      for (var phase in phases) {
+        if (phase.tryTake(worker, statistics) case var phaseTask?) {
+          task = phaseTask;
+          taskPhase = phase;
+          break;
+        }
+      }
+      if (task != null) {
+        _run(taskPhase!, worker, task, statistics);
         continue;
       }
       if (second != null && second.isDone && first.isDone) {

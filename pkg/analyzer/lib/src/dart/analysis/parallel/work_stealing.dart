@@ -3,6 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'dart:ffi';
+import 'dart:math';
 
 import 'package:analyzer/src/dart/analysis/parallel/native.dart';
 
@@ -362,6 +363,19 @@ class DependencyQueues {
       return task;
     }
     return null;
+  }
+
+  /// Returns the highest priority of a ready task, or `-1` if none.
+  ///
+  /// The result is approximate, heaps are read without locks.
+  int peekPriority() {
+    var result = -1;
+    for (var worker = 0; worker < workerCount; worker++) {
+      if (_heapCount(worker).value > 0) {
+        result = max(result, priorities[_heapItems(worker)[0]]);
+      }
+    }
+    return result;
   }
 
   Pointer<Int64> _heapCount(int worker) {
