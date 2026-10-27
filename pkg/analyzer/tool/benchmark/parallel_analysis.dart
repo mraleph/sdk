@@ -5,6 +5,9 @@
 /// Analyzes a directory with `ParallelAnalysis`, and reports the time and
 /// the peak RSS of the process.
 ///
+/// See `parallel_analysis_README.md` for building and running on Linux and
+/// macOS, and `parallel_analysis_run.dart` for measuring speedups.
+///
 /// Compile to AOT and run, e.g.:
 ///
 /// ```
@@ -101,11 +104,7 @@ String _format(String path, Diagnostic diagnostic) {
       '${diagnostic.diagnosticCode.lowerCaseName} ${diagnostic.message}';
 }
 
-int _peakRssMb() {
-  var status = File('/proc/self/status').readAsStringSync();
-  var match = RegExp(r'VmHWM:\s+(\d+) kB').firstMatch(status);
-  return match == null ? -1 : int.parse(match.group(1)!) ~/ 1024;
-}
+int _peakRssMb() => ProcessInfo.maxRss ~/ (1024 * 1024);
 
 Future<List<String>> _run(
   ArgResults options,
